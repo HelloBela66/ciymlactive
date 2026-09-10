@@ -1,5 +1,47 @@
 # Changelog
 
+## POLYTSIA V1.5, Фаза 3 — repository-інтеграційні тести: expo-sqlite не працює під jest-expo в CI, перейшли на better-sqlite3
+
+**Дата:** 2026-09-10
+
+Перші два repository-інтеграційні тестові файли (`src/data/db/migrationRunner.test.ts`,
+`src/data/repositories/PublisherRepository.test.ts`, п.44 ТЗ) спершу написані проти РЕАЛЬНОГО
+`expo-sqlite` (`SQLite.openDatabaseAsync(':memory:')`) — за аналогією з тим, що в `client.ts`
+уже існував тестовий хелпер `__resetDatabaseConnectionForTests()`, і `jest-expo` в принципі
+надає нативний шар для деяких Expo-модулів. Реальний прогін на GitHub Actions спростував це
+припущення: усі 8 тестів (5 у `PublisherRepository.test.ts`, 3 у `migrationRunner.test.ts`)
+впали з однаковою помилкою — `TypeError: _ExpoSQLite.default.NativeDatabase is not a
+constructor` (`node_modules/expo-sqlite/src/SQLiteDatabase.ts:584`). Нативний модуль
+`expo-sqlite` не конструюється в headless Node-середовищі GitHub Actions runner'а (без
+емулятора/симулятора) — саме та розвилка, яку `docs/TESTING.md` явно залишав відкритою
+("Jest + `expo` preset, чи окремий Node-SQLite драйвер... — обираємо на етапі M0"), тепер
+закрита емпірично.
+
+**Рішення:** `src/data/db/testDb.ts` (новий файл) — тонкий адаптер над `better-sqlite3`
+(синхронний нативний SQLite-драйвер для Node, прекомпільовані бінарники під
+linux-x64/win32-x64/darwin, без компілятора/node-gyp на машині розробника чи CI-runner'і),
+що реалізує рівно ті 5 асинхронних методів, які реально викликають `migrationRunner.ts` й усі
+репозиторії (`execAsync`/`runAsync`/`getFirstAsync`/`getAllAsync`/`withTransactionAsync`;
+перевірено `grep`-ом по всьому `src/data/`) — той самий SQL-діалект, `?`-плейсхолдер і
+PRAGMA-інтерфейс, що й `expo-sqlite`, тож жоден рядок продакшн-коду (самі міграції,
+репозиторії) не змінено взагалі й не знає, що під капотом тесту інший рушій виконання.
+`withTransactionAsync` реалізовано вручну через `BEGIN`/`COMMIT`/`ROLLBACK` (а не вбудований
+`Database.prototype.transaction()` з `better-sqlite3`, який очікує синхронний колбек, тоді як
+`migration.up` — справжня async-функція). Обидва тестові файли оновлено — `SQLite.openDatabaseAsync(':memory:')`
+замінено на `openTestDatabase()` з нового модуля; `docs/TESTING.md` оновлено, щоб зафіксувати
+рішення й причину замість "обираємо на етапі M0".
+
+`better-sqlite3`/`@types/better-sqlite3` — нові `devDependencies`, відсутні в продакшн-білді
+(лише тестовий код їх імпортує). Версії підбирає й фіксує в lock-файлі сам власник продукту
+через `npm install --save-dev better-sqlite3 @types/better-sqlite3` (той самий принцип, що й у
+Фазі 2 для `react-native-view-shot` — з хмарної сесії немає доступу до npm-реєстру, щоб
+підібрати версію заздалегідь). Реальний `npm install` підібрав `better-sqlite3@13.0.3`, чий
+власний `package.json` вимагає `"engines": { "node": ">=22" }` — виявлено переглядом
+`package-lock.json` перед комітом. `.github/workflows/ci.yml` (`actions/setup-node`) і
+`engines.node` у власному `package.json` підняті з `">=20"`/`'20'` до `">=22"`/`'22'`
+відповідно; сам застосунок (React Native runtime на пристрої) від версії Node у CI ніяк не
+залежить — це виключно версія Node для install/typecheck/lint/test-тулінгу.
+
 ## POLYTSIA V1.5, Фаза 2 — перший реальний прогін CI довів пайплайн до зеленого
 
 **Дата:** 2026-09-10

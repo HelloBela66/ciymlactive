@@ -1,26 +1,20 @@
-import * as SQLite from 'expo-sqlite';
-import type { SQLiteDatabase } from 'expo-sqlite';
 import { migrateDbIfNeeded, LATEST_SCHEMA_VERSION, __applyMigrationsForTests } from './migrationRunner';
+import { openTestDatabase } from './testDb';
 
 /**
- * Repository-інтеграційні тести (POLYTSIA V1.5, Фаза 3, п.44 ТЗ) — проти РЕАЛЬНОГО
- * `expo-sqlite` (`:memory:`, без диска й без емулятора/симулятора — `jest-expo` виконує
- * нативний модуль напряму в Node), не in-memory JS-мок: SQL із самих міграцій справді
- * виконується рушієм SQLite, а не просто "не кидає виняток у замоканому шарі".
+ * Repository-інтеграційні тести (POLYTSIA V1.5, Фаза 3, п.44 ТЗ) — проти РЕАЛЬНОЇ SQLite
+ * (`:memory:`, без диска), не in-memory JS-мок: SQL із самих міграцій справді виконується
+ * рушієм SQLite, а не просто "не кидає виняток у замоканому шарі". БД відкривається через
+ * `openTestDatabase()` (`./testDb.ts`) — `better-sqlite3` під капотом, а не `expo-sqlite`;
+ * докладне обґрунтування (реальна знахідка з CI) — коментар у `testDb.ts`.
  *
  * Кожен `it` відкриває свою власну `:memory:` БД — вони не діляться станом між собою (на
  * відміну від `getDatabase()` з `client.ts`, який кешує одне спільне з'єднання для
  * застосунку).
  */
-async function openTestDb(): Promise<SQLiteDatabase> {
-  const db = await SQLite.openDatabaseAsync(':memory:');
-  await db.execAsync('PRAGMA foreign_keys = ON;');
-  return db;
-}
-
 describe('migrateDbIfNeeded', () => {
   it('застосовує всі міграції на порожній БД без помилок і доводить до LATEST_SCHEMA_VERSION', async () => {
-    const db = await openTestDb();
+    const db = await openTestDatabase();
 
     const finalVersion = await migrateDbIfNeeded(db);
     expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
@@ -38,7 +32,7 @@ describe('migrateDbIfNeeded', () => {
   });
 
   it('повторний виклик на вже актуальній БД — без помилок, версія не змінюється (ідемпотентність)', async () => {
-    const db = await openTestDb();
+    const db = await openTestDatabase();
 
     await migrateDbIfNeeded(db);
     const secondRunVersion = await migrateDbIfNeeded(db);
@@ -47,7 +41,7 @@ describe('migrateDbIfNeeded', () => {
   });
 
   it('нова міграція (009: shelf.theme) застосовується на seed-БД попередньої версії без втрати даних', async () => {
-    const db = await openTestDb();
+    const db = await openTestDatabase();
 
     // Готуємо БД "версії 8" — усі міграції, КРІМ найновішої (009).
     await __applyMigrationsForTests(db, LATEST_SCHEMA_VERSION - 1);

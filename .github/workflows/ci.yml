@@ -37,8 +37,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # package.json → engines.node: ">=20"
-          node-version: '20'
+          # package.json → engines.node: ">=22" (Фаза 3: підняли з ">=20" — `better-sqlite3`,
+          # devDependency для repository-інтеграційних тестів, `docs/TESTING.md`/
+          # `src/data/db/testDb.ts`, вимагає Node >=22 у власному package.json; сам застосунок
+          # (React Native runtime на пристрої) від версії Node у CI не залежить взагалі —
+          # це лише версія Node для install/typecheck/lint/test-тулінгу).
+          node-version: '22'
           cache: 'npm'
 
       # `npm ci` тут — перша реальна перевірка, що package.json/package-lock.json насправді

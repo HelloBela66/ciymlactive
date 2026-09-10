@@ -1,17 +1,18 @@
-import * as SQLite from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { migrateDbIfNeeded } from '@/data/db/migrationRunner';
+import { openTestDatabase } from '@/data/db/testDb';
 import { PublisherRepository } from './PublisherRepository';
 
 /**
  * Repository-інтеграційний тест (POLYTSIA V1.5, Фаза 3, п.44 ТЗ) — "створення сутності →
  * читання" проти реальної `:memory:` SQLite, схема якої піднята тим самим `migrateDbIfNeeded`,
  * що й на пристрої користувача (а не вручну написаний `CREATE TABLE` в тесті, який міг би
- * розійтись зі справжніми міграціями).
+ * розійтись зі справжніми міграціями). БД відкривається через `openTestDatabase()`
+ * (`better-sqlite3` під капотом, не `expo-sqlite` — той не конструюється під `jest-expo` на
+ * CI-runner'і, докладніше — коментар у `testDb.ts`).
  */
 async function openMigratedTestDb(): Promise<SQLiteDatabase> {
-  const db = await SQLite.openDatabaseAsync(':memory:');
-  await db.execAsync('PRAGMA foreign_keys = ON;');
+  const db = await openTestDatabase();
   await migrateDbIfNeeded(db);
   return db;
 }
