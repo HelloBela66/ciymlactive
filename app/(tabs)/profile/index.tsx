@@ -36,6 +36,17 @@ const MENU_ITEMS: MenuItem[] = [
   },
   { icon: 'cloud-upload-outline', label: 'Резервна копія', onPress: () => router.push('/backup') },
   {
+    icon: 'shield-checkmark-outline',
+    label: 'Перевірка даних',
+    // `as unknown as Href` — той самий випадок, що й "Імпорт з Goodreads" нижче:
+    // `app/data-doctor.tsx` (POLYTSIA V1.5, Фаза 5) — реальний, щойно доданий маршрут, але
+    // Expo Router typed routes (`.expo/types/router.d.ts`) генеруються локально `expo
+    // start`/Metro й не потрапляють у git — до першого запуску dev-сервера на новій машині
+    // цей файл ще не знає про маршрут, і `tsc --noEmit` падає на самому рядковому літералі
+    // `'/data-doctor'`. Явний каст прибирає цю залежність.
+    onPress: () => router.push('/data-doctor' as unknown as Href),
+  },
+  {
     icon: 'download-outline',
     label: 'Імпорт з Goodreads',
     // `as unknown as Href` — маршрут `app/import/goodreads.tsx` реальний і валідний (Milestone 9), але
@@ -73,9 +84,10 @@ function StatsSummaryCard() {
 
 /**
  * Профіль. Statistics/Goals/Reminders — Milestone 5; TBR reality check/Wrapped/Резервна
- * копія — Milestone 6 (усе — справжні екрани, доступ звідси). Owned library/Loans/повні
- * Налаштування — пізніші milestone. Перемикач теми зʼявився тут уже в Milestone 0 як
- * реальна, а не заглушкова функція — ThemeProvider повністю готовий.
+ * копія — Milestone 6; Перевірка даних — POLYTSIA V1.5 Фаза 5 (усе — справжні екрани, доступ
+ * звідси). Owned library/Loans/повні Налаштування — пізніші milestone. Перемикач теми
+ * зʼявився тут уже в Milestone 0 як реальна, а не заглушкова функція — ThemeProvider
+ * повністю готовий.
  */
 export default function ProfileScreen() {
   const theme = useTheme();

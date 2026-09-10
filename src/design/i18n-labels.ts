@@ -1,4 +1,5 @@
 import type { ShelfThemeId } from '@/types/shelf';
+import type { DataIntegrityCategory } from '@/domain/dataIntegrityDoctor';
 
 /**
  * Єдине джерело українських підписів для доменних enum-значень.
@@ -184,4 +185,18 @@ export const shelfThemeLabels: Record<ShelfThemeId, string> = {
   thriller_horror: 'Трилери та жахи',
   fantasy: 'Фентезі',
   detective: 'Детективи',
+};
+
+/** Підписи для 6 категорій «Перевірки даних» (`DataIntegrityCategory`,
+ * `src/domain/dataIntegrityDoctor.ts`, Milestone 11 доповнення — Фаза 5) — рівно ті слова, що
+ * вимагає ТЗ: Книги/Сесії/Прогрес/Щоденник/Полиці/Серії. Явний `Record` (не `as const` +
+ * `keyof typeof`) з тієї ж причини, що й `shelfThemeLabels` вище — нова категорія без підпису
+ * тут не компілюється, а не мовчки лишається без назви в UI. */
+export const dataIntegrityCategoryLabels: Record<DataIntegrityCategory, string> = {
+  books: 'Книги',
+  sessions: 'Сесії',
+  progress: 'Прогрес',
+  journal: 'Щоденник',
+  shelves: 'Полиці',
+  series: 'Серії',
 };
