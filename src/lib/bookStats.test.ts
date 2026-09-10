@@ -29,6 +29,12 @@ function session(overrides: Partial<ReadingSession> = {}): ReadingSession {
     endPage: 30,
     durationSeconds: 1800,
     moodNote: null,
+    // ТЗ Фази 9 (SESSION REFLECTION) — нове обов'язкове поле типу `ReadingSession`
+    // (`readingExperience: string | null`, не `?:`), тож базовий літерал фабрики має
+    // задавати його явно — так само, як `moodNote` вище — інакше `...overrides`
+    // (typed `Partial<ReadingSession>`) робить властивість `string | null | undefined`,
+    // що не збігається з обов'язковим `string | null`.
+    readingExperience: null,
     isEdited: false,
     createdAt: '2026-09-01T10:30:00.000Z',
     updatedAt: '2026-09-01T10:30:00.000Z',

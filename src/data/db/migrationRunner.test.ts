@@ -70,4 +70,62 @@ describe('migrateDbIfNeeded', () => {
     // значення й уже наявним рядкам, не лише новим.
     expect(shelf?.theme).toBe('classic');
   });
+
+  it('нова міграція (010: reading_session.reading_experience) застосовується на seed-БД версії 9 без втрати даних', async () => {
+    // POLYTSIA V1.5, Фаза 9 (SESSION REFLECTION) — той самий сценарій "populated DB", що й
+    // тест 009 вище, лише для наступної міграції: на відміну від `shelf.theme`, тут БЕЗ
+    // DEFAULT (поле справді необов'язкове), тож очікуваний результат — NULL, а не якесь
+    // fallback-значення.
+    const db = await openTestDatabase();
+
+    await __applyMigrationsForTests(db, 9);
+    const beforeVersion = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+    expect(beforeVersion?.user_version).toBe(9);
+
+    // Мінімальний ланцюжок FK (work → edition → user_book), потрібний reading_session
+    // (`PRAGMA foreign_keys = ON` у тестовій БД, `testDb.ts`), і сама сесія, створена
+    // "попередньою версією застосунку" — до появи стовпця `reading_experience`.
+    const now = new Date().toISOString();
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-1',
+      'Книга 1',
+      now,
+      now,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга 1', 'uk', 'paperback', now, now],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,?,?,?,?)`,
+      ['user_book-1', 'edition-1', 'reading', 0, now, now],
+    );
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page,
+         duration_seconds, mood_note, is_edited, created_at, updated_at
+       ) VALUES (?,?,?,?,'[]',?,?,?,?,0,?,?)`,
+      ['session-1', 'user_book-1', now, now, 0, 10, 600, 'Гарний початок', now, now],
+    );
+
+    // Те саме, що відбулось би на пристрої власника продукту після оновлення застосунку:
+    // `migrateDbIfNeeded` бачить, що не вистачає лише останньої міграції.
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const session = await db.getFirstAsync<{
+      id: string;
+      mood_note: string | null;
+      reading_experience: string | null;
+      duration_seconds: number | null;
+    }>(`SELECT id, mood_note, reading_experience, duration_seconds FROM reading_session WHERE id = ?`, ['session-1']);
+    expect(session).not.toBeNull();
+    // Старі колонки (заповнені ще до міграції 010) не мають постраждати від rebuild — тут це
+    // навіть простіше: 010 — простий `ALTER TABLE ADD COLUMN`, без rebuild узагалі.
+    expect(session?.mood_note).toBe('Гарний початок');
+    expect(session?.duration_seconds).toBe(600);
+    // Нова колонка — без DEFAULT, тож для вже наявного рядка лишається NULL, а не якесь
+    // fallback-значення (на відміну від `shelf.theme` вище).
+    expect(session?.reading_experience).toBeNull();
+  });
 });

@@ -11,9 +11,11 @@ import { Card } from '@/components/ui/Card';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { NoteCategoryPicker, type NoteCategoryValue } from '@/components/session/NoteCategoryPicker';
+import { ReadingExperiencePicker } from '@/components/session/ReadingExperiencePicker';
 import { ReactionChips, ReactionToggle } from '@/components/journal/ReactionPicker';
 import { useTheme } from '@/design/ThemeProvider';
 import { REACTION_META, type ReactionId } from '@/design/reactions';
+import type { ReadingExperienceId } from '@/design/readingExperience';
 import { useSessionWithBook } from '@/features/reading-session/useSessionWithBook';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
@@ -22,6 +24,7 @@ import {
   useResumeSession,
   useFinishSession,
   useDiscardSession,
+  useSetReadingExperience,
 } from '@/features/reading-session/useSessionMutations';
 import { useCreateNote, useRemoveNote } from '@/features/notes/useNotes';
 import { useCreateQuote, useRemoveQuote } from '@/features/quotes/useQuotes';
@@ -72,6 +75,13 @@ function parseOptionalPage(raw: string): number | undefined {
  * читання можна було без виходу з таймера. Композер і сам таймер повністю незалежні (той
  * самий `now`-стан, що й раніше) — набір тексту в композері жодного разу не перераховує й не
  * скидає таймер.
+ *
+ * POLYTSIA V1.5, Фаза 9 (SESSION REFLECTION): після успішного `handleFinish` екран НЕ
+ * переходить одразу на Book Details — сесія вже безпечно збережена (`useFinishSession`
+ * відпрацював), і замість негайної навігації показується `SessionReflectionPanel` (легкий,
+ * необов'язковий крок "Як читалося?"). `reflectionSession` — просто 3 рядки (id/userBookId/
+ * workId), не сама сесія: усе, що реально потрібно панелі рефлексії, вона отримує пропсами й
+ * керує власним станом сама.
  */
 export default function ActiveSessionScreen() {
   const theme = useTheme();
@@ -96,8 +106,18 @@ export default function ActiveSessionScreen() {
   // "Настрій" сеансу (Milestone 11, доповнення — власник продукту, ідея з референсом):
   // необов'язкова ОДНА з 7 фіксованих реакцій, окремо від вільного тексту "Нотатка про
   // настрій" вище — докладніше про рішення НЕ зливати їх в одне поле й НЕ вимагати текст для
-  // реакції — коментар біля `ReactionChips` нижче й `handleFinish`.
+  // реакції — коментар біля `ReactionChips` нижче й `handleFinish`. НЕ те саме, що
+  // "Як читалося?" (Фаза 9, `reflectionSession`/`SessionReflectionPanel` нижче) — докладна
+  // різниця задокументована в `src/design/readingExperience.ts`.
   const [moodReaction, setMoodReaction] = useState<ReactionId | null>(null);
+
+  // Фаза 9 — коли не `null`, сесія вже збережена (`useFinishSession` успішно відпрацював) і
+  // екран показує лише `SessionReflectionPanel` замість таймера/форми завершення/композера.
+  const [reflectionSession, setReflectionSession] = useState<{
+    sessionId: string;
+    userBookId: string;
+    workId: string;
+  } | null>(null);
 
   const elapsedMs = useLiveElapsedMs(data?.session);
   const paused = data ? isCurrentlyPaused(data.session.pausedIntervals) : false;
@@ -322,7 +342,18 @@ export default function ActiveSessionScreen() {
         }
       }
 
-      router.replace({ pathname: '/work/[workId]', params: { workId: data.userBook.work.id } });
+      // ТЗ Фази 9 (SESSION REFLECTION) — сесія вже безпечно збережена (рядок з
+      // `finishSession.mutateAsync` вище пройшов без помилки), тепер, замість негайного
+      // переходу на екран книги, показуємо необов'язковий легкий крок "Як читалося?".
+      // `showFinishForm` більше не потрібен (форма завершення закрита) — гасимо його, щоб
+      // ефект автопаузи вище не намагався зайво спрацювати на вже завершеній сесії
+      // (`pause()` й так безпечний no-op для `ended_at != null`, це суто охайність стану).
+      setShowFinishForm(false);
+      setReflectionSession({
+        sessionId: data.session.id,
+        userBookId: data.session.userBookId,
+        workId: data.userBook.work.id,
+      });
     } catch {
       // `useFinishSession`'s `onError` вже показав тост із причиною (Milestone 8) — тут
       // лише не даємо необробленому reject вилетіти в консоль/термінал, той самий підхід,
@@ -374,95 +405,197 @@ export default function ActiveSessionScreen() {
               ) : null}
             </View>
 
-            <Card style={{ alignItems: 'center', gap: theme.spacing.sm, paddingVertical: theme.spacing.xl }}>
-              {paused ? (
-                <View
-                  style={{
-                    paddingHorizontal: theme.spacing.md,
-                    paddingVertical: theme.spacing.xs,
-                    borderRadius: theme.radius.pill,
-                    backgroundColor: theme.colors.accentSoft,
-                  }}
-                >
-                  <AppText variant="caption" color="accent">
-                    На паузі
-                  </AppText>
-                </View>
-              ) : null}
-
-              <AppText variant="display" style={{ fontSize: 56, lineHeight: 64 }}>
-                {formatDuration(elapsedMs)}
-              </AppText>
-
-              <AppText variant="caption" color="tertiary">
-                {data.userBook.currentPage > data.session.startPage
-                  ? `Зараз на сторінці ${data.userBook.currentPage}`
-                  : `Почато зі сторінки ${data.session.startPage}`}
-                {data.session.goalMinutes ? ` · ціль ${data.session.goalMinutes} хв` : ''}
-              </AppText>
-            </Card>
-
-            {!showFinishForm ? (
-              <View style={{ gap: theme.spacing.md }}>
-                <Button
-                  label={paused ? 'Продовжити' : 'Пауза'}
-                  variant="secondary"
-                  onPress={handleTogglePause}
-                  disabled={togglePausePending}
-                />
-                <Button label="Завершити читання" onPress={openFinishForm} />
-                <Button
-                  label={discardSession.isPending ? 'Скасовую…' : 'Скасувати сесію'}
-                  variant="ghost"
-                  onPress={handleDiscard}
-                  disabled={discardSession.isPending}
-                />
-              </View>
+            {reflectionSession ? (
+              <SessionReflectionPanel
+                sessionId={reflectionSession.sessionId}
+                userBookId={reflectionSession.userBookId}
+                workId={reflectionSession.workId}
+              />
             ) : (
-              <View style={{ gap: theme.spacing.lg }}>
-                <LabeledInput
-                  label="На якій сторінці зупинився?"
-                  value={endPage}
-                  onChangeText={setEndPage}
-                  keyboardType="numeric"
-                  placeholder={String(data.session.startPage)}
-                />
-                <LabeledInput
-                  label="Нотатка про настрій (необов'язково)"
-                  value={moodNote}
-                  onChangeText={setMoodNote}
-                />
-                <View style={{ gap: theme.spacing.xs }}>
-                  <AppText variant="caption" color="secondary">
-                    Настрій цього сеансу (необов&apos;язково)
-                  </AppText>
-                  <ReactionChips value={moodReaction} onChange={setMoodReaction} />
-                </View>
-                <Button
-                  label={finishSession.isPending ? 'Зберігаю…' : 'Зберегти сесію'}
-                  onPress={handleFinish}
-                  disabled={finishSession.isPending}
-                />
-                <Button label="Назад" variant="ghost" onPress={closeFinishForm} />
-              </View>
-            )}
+              <>
+                <Card style={{ alignItems: 'center', gap: theme.spacing.sm, paddingVertical: theme.spacing.xl }}>
+                  {paused ? (
+                    <View
+                      style={{
+                        paddingHorizontal: theme.spacing.md,
+                        paddingVertical: theme.spacing.xs,
+                        borderRadius: theme.radius.pill,
+                        backgroundColor: theme.colors.accentSoft,
+                      }}
+                    >
+                      <AppText variant="caption" color="accent">
+                        На паузі
+                      </AppText>
+                    </View>
+                  ) : null}
 
-            {!showFinishForm ? (
-              <View style={{ gap: theme.spacing.lg }}>
-                <JournalComposer
-                  userBookId={data.session.userBookId}
-                  editionId={data.userBook.edition.id}
-                  sessionId={data.session.id}
-                  currentPage={data.userBook.currentPage}
-                  pageCount={data.userBook.edition.pageCount}
-                />
-                <SessionJournalEntries sessionId={data.session.id} userBookId={data.session.userBookId} />
-              </View>
-            ) : null}
+                  <AppText variant="display" style={{ fontSize: 56, lineHeight: 64 }}>
+                    {formatDuration(elapsedMs)}
+                  </AppText>
+
+                  <AppText variant="caption" color="tertiary">
+                    {data.userBook.currentPage > data.session.startPage
+                      ? `Зараз на сторінці ${data.userBook.currentPage}`
+                      : `Почато зі сторінки ${data.session.startPage}`}
+                    {data.session.goalMinutes ? ` · ціль ${data.session.goalMinutes} хв` : ''}
+                  </AppText>
+                </Card>
+
+                {!showFinishForm ? (
+                  <View style={{ gap: theme.spacing.md }}>
+                    <Button
+                      label={paused ? 'Продовжити' : 'Пауза'}
+                      variant="secondary"
+                      onPress={handleTogglePause}
+                      disabled={togglePausePending}
+                    />
+                    <Button label="Завершити читання" onPress={openFinishForm} />
+                    <Button
+                      label={discardSession.isPending ? 'Скасовую…' : 'Скасувати сесію'}
+                      variant="ghost"
+                      onPress={handleDiscard}
+                      disabled={discardSession.isPending}
+                    />
+                  </View>
+                ) : (
+                  <View style={{ gap: theme.spacing.lg }}>
+                    <LabeledInput
+                      label="На якій сторінці зупинився?"
+                      value={endPage}
+                      onChangeText={setEndPage}
+                      keyboardType="numeric"
+                      placeholder={String(data.session.startPage)}
+                    />
+                    <LabeledInput
+                      label="Нотатка про настрій (необов'язково)"
+                      value={moodNote}
+                      onChangeText={setMoodNote}
+                    />
+                    <View style={{ gap: theme.spacing.xs }}>
+                      <AppText variant="caption" color="secondary">
+                        Настрій цього сеансу (необов&apos;язково)
+                      </AppText>
+                      <ReactionChips value={moodReaction} onChange={setMoodReaction} />
+                    </View>
+                    <Button
+                      label={finishSession.isPending ? 'Зберігаю…' : 'Зберегти сесію'}
+                      onPress={handleFinish}
+                      disabled={finishSession.isPending}
+                    />
+                    <Button label="Назад" variant="ghost" onPress={closeFinishForm} />
+                  </View>
+                )}
+
+                {!showFinishForm ? (
+                  <View style={{ gap: theme.spacing.lg }}>
+                    <JournalComposer
+                      userBookId={data.session.userBookId}
+                      editionId={data.userBook.edition.id}
+                      sessionId={data.session.id}
+                      currentPage={data.userBook.currentPage}
+                      pageCount={data.userBook.edition.pageCount}
+                    />
+                    <SessionJournalEntries sessionId={data.session.id} userBookId={data.session.userBookId} />
+                  </View>
+                ) : null}
+              </>
+            )}
           </View>
         )}
       </ScreenContainer>
     </>
+  );
+}
+
+interface SessionReflectionPanelProps {
+  sessionId: string;
+  userBookId: string;
+  workId: string;
+}
+
+/**
+ * ТЗ Фази 9 (SESSION REFLECTION) — легкий, необов'язковий крок ПІСЛЯ того, як сесія вже
+ * безпечно збережена: "Як читалося?" (5 фіксованих значень, `ReadingExperiencePicker`) +
+ * опціональний CTA "Додати момент". Жодна дія тут не блокує вихід з екрана — вибір досвіду
+ * одразу зберігається (fire-and-forget мутація, `handlePick` не чекає результату) і одразу
+ * переходить на екран книги; кнопка "Готово" внизу пропускає крок повністю, без запису
+ * жодного значення (`readingExperience` лишається `NULL` — саме так виглядає "користувач
+ * пропустив" для цього поля).
+ *
+ * `sessionId`/`userBookId`/`workId` — прості рядки, не сама сесія: сесія вже завершена й
+ * збережена до появи цієї панелі, тут не потрібен жоден подальший запит її даних.
+ */
+function SessionReflectionPanel({ sessionId, userBookId, workId }: SessionReflectionPanelProps) {
+  const theme = useTheme();
+  const setReadingExperience = useSetReadingExperience();
+  const createMoment = useCreateNote();
+
+  const [pickedExperience, setPickedExperience] = useState<ReadingExperienceId | null>(null);
+  const [momentExpanded, setMomentExpanded] = useState(false);
+  const [momentText, setMomentText] = useState('');
+
+  const goToBook = () => {
+    router.replace({ pathname: '/work/[workId]', params: { workId } });
+  };
+
+  const handlePick = (id: ReadingExperienceId) => {
+    setPickedExperience(id);
+    // Не блокуюче навмисно (докладніше — коментар компонента вище й `useSetReadingExperience`):
+    // сесія вже збережена, тап одразу веде далі, збереження позначки відбувається у фоні.
+    setReadingExperience.mutate({ id: sessionId, userBookId, value: id });
+    goToBook();
+  };
+
+  const handleSaveMoment = async () => {
+    const trimmed = momentText.trim();
+    if (!trimmed) return;
+    try {
+      // Той самий тип нотатки, що й "Настрій цього сеансу" (`type: 'moment'`), але тут з
+      // вільним текстом користувача, а не міткою реакції — "Додати момент" з самого ТЗ.
+      await createMoment.mutateAsync({ userBookId, sessionId, type: 'moment', text: trimmed });
+      setMomentText('');
+      setMomentExpanded(false);
+    } catch {
+      // `useCreateNote`'s `onError` уже показав тост — форма лишається відкритою для повтору,
+      // той самий підхід, що й `JournalComposer`/`handleFinish` вище.
+    }
+  };
+
+  return (
+    <View style={{ gap: theme.spacing.lg, alignItems: 'center', width: '100%' }}>
+      <View style={{ alignItems: 'center', gap: theme.spacing.xs }}>
+        <Ionicons name="checkmark-circle" size={32} color={theme.colors.accent} />
+        <AppText variant="heading">Сесію збережено</AppText>
+      </View>
+
+      <View style={{ gap: theme.spacing.sm, width: '100%' }}>
+        <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+          Як читалося? (необов&apos;язково)
+        </AppText>
+        <ReadingExperiencePicker value={pickedExperience} onChange={handlePick} />
+      </View>
+
+      {momentExpanded ? (
+        <View style={{ gap: theme.spacing.sm, width: '100%' }}>
+          <LabeledInput
+            label="Момент"
+            value={momentText}
+            onChangeText={setMomentText}
+            placeholder="Що запам'яталось?"
+          />
+          <Button
+            label={createMoment.isPending ? 'Зберігаю…' : 'Зберегти момент'}
+            variant="secondary"
+            onPress={handleSaveMoment}
+            disabled={!momentText.trim() || createMoment.isPending}
+          />
+        </View>
+      ) : (
+        <Button label="Додати момент" variant="ghost" onPress={() => setMomentExpanded(true)} />
+      )}
+
+      <Button label="Готово" onPress={goToBook} />
+    </View>
   );
 }
 

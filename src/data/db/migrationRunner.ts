@@ -9,6 +9,7 @@ import * as migration006 from './migrations/006_recommendation_shown';
 import * as migration007 from './migrations/007_book_source_curated';
 import * as migration008 from './migrations/008_note_category';
 import * as migration009 from './migrations/009_shelf_theme';
+import * as migration010 from './migrations/010_reading_experience';
 
 const log = createLogger('db/migrations');
 
@@ -38,6 +39,7 @@ const migrations: Migration[] = [
   { version: migration007.version, up: migration007.up, manualTransaction: migration007.manualTransaction },
   { version: migration008.version, up: migration008.up },
   { version: migration009.version, up: migration009.up },
+  { version: migration010.version, up: migration010.up },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;

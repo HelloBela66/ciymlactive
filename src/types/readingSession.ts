@@ -22,6 +22,13 @@ export const ReadingSessionSchema = z.object({
   endPage: z.number().int().nullable(),
   durationSeconds: z.number().int().nullable(),
   moodNote: z.string().nullable(),
+  // ТЗ Фази 9 (SESSION REFLECTION) — "Як читалося?", одне з 5 фіксованих значень
+  // (`ReadingExperienceId`, `src/design/readingExperience.ts`), проставляється ОКРЕМОЮ
+  // мутацією ПІСЛЯ того, як сесія вже безпечно збережена (`setReadingExperience`,
+  // `ReadingSessionRepository.ts`). Навмисно вільний рядок, не enum — той самий підхід, що й
+  // `moodNote`/`note.reaction` вище: список значень фіксується лише TypeScript-типом,
+  // нерозпізнане значення UI сам відфільтровує (`isReadingExperienceId`), а не ця схема.
+  readingExperience: z.string().nullable(),
   isEdited: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),

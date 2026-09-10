@@ -105,6 +105,32 @@ export function useFinishSession() {
   });
 }
 
+/**
+ * "Як читалося?" (ТЗ Фази 9 — SESSION REFLECTION), окрема мутація від `useFinishSession` —
+ * навмисно: сесія до цього моменту вже безпечно збережена (`ended_at` записано), рефлексія —
+ * легкий, необов'язковий крок ПІСЛЯ, тому власна помилка тут ніколи не повинна виглядати як
+ * "сесію не збережено" (`SessionReflectionPanel`, `app/session/[sessionId].tsx`, навіть не
+ * чекає результату перед переходом на екран книги — тост про помилку тут суто інформаційний).
+ */
+export function useSetReadingExperience() {
+  const queryClient = useQueryClient();
+  const onError = useMutationErrorHandler(
+    log,
+    'Не вдалося зберегти "Як читалося?". Сама сесія вже збережена — це лише необов\'язкова позначка.',
+  );
+  return useMutation<void, Error, { id: string; userBookId: string; value: string | null }>({
+    mutationFn: async ({ id, value }) => {
+      const db = await getDatabase();
+      await ReadingSessionRepository.setReadingExperience(db, id, value);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(variables.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.history(variables.userBookId) });
+    },
+    onError,
+  });
+}
+
 export function useDiscardSession() {
   const invalidate = useInvalidateSessions();
   const onError = useMutationErrorHandler(log, 'Не вдалося скасувати сесію.');

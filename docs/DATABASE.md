@@ -87,6 +87,25 @@ sync/catalog backend, але жодна читацька дія (старт се
    доповнення, розділ нижче) отримав нове значення в `BookSourceTypeSchema`
    (`src/types/bookDraft.ts`), і без цієї міграції збереження книги з кураторської добірки
    падало б з `CHECK constraint failed`.
+8. **008_note_category** — власні категорії нотаток користувача (Milestone 11, доповнення —
+   панель читання). Нова таблиця `note_category` (`user_book_id` → `user_book`, `ON DELETE
+   CASCADE`, м'яке видалення через `deleted_at`) і нова nullable-колонка `note.category_id`
+   (простий `ALTER TABLE ADD COLUMN`, навмисно БЕЗ `REFERENCES` — той самий ризик rebuild-міграцій
+   з FK через `ALTER TABLE`, що й описано у 002). `note.type` лишається як є (`'general'` за
+   замовчуванням) навіть коли задана власна категорія — обидва поля співіснують, UI резолвить
+   назву через `resolveEntryTypeLabel`.
+9. **009_shelf_theme** — тематичне оформлення полиці (Milestone 11, доповнення8). Проста
+   `ALTER TABLE ADD COLUMN theme TEXT NOT NULL DEFAULT 'classic'` — той самий свідомий вибір,
+   що й 003/005: список тем фіксується лише TypeScript-типом, не CHECK. Існуючі полиці
+   отримують `'classic'` заднім числом.
+10. **010_reading_experience** — «Як читалося?» (POLYTSIA V1.5, Фаза 9: SESSION REFLECTION).
+    Нова nullable-колонка `reading_session.reading_experience TEXT`, простий `ALTER TABLE ADD
+    COLUMN`, БЕЗ CHECK і БЕЗ `DEFAULT` (на відміну від 009 — це справді необов'язкове поле, для
+    якого NULL і є коректним "не вказано", нейтральний fallback тут не потрібен). Значення
+    фіксує лише TypeScript-тип `ReadingExperienceId` (`src/design/readingExperience.ts`) — 5
+    фіксованих значень із самого ТЗ. Проставляється ОКРЕМОЮ мутацією
+    (`ReadingSessionRepository.setReadingExperience`) вже ПІСЛЯ того, як сесію збережено
+    (`finish()`), не є частиною тієї самої транзакції.
 - Усі зовнішні ключі з `PRAGMA foreign_keys = ON`.
 - Дати зберігаються як ISO-8601 `TEXT` (UTC), не Unix timestamp — легше дебажити, легше
   експортувати в JSON/CSV без конвертацій.
@@ -332,6 +351,7 @@ CREATE TABLE reading_session (
   end_page INTEGER,
   duration_seconds INTEGER,           -- обчислюється при завершенні: ended-started мінус паузи
   mood_note TEXT,                     -- коротка думка після сесії
+  reading_experience TEXT,            -- "Як читалося?" (Фаза 9): easy/engaging/calm/tense/difficult, без CHECK
   is_edited INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

@@ -17,6 +17,7 @@ interface ReadingSessionRow {
   end_page: number | null;
   duration_seconds: number | null;
   mood_note: string | null;
+  reading_experience: string | null;
   is_edited: number;
   created_at: string;
   updated_at: string;
@@ -43,6 +44,7 @@ function mapRow(row: ReadingSessionRow): ReadingSession {
     endPage: row.end_page,
     durationSeconds: row.duration_seconds,
     moodNote: row.mood_note,
+    readingExperience: row.reading_experience,
     isEdited: row.is_edited === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -104,6 +106,7 @@ export const ReadingSessionRepository = {
       endPage: null,
       durationSeconds: null,
       moodNote: null,
+      readingExperience: null,
       isEdited: false,
       createdAt: now,
       updatedAt: now,
@@ -196,6 +199,28 @@ export const ReadingSessionRepository = {
       moodNote: params.moodNote ?? null,
       updatedAt: now,
     };
+  },
+
+  /**
+   * "Як читалося?" (ТЗ Фази 9 — SESSION REFLECTION), ОКРЕМО від `finish()`: за задумом ТЗ,
+   * рефлексія — необов'язковий крок ПІСЛЯ того, як сесія вже безпечно збережена (`ended_at`
+   * записано), а не частина тієї самої транзакції/форми завершення — тож будь-яка проблема з
+   * цим викликом НІКОЛИ не може вплинути на вже збережений прогрес сесії (`SessionReflectionPanel`,
+   * `app/session/[sessionId].tsx`, навіть не чекає результату перед переходом далі).
+   *
+   * `value` — вільний `TEXT` без CHECK (той самий підхід, що й `note.reaction`/`shelf.theme`):
+   * 5 значень фіксує лише TypeScript-тип `ReadingExperienceId`
+   * (`src/design/readingExperience.ts`), UI сам відфільтровує нерозпізнані значення
+   * (`isReadingExperienceId`), а не ця функція. `value: null` — свідоме "прибрати відповідь"
+   * (не використовується зараз жодним UI, але симетрично з тим, як `pause`/`resume` не
+   * забороняють себе викликати у "вже такому" стані — просто UPDATE, без додаткових умов).
+   */
+  async setReadingExperience(db: SQLiteDatabase, id: string, value: string | null): Promise<void> {
+    await db.runAsync(`UPDATE reading_session SET reading_experience = ?, updated_at = ? WHERE id = ?`, [
+      value,
+      nowIso(),
+      id,
+    ]);
   },
 
   /** Скасувати сесію без збереження (опція відновлення "осиротілої" сесії при relaunch). */
