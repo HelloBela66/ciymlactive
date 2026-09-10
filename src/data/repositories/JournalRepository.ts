@@ -533,6 +533,39 @@ export const JournalRepository = {
   },
 
   /**
+   * Останній запис щоденника (нотатка чи цитата) на книгу, пакетно для списку книг (ТЗ Фази 8
+   * — READING CONTINUITY, картка "Зараз читаєш" на Home: "Остання думка: …", максимум 1 запис
+   * на книгу). Той самий union `note`+`quote`, що й `listPage`, звужений до `user_book_id IN
+   * (…)`, але БЕЗ `bookJoin`/`categoryJoin` — виклик уже знає, про яку книгу йдеться (на
+   * відміну від `listFeedPage`, де назва/обкладинка книги потрібні для змішаної стрічки). Той
+   * самий "перше входження на групу" підхід у JS, що й
+   * `ReadingSessionRepository.listLastCompletedByUserBookIds`.
+   */
+  async listLatestByUserBookIds(db: SQLiteDatabase, userBookIds: string[]): Promise<Map<string, JournalEntry>> {
+    const result = new Map<string, JournalEntry>();
+    if (userBookIds.length === 0) return result;
+
+    const placeholders = userBookIds.map(() => '?').join(',');
+    const sql = `
+      SELECT id, 'note' AS kind, user_book_id, NULL AS edition_id, session_id, page,
+             progress_percent, type, category_id, text, NULL AS comment, tags, is_favorite, reaction,
+             created_at, updated_at
+        FROM note WHERE deleted_at IS NULL AND user_book_id IN (${placeholders})
+      UNION ALL
+      SELECT id, 'quote' AS kind, user_book_id, edition_id, session_id, page,
+             progress_percent, 'quote' AS type, NULL AS category_id, text, comment, tags,
+             is_favorite, reaction, created_at, updated_at
+        FROM quote WHERE deleted_at IS NULL AND user_book_id IN (${placeholders})
+      ORDER BY created_at DESC`;
+
+    const rows = await db.getAllAsync<JournalUnionRow>(sql, [...userBookIds, ...userBookIds]);
+    for (const row of rows) {
+      if (!result.has(row.user_book_id)) result.set(row.user_book_id, mapRow(row));
+    }
+    return result;
+  },
+
+  /**
    * Кількість записів по кожній реакції, по всій бібліотеці (Milestone 11, доповнення —
    * агрегована статистика "N смішних моментів..." на екрані щоденника). `GROUP BY reaction`
    * над union `note`+`quote`, лише непорожні (`reaction IS NOT NULL`). Ключі результату — сирі

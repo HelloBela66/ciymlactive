@@ -37,6 +37,14 @@ export const queryKeys = {
     active: ['sessions', 'active'] as const,
     detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
     history: (userBookId: string) => ['sessions', 'history', userBookId] as const,
+    // POLYTSIA V1.5, Фаза 8 (READING CONTINUITY) — остання завершена сесія на кожну книгу зі
+    // списку "Зараз читаєш" (Home), пакетно. `[...userBookIds].sort()` — порядок книг у списку
+    // вже детермінований (`useLibraryByStatus`), але сортування тут прибирає будь-яку залежність
+    // ключа кешу від порядку викликів. Інвалідується за префіксом `['sessions','continuity']`
+    // (`useSessionMutations.ts`/`journalInvalidation.ts`), не за цим повним ключем — те саме
+    // рішення, що й `journal.feed` (Фаза 4): склад/порядок `userBookIds` не повинен впливати на
+    // те, чи інвалідація "влучає".
+    continuity: (userBookIds: string[]) => ['sessions', 'continuity', [...userBookIds].sort()] as const,
   },
   notes: {
     byUserBook: (userBookId: string) => ['notes', 'byUserBook', userBookId] as const,

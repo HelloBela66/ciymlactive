@@ -241,4 +241,33 @@ export const ReadingSessionRepository = {
     );
     return rows.map(mapRow);
   },
+
+  /**
+   * Остання ЗАВЕРШЕНА сесія на книгу, пакетно для списку книг (ТЗ Фази 8 — READING CONTINUITY,
+   * картка "Зараз читаєш" на Home: "Останній раз: …", "N хв · N стор."). Той самий підхід, що
+   * й `ShelfRepository.listNamesByUserBookIds` — один запит замість одного на кожну книгу
+   * списку. Проста вибірка, відсортована `started_at DESC`, лишає в Map лише ПЕРШЕ (тобто
+   * найновіше) входження на кожен `user_book_id` — window-функції (`ROW_NUMBER() OVER
+   * (PARTITION BY …)`) тут навмисно не потрібні заради такого невеликого списку (Home показує
+   * щонайбільше `HOME_READING_LIST_LIMIT` книг одразу).
+   */
+  async listLastCompletedByUserBookIds(
+    db: SQLiteDatabase,
+    userBookIds: string[],
+  ): Promise<Map<string, ReadingSession>> {
+    const result = new Map<string, ReadingSession>();
+    if (userBookIds.length === 0) return result;
+
+    const placeholders = userBookIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<ReadingSessionRow>(
+      `SELECT * FROM reading_session
+       WHERE user_book_id IN (${placeholders}) AND deleted_at IS NULL AND ended_at IS NOT NULL
+       ORDER BY started_at DESC`,
+      userBookIds,
+    );
+    for (const row of rows) {
+      if (!result.has(row.user_book_id)) result.set(row.user_book_id, mapRow(row));
+    }
+    return result;
+  },
 };

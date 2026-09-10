@@ -23,4 +23,9 @@ export function invalidateJournal(queryClient: QueryClient, userBookId: string, 
   if (sessionId) {
     queryClient.invalidateQueries({ queryKey: queryKeys.journal.bySession(sessionId) });
   }
+  // ТЗ Фази 8 (READING CONTINUITY) — "остання думка" на картці "Зараз читаєш" (Home) читає
+  // саме останній note/quote на книгу, тож будь-яка мутація note/quote могла її змінити.
+  // Префікс, не повний параметризований ключ — той самий підхід, що й `['journal','feed']`
+  // вище (`queryKeys.sessions.continuity`, `useReadingContinuity.ts`).
+  queryClient.invalidateQueries({ queryKey: ['sessions', 'continuity'] });
 }

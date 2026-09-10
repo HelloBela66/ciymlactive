@@ -19,6 +19,12 @@ function useInvalidateSessions() {
     // Book Details показує "почати"/"продовжити" залежно від активної сесії книги.
     queryClient.invalidateQueries({ queryKey: queryKeys.works.all });
     queryClient.invalidateQueries({ queryKey: queryKeys.userBooks.all });
+    // ТЗ Фази 8 (READING CONTINUITY) — старт/завершення/скасування сесії міняють "останню
+    // завершену сесію" картки "Зараз читаєш" на Home. Префікс, не повний параметризований
+    // ключ (`queryKeys.sessions.continuity`, той самий підхід, що й `journal.feed`/
+    // `invalidateJournal`) — так змивається кеш незалежно від того, який саме набір
+    // `userBookIds` був у списку на момент запиту.
+    queryClient.invalidateQueries({ queryKey: ['sessions', 'continuity'] });
   };
 }
 

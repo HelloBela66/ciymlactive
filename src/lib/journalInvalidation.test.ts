@@ -23,6 +23,9 @@ describe('invalidateJournal', () => {
       ['journal', 'feed'],
       queryKeys.journal.countAll,
       queryKeys.journal.reactionCounts,
+      // ТЗ Фази 8 (READING CONTINUITY) — "остання думка" на картці "Зараз читаєш" (Home)
+      // читає останній note/quote на книгу, тож будь-яка мутація note/quote змиває і її.
+      ['sessions', 'continuity'],
     ]);
   });
 
@@ -31,7 +34,7 @@ describe('invalidateJournal', () => {
     invalidateJournal(queryClient, 'ub1', 'sess1');
 
     const keys = invalidatedKeys(queryClient);
-    expect(keys).toHaveLength(7);
+    expect(keys).toHaveLength(8);
     expect(keys).toContainEqual(queryKeys.journal.bySession('sess1'));
   });
 
@@ -39,7 +42,7 @@ describe('invalidateJournal', () => {
     const queryClient = createMockQueryClient();
     invalidateJournal(queryClient, 'ub1', null);
 
-    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(6);
+    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(7);
   });
 
   it('стрічку інвалідує за спільним префіксом ["journal", "feed"], а не за конкретними фільтрами', () => {

@@ -11,11 +11,16 @@ import { ReadingProgressBar } from '@/components/ui/ReadingProgressBar';
 import { useTheme } from '@/design/ThemeProvider';
 import { getTimeOfDayGreeting } from '@/lib/greeting';
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
+import { useReadingContinuity } from '@/features/reading-session/useReadingContinuity';
 import { useLibraryByStatus } from '@/features/library/useLibrary';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
 import { useJournalGlobalCount } from '@/features/journal/useJournal';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 import { computeProgressPercent } from '@/lib/progressPercent';
+import { formatLastReadLabel } from '@/lib/lastReadLabel';
+import type { ReadingSession } from '@/types/readingSession';
+import type { JournalEntry } from '@/types/journalEntry';
+import type { UserBookWithDetails } from '@/types/userBook';
 
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
 const ENTRY_FORMS = ['запис', 'записи', 'записів'] as const;
@@ -27,11 +32,129 @@ const ENTRY_FORMS = ['запис', 'записи', 'записів'] as const;
  * список — дешевий і правильний захист на майбутнє). */
 const HOME_READING_LIST_LIMIT = 5;
 
+/**
+ * Компактний рядок "Останній раз: …" / "N хв · N стор." (ТЗ Фази 8 — READING CONTINUITY) —
+ * складає всі доступні шматки в один підпис, кожен окремо необов'язковий ("gracefully
+ * деградує", якщо даних немає): поточна сторінка, час і сторінки останньої сесії. Прогрес
+ * (%) навмисно НЕ тут — він і так завжди видимий на `ReadingProgressBar` поруч, дублювати його
+ * тут означало б саме "перевантажувати card", від чого прямо застерігає ТЗ.
+ */
+function buildContinuityMetaLine(currentPage: number, lastSession: ReadingSession | null, now: Date): string | null {
+  const parts: string[] = [];
+  if (currentPage > 0) parts.push(`с. ${currentPage}`);
+  if (lastSession?.endedAt) parts.push(`Останній раз: ${formatLastReadLabel(lastSession.endedAt, now)}`);
+  if (lastSession?.durationSeconds != null) {
+    const minutes = Math.round(lastSession.durationSeconds / 60);
+    if (minutes > 0) parts.push(`${minutes} хв`);
+  }
+  if (lastSession?.endPage != null) {
+    const pages = Math.max(0, lastSession.endPage - lastSession.startPage);
+    if (pages > 0) parts.push(`${pages} стор.`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function CurrentReadingRow({
+  userBook,
+  lastSession,
+  lastEntry,
+  now,
+}: {
+  userBook: UserBookWithDetails;
+  lastSession: ReadingSession | null;
+  lastEntry: JournalEntry | null;
+  now: Date;
+}) {
+  const theme = useTheme();
+  const percent = computeProgressPercent(userBook.currentPage, userBook.edition.pageCount);
+  const metaLine = buildContinuityMetaLine(userBook.currentPage, lastSession, now);
+
+  return (
+    <Pressable
+      // Milestone 11, доповнення: тап тут веде НЕ на повний Book Details (як досі в
+      // Бібліотеці — там свідомо лишається без змін), а на компактний екран запуску сесії
+      // читання саме цієї книги (`app/session/launch/[userBookId].tsx`). `as unknown as
+      // Href` — навколо ВСЬОГО об'єкта (не лише `pathname`) — той самий прийом, що вже
+      // усталений для параметризованих маршрутів поза кешем typed routes (`app/work/[workId].tsx`,
+      // `router.push({ pathname: '/completion/[workId]', params: { workId } } as unknown as Href)`):
+      // маршрут реальний, лише локальний кеш typed routes (`.expo/types/router.d.ts`, не в
+      // git) ще не встиг його побачити — саме тому `Href`-каст об'єкта-як-цілого, а не рядка
+      // `pathname` окремо (той не проходить перевірку типів, бо звужений рядковий літерал
+      // очікується саме в полі `pathname`, а не увесь union-тип `Href`).
+      onPress={() =>
+        router.push({
+          pathname: '/session/launch/[userBookId]',
+          params: { userBookId: userBook.id },
+        } as unknown as Href)
+      }
+      accessibilityRole="button"
+      accessibilityLabel={`${
+        percent != null ? `${userBook.work.title}, прочитано ${Math.round(percent)}%` : userBook.work.title
+      }. Продовжити читання.`}
+    >
+      <Card style={{ gap: theme.spacing.sm }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
+          <CoverThumbnail
+            coverUrl={userBook.edition.coverUrl}
+            title={userBook.work.title}
+            fallbackColor={userBook.work.coverFallbackColor}
+            width={40}
+            height={58}
+          />
+          <View style={{ flex: 1, gap: theme.spacing.xs }}>
+            <AppText variant="body">{userBook.work.title}</AppText>
+            {userBook.work.authors.length > 0 ? (
+              <AppText variant="caption" color="secondary">
+                {userBook.work.authors.map((a) => a.name).join(', ')}
+              </AppText>
+            ) : null}
+            {percent != null ? (
+              <View style={{ marginTop: theme.spacing.xs }}>
+                <ReadingProgressBar percent={percent} />
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Last journal entry preview — щонайбільше 1 запис, короткий truncated preview
+            (`numberOfLines={1}`, ТЗ Фази 8: "не перевантажуй card"). */}
+        {metaLine || lastEntry ? (
+          <View style={{ gap: 2 }}>
+            {metaLine ? (
+              <AppText variant="caption" color="secondary">
+                {metaLine}
+              </AppText>
+            ) : null}
+            {lastEntry ? (
+              <AppText variant="caption" color="tertiary" numberOfLines={1} style={{ fontStyle: 'italic' }}>
+                Остання думка: «{lastEntry.text}»
+              </AppText>
+            ) : null}
+          </View>
+        ) : null}
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <AppText variant="caption" color="accent">
+            Продовжити читання
+          </AppText>
+          <Ionicons name="chevron-forward" size={14} color={theme.colors.accent} />
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
 function CurrentlyReadingList() {
   const theme = useTheme();
   const { data: reading } = useLibraryByStatus('reading');
+  const visible = (reading ?? []).slice(0, HOME_READING_LIST_LIMIT);
+  // Хук викликається БЕЗУМОВНО, до раннього `return null` нижче (Rules of Hooks) — порожній
+  // масив (доки `reading` ще не завантажився) означає, що запит просто не виконується
+  // (`enabled` усередині `useReadingContinuity`).
+  const continuity = useReadingContinuity(visible.map((userBook) => userBook.id));
+  const now = new Date();
+
   if (!reading || reading.length === 0) return null;
-  const visible = reading.slice(0, HOME_READING_LIST_LIMIT);
   const hiddenCount = reading.length - visible.length;
 
   return (
@@ -51,57 +174,15 @@ function CurrentlyReadingList() {
         ) : null}
       </View>
       {visible.map((userBook) => {
-        const percent = computeProgressPercent(userBook.currentPage, userBook.edition.pageCount);
+        const info = continuity.data?.get(userBook.id);
         return (
-          <Pressable
+          <CurrentReadingRow
             key={userBook.id}
-            // Milestone 11, доповнення: тап тут веде НЕ на повний Book Details (як досі в
-            // Бібліотеці — там свідомо лишається без змін), а на компактний екран запуску сесії
-            // читання саме цієї книги (`app/session/launch/[userBookId].tsx`). `as unknown as
-            // Href` — навколо ВСЬОГО об'єкта (не лише `pathname`) — той самий прийом, що вже
-            // усталений для параметризованих маршрутів поза кешем typed routes (`app/work/[workId].tsx`,
-            // `router.push({ pathname: '/completion/[workId]', params: { workId } } as unknown as Href)`):
-            // маршрут реальний, лише локальний кеш typed routes (`.expo/types/router.d.ts`, не в
-            // git) ще не встиг його побачити — саме тому `Href`-каст об'єкта-як-цілого, а не рядка
-            // `pathname` окремо (той не проходить перевірку типів, бо звужений рядковий літерал
-            // очікується саме в полі `pathname`, а не увесь union-тип `Href`).
-            onPress={() =>
-              router.push({
-                pathname: '/session/launch/[userBookId]',
-                params: { userBookId: userBook.id },
-              } as unknown as Href)
-            }
-            accessibilityRole="button"
-            accessibilityLabel={
-              percent != null
-                ? `${userBook.work.title}, прочитано ${Math.round(percent)}%`
-                : userBook.work.title
-            }
-          >
-            <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
-              <CoverThumbnail
-                coverUrl={userBook.edition.coverUrl}
-                title={userBook.work.title}
-                fallbackColor={userBook.work.coverFallbackColor}
-                width={40}
-                height={58}
-              />
-              <View style={{ flex: 1, gap: theme.spacing.xs }}>
-                <AppText variant="body">{userBook.work.title}</AppText>
-                {userBook.work.authors.length > 0 ? (
-                  <AppText variant="caption" color="secondary">
-                    {userBook.work.authors.map((a) => a.name).join(', ')}
-                  </AppText>
-                ) : null}
-                {percent != null ? (
-                  <View style={{ marginTop: theme.spacing.xs }}>
-                    <ReadingProgressBar percent={percent} />
-                  </View>
-                ) : null}
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-            </Card>
-          </Pressable>
+            userBook={userBook}
+            lastSession={info?.lastSession ?? null}
+            lastEntry={info?.lastEntry ?? null}
+            now={now}
+          />
         );
       })}
     </View>
