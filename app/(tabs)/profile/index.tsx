@@ -25,6 +25,17 @@ interface MenuItem {
 
 const MENU_ITEMS: MenuItem[] = [
   { icon: 'bar-chart-outline', label: 'Статистика', onPress: () => router.push('/statistics') },
+  {
+    icon: 'time-outline',
+    label: 'Моя історія',
+    // `as unknown as Href` — той самий випадок, що й "Перевірка даних"/"Імпорт з Goodreads"
+    // нижче: `app/history.tsx` (POLYTSIA V1.5, Фаза 12) — реальний, щойно доданий маршрут, але
+    // Expo Router typed routes (`.expo/types/router.d.ts`) генеруються локально `expo
+    // start`/Metro й не потрапляють у git — до першого запуску dev-сервера на новій машині цей
+    // файл ще не знає про маршрут, і `tsc --noEmit` падає на самому рядковому літералі
+    // `'/history'`. Явний каст прибирає цю залежність.
+    onPress: () => router.push('/history' as unknown as Href),
+  },
   { icon: 'flag-outline', label: 'Цілі читання', onPress: () => router.push('/goals') },
   { icon: 'notifications-outline', label: 'Нагадування', onPress: () => router.push('/reminders') },
   { icon: 'layers-outline', label: 'TBR reality check', onPress: () => router.push('/tbr') },
@@ -84,10 +95,11 @@ function StatsSummaryCard() {
 
 /**
  * Профіль. Statistics/Goals/Reminders — Milestone 5; TBR reality check/Wrapped/Резервна
- * копія — Milestone 6; Перевірка даних — POLYTSIA V1.5 Фаза 5 (усе — справжні екрани, доступ
- * звідси). Owned library/Loans/повні Налаштування — пізніші milestone. Перемикач теми
- * зʼявився тут уже в Milestone 0 як реальна, а не заглушкова функція — ThemeProvider
- * повністю готовий.
+ * копія — Milestone 6; Перевірка даних — POLYTSIA V1.5 Фаза 5; Моя історія — POLYTSIA V1.5
+ * Фаза 12 (усе — справжні екрани, доступ звідси; ТЗ Фази 12: "Entry point — Profile", "Не
+ * створюй нову bottom tab"). Owned library/Loans/повні Налаштування — пізніші milestone.
+ * Перемикач теми зʼявився тут уже в Milestone 0 як реальна, а не заглушкова функція —
+ * ThemeProvider повністю готовий.
  */
 export default function ProfileScreen() {
   const theme = useTheme();

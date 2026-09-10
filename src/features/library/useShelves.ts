@@ -102,6 +102,10 @@ export function useToggleShelfBook() {
       queryClient.invalidateQueries({ queryKey: queryKeys.shelves.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.shelves.detail(variables.shelfId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.shelves.forUserBook(variables.userBookId) });
+      // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — стрічка "Моя історія" читає
+      // `shelf_book.added_at` як подію `shelf_addition` (лише додавання; прибирання з полиці
+      // просто прибирає рядок-джерело, тож подія зникає з наступного перезапиту сама).
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
     },
     onError,
   });

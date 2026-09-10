@@ -47,6 +47,10 @@ export function useUpdateUserBookStatus() {
       queryClient.invalidateQueries({ queryKey: queryKeys.statistics.overall });
       queryClient.invalidateQueries({ queryKey: queryKeys.goals.all });
       queryClient.invalidateQueries({ queryKey: ['wrapped'] });
+      // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — зміна статусу могла проставити
+      // `started_at`/`finished_at` (`UserBookRepository.updateStatus`), а стрічка "Моя історія"
+      // читає саме ці колонки як `book_started`/`book_finished` події (`ActivityHistoryRepository`).
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
     },
     onError,
   });

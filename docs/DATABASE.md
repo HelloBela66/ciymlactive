@@ -114,6 +114,24 @@ sync/catalog backend, але жодна читацька дія (старт се
     `idx_note_revisit_later`/`idx_quote_revisit_later` — той самий привід, що й
     `idx_note_favorite`/`idx_quote_favorite`: `JournalRepository` фільтрує за цим полем
     (`revisitLaterOnly`) так само, як за `is_favorite`.
+
+**POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
+Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
+прямо вимагає derived model замість нової event-sourcing архітектури. Новий
+`ActivityHistoryRepository.listRecent` — це один SQL `UNION ALL` запит через вісім уже наявних
+timestamped-джерел, без жодного нового стовпця чи таблиці:
+
+| Тип події           | Джерело · timestamp-колонка              |
+| -------------------- | ----------------------------------------- |
+| `session_completed`  | `reading_session.ended_at`                |
+| `book_started`       | `user_book.started_at`                    |
+| `book_finished`      | `user_book.finished_at`                   |
+| `book_added`         | `user_book.added_at`                      |
+| `rating_added`       | `rating.created_at`                       |
+| `journal_entry`      | `note.created_at`                         |
+| `quote`               | `quote.created_at`                        |
+| `shelf_addition`      | `shelf_book.added_at`                     |
+
 - Усі зовнішні ключі з `PRAGMA foreign_keys = ON`.
 - Дати зберігаються як ISO-8601 `TEXT` (UTC), не Unix timestamp — легше дебажити, легше
   експортувати в JSON/CSV без конвертацій.

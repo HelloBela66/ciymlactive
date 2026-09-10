@@ -32,4 +32,10 @@ export function invalidateJournal(queryClient: QueryClient, userBookId: string, 
   // Префікс, не повний параметризований ключ — той самий підхід, що й `['journal','feed']`
   // вище (`queryKeys.sessions.continuity`, `useReadingContinuity.ts`).
   queryClient.invalidateQueries({ queryKey: ['sessions', 'continuity'] });
+  // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — стрічка "Моя історія" читає
+  // `note.created_at`/`quote.created_at` як події `journal_entry`/`quote`; create/remove
+  // (не favorite/reaction/revisitLater) справді змінюють цей список, але інвалідація тут —
+  // той самий "будь-яка мутація" підхід, що й у решти рядків цієї функції, а не окрема гілка
+  // лише для create/remove.
+  queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
 }

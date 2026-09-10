@@ -34,6 +34,9 @@ export function useSetRating() {
       // року" рахується саме з оцінок, тож без цього рядка щойно поставлена/змінена оцінка не
       // з'являлась би там одразу.
       queryClient.invalidateQueries({ queryKey: ['wrapped'] });
+      // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — стрічка "Моя історія" читає
+      // `rating.created_at` як подію `rating_added`.
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
     },
     onError,
   });
@@ -53,6 +56,9 @@ export function useRemoveRating() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ratings.byUserBook(variables.userBookId) });
       queryClient.invalidateQueries({ queryKey: ['wrapped'] });
+      // POLYTSIA V1.5, Фаза 12 — `rating` видаляється жорстко (без `deleted_at`), тож і подія
+      // `rating_added` має зникнути зі стрічки "Моя історія" разом з оцінкою.
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
     },
     onError,
   });

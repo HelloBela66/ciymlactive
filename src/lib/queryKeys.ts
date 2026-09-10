@@ -121,6 +121,11 @@ export const queryKeys = {
   statistics: {
     overall: ['statistics', 'overall'] as const,
   },
+  activityHistory: {
+    // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — без параметрів, той самий сенс, що й
+    // `statistics.overall`: один запит на всю похідну стрічку подій користувача.
+    recent: ['activityHistory', 'recent'] as const,
+  },
   tbr: {
     reality: ['tbr', 'reality'] as const,
   },

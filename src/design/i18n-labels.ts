@@ -1,5 +1,6 @@
 import type { ShelfThemeId } from '@/types/shelf';
 import type { DataIntegrityCategory } from '@/domain/dataIntegrityDoctor';
+import type { ActivityEventType } from '@/types/activityEvent';
 
 /**
  * Єдине джерело українських підписів для доменних enum-значень.
@@ -199,4 +200,20 @@ export const dataIntegrityCategoryLabels: Record<DataIntegrityCategory, string> 
   journal: 'Щоденник',
   shelves: 'Полиці',
   series: 'Серії',
+};
+
+/** Дієслівна фраза для кожного типу події "Моя історія" (POLYTSIA V1.5, Фаза 12) — екран
+ * (`app/history.tsx`) додає до неї назву книги/деталі (тривалість сесії, оцінку, назву
+ * полиці, текст запису) окремо, бо ці частини різняться за структурою даних, а не просто за
+ * мовою. Явний `Record` — та сама причина, що й у `dataIntegrityCategoryLabels`/
+ * `shelfThemeLabels` вище: новий тип події без підпису тут не компілюється. */
+export const activityEventTypeLabels: Record<ActivityEventType, string> = {
+  session_completed: 'Сесія читання',
+  book_started: 'Почав(-ла) читати',
+  book_finished: 'Прочитав(-ла)',
+  book_added: 'Додав(-ла) до бібліотеки',
+  rating_added: 'Оцінив(-ла)',
+  journal_entry: 'Запис у щоденнику',
+  quote: 'Цитата',
+  shelf_addition: 'Додав(-ла) на полицю',
 };

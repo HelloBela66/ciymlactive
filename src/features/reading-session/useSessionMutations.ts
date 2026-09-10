@@ -94,6 +94,9 @@ export function useFinishSession() {
       queryClient.invalidateQueries({ queryKey: queryKeys.statistics.overall });
       queryClient.invalidateQueries({ queryKey: queryKeys.goals.all });
       queryClient.invalidateQueries({ queryKey: ['calendar'] });
+      // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — стрічка "Моя історія" читає
+      // завершені сесії (`reading_session.ended_at`) як `session_completed` події.
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
       // Wrapped (Milestone 10 fix6, `docs/STATUS_V1.md` п. 3.4) — завершення сесії читання це
       // основна дія циклу читання, яку користувач робить найчастіше з усіх, що впливають на
       // підсумок року (сторінки/час читання за рік, найактивніші місяці рахуються саме з

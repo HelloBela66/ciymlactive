@@ -29,6 +29,10 @@ describe('invalidateJournal', () => {
       // ТЗ Фази 8 (READING CONTINUITY) — "остання думка" на картці "Зараз читаєш" (Home)
       // читає останній note/quote на книгу, тож будь-яка мутація note/quote змиває і її.
       ['sessions', 'continuity'],
+      // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — стрічка "Моя історія" читає
+      // note.created_at/quote.created_at як події journal_entry/quote, тож будь-яка мутація
+      // note/quote змиває і її (той самий "будь-яка мутація" привід, що й у решти ключів тут).
+      queryKeys.activityHistory.recent,
     ]);
   });
 
@@ -37,8 +41,9 @@ describe('invalidateJournal', () => {
     invalidateJournal(queryClient, 'ub1', 'sess1');
 
     const keys = invalidatedKeys(queryClient);
-    // Фаза 11 додала ще один базовий ключ (`revisitLaterByUserBook`) — було 8, стало 9.
-    expect(keys).toHaveLength(9);
+    // Фаза 11 додала базовий ключ `revisitLaterByUserBook` (було 8, стало 9), Фаза 12 додала
+    // `activityHistory.recent` (стало 10).
+    expect(keys).toHaveLength(10);
     expect(keys).toContainEqual(queryKeys.journal.bySession('sess1'));
   });
 
@@ -46,8 +51,9 @@ describe('invalidateJournal', () => {
     const queryClient = createMockQueryClient();
     invalidateJournal(queryClient, 'ub1', null);
 
-    // Фаза 11 додала ще один базовий виклик (`revisitLaterByUserBook`) — було 7, стало 8.
-    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(8);
+    // Фаза 11 додала базовий виклик `revisitLaterByUserBook` (було 7, стало 8), Фаза 12 додала
+    // `activityHistory.recent` (стало 9).
+    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(9);
   });
 
   it('стрічку інвалідує за спільним префіксом ["journal", "feed"], а не за конкретними фільтрами', () => {

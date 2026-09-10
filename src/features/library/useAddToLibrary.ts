@@ -56,6 +56,11 @@ export function useAddToLibrary() {
       queryClient.invalidateQueries({ queryKey: queryKeys.userBooks.all });
       // Book Details тримає власний UserBook-снепшот у своєму query — інвалідуємо і його.
       queryClient.invalidateQueries({ queryKey: queryKeys.works.all });
+      // POLYTSIA V1.5, Фаза 12 (READING ACTIVITY HISTORY) — стрічка "Моя історія" читає
+      // `user_book.added_at` як подію `book_added` (а якщо додано одразу зі статусом
+      // "прочитано"/"читаю", `UserBookRepository.addToLibrary` міг заразом проставити
+      // `started_at`/`finished_at` — ті самі колонки, що дають `book_started`/`book_finished`).
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
     },
     onError,
   });
