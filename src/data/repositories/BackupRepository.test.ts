@@ -421,3 +421,39 @@ describe('backup schemaVersion відповідає реальній схемі 
     expect(checkSchemaCompatibility(LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)).toBe('ok');
   });
 });
+
+describe('BackupRepository.approximateCounts (ТЗ Фази 13 — BACKUP HEALTH UX)', () => {
+  it('на щойно-мігрованій порожній БД повертає всі нулі', async () => {
+    const db = await openMigratedTestDb();
+    const counts = await BackupRepository.approximateCounts(db);
+    expect(counts).toEqual({ works: 0, userBooks: 0, sessions: 0, notes: 0 });
+  });
+
+  it('на заповненій БД збігається з summarize(exportAll(...)) — те саме число, два різні способи його дістати', async () => {
+    const db = await openMigratedTestDb();
+    await seedRepresentativeDatabase(db);
+
+    const counts = await BackupRepository.approximateCounts(db);
+    const viaExport = BackupRepository.summarize(await BackupRepository.exportAll(db));
+
+    expect(counts).toEqual(viaExport);
+    // Побіжна перевірка на конкретні числа з seedRepresentativeDatabase — щоб тест не
+    // пройшов випадково, якщо обидва методи однаково (та неправильно) порахують нуль.
+    expect(counts).toEqual({ works: 2, userBooks: 2, sessions: 2, notes: 2 });
+  });
+
+  it('рахує м\'яко видалені рядки так само, як summarize/exportAll (жоден фільтр по deleted_at)', async () => {
+    const db = await openMigratedTestDb();
+    await seedRepresentativeDatabase(db);
+    await db.runAsync(`UPDATE work SET deleted_at = ? WHERE id = ?`, ['2026-09-10T21:15:00.000Z', 'work-1']);
+
+    const counts = await BackupRepository.approximateCounts(db);
+    const viaExport = BackupRepository.summarize(await BackupRepository.exportAll(db));
+
+    // `work-1` лишається у лічильнику (той самий "рахує усе" підхід, що й summarize/exportAll) —
+    // якби approximateCounts фільтрував по deleted_at, а summarize/exportAll — ні, ці два
+    // числа розійшлись би, і саме це мала б впіймати ця перевірка.
+    expect(counts.works).toBe(2);
+    expect(counts).toEqual(viaExport);
+  });
+});

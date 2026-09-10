@@ -10,26 +10,42 @@ import {
   type BackupEnvelope,
 } from '@/lib/backupSerializer';
 import { writeAndShareBackupFile, pickBackupFileAsync } from '@/lib/backupFile';
+import { BackupExportStatusStorage } from '@/lib/backupExportStatusStorage';
 import { createLogger } from '@/lib/logger';
+import { queryKeys } from '@/lib/queryKeys';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
 
 const log = createLogger('features/backup');
 
 /** Експорт: дамп усієї БД → JSON-конверт (`docs/BACKUP_FORMAT.md`) → файл → системний
- * "Поділитися" (щоб користувач сам обрав, куди зберегти — Файли, хмара, месенджер тощо). */
+ * "Поділитися" (щоб користувач сам обрав, куди зберегти — Файли, хмара, месенджер тощо).
+ *
+ * ТЗ Фази 13 (BACKUP HEALTH UX) — цей успішний виклик і є "last successful export time":
+ * `exportedAt` фіксується один раз тут (той самий момент, що йде в сам конверт файлу, а не
+ * повторний `new Date()` в `onSuccess`, який міг би розійтись на кілька мілісекунд) і
+ * зберігається через `BackupExportStatusStorage` (докладне обґрунтування "чому не
+ * `app_settings.last_backup_at`" — коментар там-таки). */
 export function useExportBackup() {
+  const queryClient = useQueryClient();
   const onError = useMutationErrorHandler(log, 'Не вдалося створити резервну копію. Спробуй ще раз.');
   return useMutation({
     mutationFn: async () => {
       const db = await getDatabase();
       const data = await BackupRepository.exportAll(db);
+      const exportedAt = new Date().toISOString();
       const json = serializeBackup({
         schemaVersion: LATEST_SCHEMA_VERSION,
         appVersion: Constants.expoConfig?.version ?? '0.0.0',
         data,
+        exportedAt,
       });
       const filename = `polytsya-backup-${format(new Date(), 'yyyy-MM-dd-HHmm')}.json`;
-      return writeAndShareBackupFile(json, filename);
+      const result = await writeAndShareBackupFile(json, filename);
+      return { ...result, exportedAt };
+    },
+    onSuccess: ({ exportedAt }) => {
+      void BackupExportStatusStorage.setLastManualExportAt(exportedAt);
+      queryClient.invalidateQueries({ queryKey: queryKeys.backupHealth.status });
     },
     onError,
   });

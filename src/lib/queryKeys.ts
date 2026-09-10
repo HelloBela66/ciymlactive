@@ -135,6 +135,11 @@ export const queryKeys = {
   autoBackup: {
     settings: ['autoBackup', 'settings'] as const,
   },
+  backupHealth: {
+    // ТЗ Фази 13 (BACKUP HEALTH UX) — без параметрів, той самий сенс, що й
+    // `activityHistory.recent`/`statistics.overall`: один запит на весь стан копіювання.
+    status: ['backupHealth', 'status'] as const,
+  },
   trends: {
     // «Тренди» (Milestone 11, доповнення) — топ-N за кількістю пристроїв, що зберегли книгу
     // (`catalog_top_books`, `SharedCatalogClient.topBooks`). Без параметрів у ключі: єдиний
