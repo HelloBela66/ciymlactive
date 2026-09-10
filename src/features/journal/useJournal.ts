@@ -95,19 +95,40 @@ export interface JournalFeedFilters {
   favoriteOnly: boolean;
   /** `null` — усі типи. */
   types: JournalEntryType[] | null;
+  /** Пошукові фільтри «Мій щоденник» (ТЗ Фази 7 — text/book/reaction/date; `favorite`/`type`
+   * вище — вже наявні фільтри Фази 4). Усі — необов'язкові, без жодного — поведінка не
+   * відрізняється від Фази 4. */
+  query?: string;
+  reaction?: string;
+  workId?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
-/** Глобальна стрічка "Мій щоденник" (Фаза 4, `app/journal/index.tsx`) — keyset-пагінація
- * через `useInfiniteQuery`, кожна сторінка несе назву/обкладинку книги кожного запису
- * (`JournalRepository.listFeedPage`, записи різних книг ідуть впереміш). */
+/** Глобальна стрічка "Мій щоденник" (Фаза 4, розширена пошуком у Фазі 7; `app/journal/index.tsx`)
+ * — keyset-пагінація через `useInfiniteQuery`, кожна сторінка несе назву/обкладинку книги
+ * кожного запису (`JournalRepository.listFeedPage`, записи різних книг ідуть впереміш). */
 export function useJournalFeed(filters: JournalFeedFilters) {
   return useInfiniteQuery({
-    queryKey: queryKeys.journal.feed({ favoriteOnly: filters.favoriteOnly, types: filters.types }),
+    queryKey: queryKeys.journal.feed({
+      favoriteOnly: filters.favoriteOnly,
+      types: filters.types,
+      query: filters.query ?? null,
+      reaction: filters.reaction ?? null,
+      workId: filters.workId ?? null,
+      dateFrom: filters.dateFrom ?? null,
+      dateTo: filters.dateTo ?? null,
+    }),
     queryFn: async ({ pageParam }) => {
       const db = await getDatabase();
       return JournalRepository.listFeedPage(db, {
         favoriteOnly: filters.favoriteOnly,
         types: filters.types ?? undefined,
+        query: filters.query,
+        reaction: filters.reaction,
+        workId: filters.workId,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
         cursor: pageParam,
         limit: 30,
       });

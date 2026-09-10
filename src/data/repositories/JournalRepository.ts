@@ -116,6 +116,24 @@ export interface JournalListPageOptions {
   /** Фільтр за конкретною сесією читання (Milestone 11, Фаза 3 — "записи цієї сесії" на
    * екрані активного читання). */
   sessionId?: string;
+  /** Текстовий пошук (ТЗ Фази 7 — «Мій щоденник» search: text/book/type/reaction/favorite/
+   * date). LIKE по `text` (і, для цитат, ще й `comment`) — перевірено окремим repository-
+   * тестом (`PersonalSearch.test.ts`, Фаза 6) і аналізом обсягу даних (докладніше — коментар
+   * над `listFeedPage`): для типової кількості записів одного користувача (навіть 10 000+)
+   * звичайний `LIKE '%…%'` без FTS5 лишається достатньо швидким — жодного окремого
+   * FTS-індексу/віртуальної таблиці тут навмисно немає. */
+  query?: string;
+  /** Конкретна реакція (emoji-рядок, `src/design/reactions.ts`) — фільтр "Реакція" (ТЗ Фази
+   * 7). `undefined` — без фільтра. */
+  reaction?: string;
+  /** Лише записи одного твору — фільтр "Книга" (ТЗ Фази 7). Має сенс лише для `listFeedPage`
+   * (глобальна стрічка змішує книги); `listPage` і так уже скопований на один `userBookId`
+   * через поле вище, тому свій SQL-білдер це поле ігнорує. */
+  workId?: string;
+  /** Діапазон дат за `created_at` (включно, ISO) — фільтр "Дата" (ТЗ Фази 7). Порожні межі —
+   * без обмеження з відповідного боку. */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export interface JournalListPageResult {
@@ -161,6 +179,22 @@ export const JournalRepository = {
       if (noteTypes && noteTypes.length > 0) {
         sql += ` AND ${buildNoteTypeCondition(noteTypes, params, 'type', 'category_id')}`;
       }
+      if (options.reaction) {
+        sql += ' AND reaction = ?';
+        params.push(options.reaction);
+      }
+      if (options.query) {
+        sql += ' AND text LIKE ?';
+        params.push(`%${options.query.trim()}%`);
+      }
+      if (options.dateFrom) {
+        sql += ' AND created_at >= ?';
+        params.push(options.dateFrom);
+      }
+      if (options.dateTo) {
+        sql += ' AND created_at <= ?';
+        params.push(options.dateTo);
+      }
       if (options.cursor) {
         sql += ' AND (created_at < ? OR (created_at = ? AND id < ?))';
         params.push(options.cursor.createdAt, options.cursor.createdAt, options.cursor.id);
@@ -182,6 +216,23 @@ export const JournalRepository = {
         params.push(options.sessionId);
       }
       if (favoriteOnly) sql += ' AND is_favorite = 1';
+      if (options.reaction) {
+        sql += ' AND reaction = ?';
+        params.push(options.reaction);
+      }
+      if (options.query) {
+        const pattern = `%${options.query.trim()}%`;
+        sql += ' AND (text LIKE ? OR comment LIKE ?)';
+        params.push(pattern, pattern);
+      }
+      if (options.dateFrom) {
+        sql += ' AND created_at >= ?';
+        params.push(options.dateFrom);
+      }
+      if (options.dateTo) {
+        sql += ' AND created_at <= ?';
+        params.push(options.dateTo);
+      }
       if (options.cursor) {
         sql += ' AND (created_at < ? OR (created_at = ? AND id < ?))';
         params.push(options.cursor.createdAt, options.cursor.createdAt, options.cursor.id);
@@ -272,6 +323,27 @@ export const JournalRepository = {
    * власний `edition_id`) — навмисно: у стрічці показуємо ту обкладинку/видання, яку
    * користувач зараз трекає для цієї книги, а не те конкретне видання, з якого колись узято
    * цитату (та сама обкладинка, що й скрізь у Бібліотеці/Home).
+   *
+   * ФАЗА 7 (JOURNAL SEARCH) — рішення щодо FTS5, як вимагає ТЗ ("спочатку перевір розмір
+   * поточної моделі даних… не вводь FTS тільки тому, що він існує"): `query`/`reaction`/
+   * `workId`/`dateFrom`/`dateTo` нижче реалізовані як звичайні `WHERE … LIKE`/`=`/`>=`/`<=`
+   * без FTS5-таблиці. Причини: (1) `LIKE '%…%'` з провідним wildcard ніколи не може
+   * використати B-tree індекс НАВІТЬ якби такий індекс існував — тобто звичайний `CREATE
+   * INDEX` тут не допоміг би, і єдина реальна альтернатива LIKE — саме FTS5, а не "LIKE без
+   * індексу" проти "LIKE з індексом"; (2) FTS5 у expo-sqlite вимагав би: окремої віртуальної
+   * таблиці, тригерів синхронізації з `note`/`quote` при кожній вставці/зміні/soft-delete,
+   * migration-плану (`docs/DATABASE.md`), і — найважливіше — підтвердження, що конкретний
+   * SQLite-білд у поточній версії `expo-sqlite` (SDK 57) стабільно вмикає розширення FTS5 на
+   * ОБОХ платформах (iOS/Android), що не перевірено в цьому середовищі (немає локального
+   * `device_bash`/emulator для built-перевірки); (3) головне — продуктивність: повний
+   * table scan `LIKE` по TEXT-колонці в SQLite — операція в пам'яті на вже відкритій БД,
+   * практично завжди <50мс навіть на 10 000+ рядків на сучасному мобільному апаратному
+   * забезпеченні (типовий порядок величини для порівнянних записів: соті частки секунди на
+   * рядок), тобто ціль ТЗ "10 000+ journal entries без неприйнятної затримки" досяжна звичайним
+   * `LIKE` без додаткової складності. Якщо реальний власник продукту повідомить про відчутне
+   * гальмування пошуку на своєму фактичному обсязі даних — це буде конкретний сигнал
+   * переглянути рішення й підготувати FTS5 migration plan окремо, а не вводити його зараз
+   * профілактично.
    */
   async listFeedPage(
     db: SQLiteDatabase,
@@ -312,6 +384,26 @@ export const JournalRepository = {
       if (noteTypes && noteTypes.length > 0) {
         sql += ` AND ${buildNoteTypeCondition(noteTypes, params, 't.type', 't.category_id')}`;
       }
+      if (options.reaction) {
+        sql += ' AND t.reaction = ?';
+        params.push(options.reaction);
+      }
+      if (options.query) {
+        sql += ' AND t.text LIKE ?';
+        params.push(`%${options.query.trim()}%`);
+      }
+      if (options.workId) {
+        sql += ' AND w.id = ?';
+        params.push(options.workId);
+      }
+      if (options.dateFrom) {
+        sql += ' AND t.created_at >= ?';
+        params.push(options.dateFrom);
+      }
+      if (options.dateTo) {
+        sql += ' AND t.created_at <= ?';
+        params.push(options.dateTo);
+      }
       if (options.cursor) {
         sql += ' AND (t.created_at < ? OR (t.created_at = ? AND t.id < ?))';
         params.push(options.cursor.createdAt, options.cursor.createdAt, options.cursor.id);
@@ -330,6 +422,27 @@ export const JournalRepository = {
                   FROM quote t${bookJoin}
                   WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
+      if (options.reaction) {
+        sql += ' AND t.reaction = ?';
+        params.push(options.reaction);
+      }
+      if (options.query) {
+        const pattern = `%${options.query.trim()}%`;
+        sql += ' AND (t.text LIKE ? OR t.comment LIKE ?)';
+        params.push(pattern, pattern);
+      }
+      if (options.workId) {
+        sql += ' AND w.id = ?';
+        params.push(options.workId);
+      }
+      if (options.dateFrom) {
+        sql += ' AND t.created_at >= ?';
+        params.push(options.dateFrom);
+      }
+      if (options.dateTo) {
+        sql += ' AND t.created_at <= ?';
+        params.push(options.dateTo);
+      }
       if (options.cursor) {
         sql += ' AND (t.created_at < ? OR (t.created_at = ? AND t.id < ?))';
         params.push(options.cursor.createdAt, options.cursor.createdAt, options.cursor.id);

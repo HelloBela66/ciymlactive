@@ -61,11 +61,20 @@ export const queryKeys = {
     favoritesByUserBook: (userBookId: string) => ['journal', 'favoritesByUserBook', userBookId] as const,
     countByUserBook: (userBookId: string) => ['journal', 'countByUserBook', userBookId] as const,
     bySession: (sessionId: string) => ['journal', 'bySession', sessionId] as const,
-    // Параметризований фільтрами (Фаза 4) — щоб кожна комбінація тип/обране кешувалась
-    // окремо. Інвалідація йде за спільним префіксом `['journal', 'feed']`
-    // (`journalInvalidation.ts`), а не за цим повним ключем — так одна мутація нотатки/цитати
-    // змиває стрічку одразу для БУДЬ-ЯКОГО набору фільтрів, не лише поточного.
-    feed: (filters: { favoriteOnly: boolean; types: string[] | null }) => ['journal', 'feed', filters] as const,
+    // Параметризований фільтрами (Фаза 4; розширено пошуковими фільтрами — Фаза 7) — щоб
+    // кожна комбінація тип/обране/текст/реакція/книга/дата кешувалась окремо. Інвалідація йде
+    // за спільним префіксом `['journal', 'feed']` (`journalInvalidation.ts`), а не за цим
+    // повним ключем — так одна мутація нотатки/цитати змиває стрічку одразу для БУДЬ-ЯКОГО
+    // набору фільтрів, не лише поточного.
+    feed: (filters: {
+      favoriteOnly: boolean;
+      types: string[] | null;
+      query?: string | null;
+      reaction?: string | null;
+      workId?: string | null;
+      dateFrom?: string | null;
+      dateTo?: string | null;
+    }) => ['journal', 'feed', filters] as const,
     countAll: ['journal', 'countAll'] as const,
     draft: (userBookId: string) => ['journal', 'draft', userBookId] as const,
     // Milestone 11, доповнення (реакції) — агрегована статистика "N смішних моментів..." на
