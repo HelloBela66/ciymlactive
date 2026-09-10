@@ -68,15 +68,20 @@ DDL — обираємо на етапі M0 залежно від того, що
 своєї гілки, якщо ініціалізуєш репозиторій з іншою default-гілкою — GitHub сьогодні створює
 `main` за замовчуванням, звідси припущення). Кроки, у порядку:
 
-1. **`npm ci`** — не `npm install`: `package-lock.json` (`lockfileVersion: 3`) перевірено
-   програмно перед створенням цього workflow — усі `dependencies`/`devDependencies`
-   `package.json` присутні в lock-файлі, тож `npm ci` (відтворюваний install, точно за
-   lock-файлом) має спрацювати. **Не перевірено реальним запуском** — у хмарному середовищі
-   розробки немає доступу до реєстру npm (`403 Forbidden`), тож перший реальний запуск
-   `npm ci` станеться лише на самому GitHub Actions runner'і.
+1. **`npm ci`** — не `npm install`: строго відтворюваний install точно за `package-lock.json`
+   (`lockfileVersion: 3`), тому падає (навмисно, `EUSAGE`), якщо lock-файл і `package.json`
+   розійшлись, замість тихо це виправити. **Перевірено реальним запуском** на GitHub Actions
+   runner'і (перший реальний прогін цього workflow виявив саме таке розходження —
+   `react-native-view-shot` було зафіксовано на `5.1.0` при вимозі `^5.1.1` — виправлено
+   `npm install` локально й комітом оновленого lock-файлу).
 2. **`npm run typecheck`** (`tsc --noEmit`) — TypeScript `strict: true` (`tsconfig.json`).
-3. **`npm run lint`** (`eslint . --max-warnings=0`) — увімкнено лише тому, що і сам скрипт, і
-   `eslint.config.js` справді існують у репозиторії (перевірено, не вигадано).
+   `tsconfig.json` явно виключає `supabase/functions` (`exclude`) — ці файли виконуються в
+   Deno runtime (Supabase Edge Functions), не в Node/React Native застосунку, і мають інший
+   синтаксис (глобал `Deno`, імпорти з явним `.ts`), невалідний для звичайного tsc-проєкту
+   застосунку; перевіряються (за потреби) окремо через Supabase CLI/`deno check`, не тут.
+3. **`npm run lint`** (`eslint . --max-warnings=0`) — `eslint.config.js` виключає
+   `supabase/functions/**` (`ignores`) з тієї ж причини, що й `tsconfig.json` вище (Deno
+   runtime, не Node/React Native застосунок).
 4. **`npm test -- --ci`** (Jest, `jest-expo` preset) — увесь домен/lib (список вище) плюс,
    щойно з'являться (Фаза 3 того самого milestone), repository-інтеграційні тести.
 5. **`npx expo-doctor`** — "Expo health check", `continue-on-error: true` (advisory, не валить
