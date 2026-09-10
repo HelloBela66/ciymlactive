@@ -1,5 +1,23 @@
 # Changelog
 
+## POLYTSIA V1.5 — FINAL REPORT
+
+**Дата:** 2026-09-10
+
+Після завершення всіх 16 фаз — підсумковий звіт за структурою самого ТЗ:
+`docs/FINAL_REPORT.md` (15 розділів: реалізоване, додатково знайдені bugs, міграції, security
+changes, CI status, tests count, repository test coverage, backup round-trip, performance
+findings, files changed, manual device checklist, OWNER ACTION REQUIRED, residual risks, що не
+реалізовано навмисно, рекомендація щодо готовності до V2 Auth).
+
+При зведенні фактів для звіту виявлено, що `docs/SECURITY.md` (розділи 3-4) і
+`docs/V2_READINESS.md` (розділ 7 і статус-нотатка розділу 11) лишались застарілими —
+стверджували "ще не задеплоєно"/"🔴 ВІДКРИТО" для обох знахідок безпеки ISBNdb-ключа й
+`book-covers`, хоча ті самі документи вище (розділи "Оновлення (2026-09-10)") вже
+підтверджували реальний деплой і перевірку власником продукту (Фази 1.1/1.2). Виправлено
+тим самим append-only correction-notes патерном, що й Фаза 14 — жодного факту не
+переписано, лише додано пояснювальні нотатки під застарілими рядками.
+
 ## POLYTSIA V1.5, Фаза 16 — Design Polish
 
 **Дата:** 2026-09-10
