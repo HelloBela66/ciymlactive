@@ -71,7 +71,7 @@ export default function StatisticsScreen() {
             </View>
 
             <AppText variant="caption" color="tertiary" style={{ textAlign: 'center', marginTop: theme.spacing.sm }}>
-              "Сторінок прочитано" — сума приросту сторінок за сесіями (може не збігатись з
+              &quot;Сторінок прочитано&quot; — сума приросту сторінок за сесіями (може не збігатись з
               фактичним обсягом книги, якщо сторінку вказано неточно).
             </AppText>
           </View>

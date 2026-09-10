@@ -6,7 +6,6 @@ import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { RatingRepository } from '@/data/repositories/RatingRepository';
 import { ShelfRepository } from '@/data/repositories/ShelfRepository';
 import { parseGoodreadsCsv, type GoodreadsImportRow } from './goodreadsImport';
-import { queryKeys } from '@/lib/queryKeys';
 import { createLogger } from '@/lib/logger';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
 

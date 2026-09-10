@@ -138,7 +138,7 @@ export const SeriesRepository = {
   async getByIdWithWorks(
     db: SQLiteDatabase,
     id: string,
-  ): Promise<{ series: Series; entries: Array<{ entry: SeriesEntry; work: WorkWithAuthors }> } | null> {
+  ): Promise<{ series: Series; entries: { entry: SeriesEntry; work: WorkWithAuthors }[] } | null> {
     const series = await SeriesRepository.getById(db, id);
     if (!series) return null;
 

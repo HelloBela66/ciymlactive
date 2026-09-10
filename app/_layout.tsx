@@ -91,7 +91,7 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
       <Text style={styles.message}>
         Застосунок наштовхнувся на неочікувану помилку. Спробуй ще раз — жодні дані при цьому
         не втрачаються, усе зберігається в локальній базі одразу під час дії, а не лише в
-        пам'яті екрана.
+        пам&apos;яті екрана.
       </Text>
       <Pressable onPress={retry} accessibilityRole="button" accessibilityLabel="Спробувати ще раз" style={styles.button}>
         <Text style={styles.buttonText}>Спробувати ще раз</Text>

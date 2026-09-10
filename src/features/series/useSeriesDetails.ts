@@ -7,7 +7,7 @@ import type { WorkWithAuthors } from '@/types/work';
 
 export interface SeriesDetails {
   series: Series;
-  entries: Array<{ entry: SeriesEntry; work: WorkWithAuthors }>;
+  entries: { entry: SeriesEntry; work: WorkWithAuthors }[];
 }
 
 /** Повний Series Screen (Milestone 2): серія + всі твори, впорядковані за позицією. */

@@ -143,7 +143,7 @@ export const SharedCatalogClient = {
    * ніколи не має заблокувати чи зіпсувати локальне збереження книги користувачу. */
   async upsertBook(input: CatalogUpsertInput): Promise<string | null> {
     if (!input.isbn13 && !input.isbn10) return null;
-    const rows = await callRpc<Array<{ id: string }>>('catalog_upsert_book', {
+    const rows = await callRpc<{ id: string }[]>('catalog_upsert_book', {
       p_isbn13: input.isbn13 ?? null,
       p_isbn10: input.isbn10 ?? null,
       p_title: input.title,

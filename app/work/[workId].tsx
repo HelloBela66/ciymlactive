@@ -65,7 +65,7 @@ function parseOptionalPage(raw: string): number | undefined {
 
 function EditionCard({ edition }: { edition: EditionWithRelations }) {
   const theme = useTheme();
-  const rows: Array<[string, string]> = [];
+  const rows: [string, string][] = [];
 
   if (edition.publisher) rows.push(['Видавництво', edition.publisher.name]);
   if (edition.publicationYear) rows.push(['Рік видання', String(edition.publicationYear)]);
@@ -518,7 +518,6 @@ function LibrarySection({
  * дозволити почати другу паралельну сесію (докладніше — ReadingSessionRepository).
  */
 function ReadingControls({ userBook }: { userBook: UserBook }) {
-  const theme = useTheme();
   const { data: activeSession } = useActiveSession();
   const startSession = useStartSession();
 
@@ -850,7 +849,7 @@ function JournalSection({ userBookId, editionId }: { userBookId: string; edition
 
       {(!entries || entries.length === 0) && !showForm ? (
         <AppText variant="caption" color="tertiary">
-          Ще немає жодного запису — думки, питання чи улюблені цитати про цю книгу з'являться
+          Ще немає жодного запису — думки, питання чи улюблені цитати про цю книгу з&apos;являться
           тут.
         </AppText>
       ) : null}

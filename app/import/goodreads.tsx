@@ -80,12 +80,13 @@ export default function GoodreadsImportScreen() {
               <Card style={{ gap: theme.spacing.sm }}>
                 <AppText variant="heading">Імпорт з Goodreads</AppText>
                 <AppText variant="body" color="secondary">
-                  На сайті Goodreads: "My Books" → внизу списку полиць посилання "Import and
-                  export" → "Export Library". За кілька хвилин на пошту прийде лист із
-                  посиланням на CSV-файл — обери його нижче.
+                  На сайті Goodreads: &quot;My Books&quot; → внизу списку полиць посилання
+                  &quot;Import and export&quot; → &quot;Export Library&quot;. За кілька хвилин
+                  на пошту прийде лист із посиланням на CSV-файл — обери його нижче.
                 </AppText>
                 <AppText variant="body" color="secondary">
-                  Полиці "read"/"currently-reading"/"to-read" стануть статусом книги, власні
+                  Полиці &quot;read&quot;/&quot;currently-reading&quot;/&quot;to-read&quot;
+                  стануть статусом книги, власні
                   полиці — полицями застосунку, оцінки й дати прочитання перенесуться теж.
                   Дублікати не перевіряються — не імпортуй той самий файл двічі.
                 </AppText>

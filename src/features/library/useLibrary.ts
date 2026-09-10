@@ -2,8 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getDatabase } from '@/data/db';
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { queryKeys } from '@/lib/queryKeys';
-import type { UserBookStatus } from '@/types/userBook';
-import type { UserBookWithDetails } from '@/types/userBook';
+import type { UserBookStatus, UserBookWithDetails } from '@/types/userBook';
 
 /** Книги користувача з певним статусом — вкладки Бібліотеки (Milestone 2). */
 export function useLibraryByStatus(status: UserBookStatus) {

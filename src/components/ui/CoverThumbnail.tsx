@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { AppText } from './AppText';
@@ -67,15 +67,21 @@ export function CoverThumbnail({
   const [hasError, setHasError] = useState(false);
   const radius = borderRadius ?? theme.radius.sm;
   const trimmedUrl = coverUrl?.trim();
-  const showImage = !!trimmedUrl && !hasError;
 
   // Той самий `CoverThumbnail` рендерить різні книги при повторному використанні того самого
   // компонента в списку (React переставляє/перевикористовує instance за key), а `hasError` —
   // локальний стан конкретного instance: без скидання при зміні `coverUrl` помилка одного
   // зображення "прилипає" й до наступної книги, чий `coverUrl` міг завантажитись успішно.
-  useEffect(() => {
+  // Скидання просто під час рендеру (React-рекомендований патерн для "стан залежить від
+  // пропа", а не через `useEffect`) — уникає зайвого проміжного кадру зі старою помилкою
+  // перед тим, як ефект встиг би відпрацювати.
+  const [prevTrimmedUrl, setPrevTrimmedUrl] = useState(trimmedUrl);
+  if (trimmedUrl !== prevTrimmedUrl) {
+    setPrevTrimmedUrl(trimmedUrl);
     setHasError(false);
-  }, [trimmedUrl]);
+  }
+
+  const showImage = !!trimmedUrl && !hasError;
 
   if (showImage) {
     return (

@@ -10,7 +10,7 @@ interface ChipOption<T extends string> {
 
 interface ChipSelectProps<T extends string> {
   label: string;
-  options: ReadonlyArray<ChipOption<T>>;
+  options: readonly ChipOption<T>[];
   value: T;
   onChange: (value: T) => void;
   /** Блокує всі чипи (наприклад, поки триває мутація зміни статусу) — запобігає подвійному

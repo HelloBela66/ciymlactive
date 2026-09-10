@@ -3,19 +3,12 @@ import { Text, TextProps } from 'react-native';
 import { useTheme } from '@/design/ThemeProvider';
 import type { TypeScaleEntry } from '@/design/tokens';
 
+type AppTextVariant = 'display' | 'title' | 'heading' | 'body' | 'caption' | 'micro';
+
 interface AppTextProps extends TextProps {
-  variant?: keyof typeof variantKeys;
+  variant?: AppTextVariant;
   color?: 'primary' | 'secondary' | 'tertiary' | 'accent' | 'danger' | 'onAccent';
 }
-
-const variantKeys = {
-  display: true,
-  title: true,
-  heading: true,
-  body: true,
-  caption: true,
-  micro: true,
-} as const;
 
 /**
  * Єдиний текстовий компонент застосунку: гарантує, що всі написи використовують

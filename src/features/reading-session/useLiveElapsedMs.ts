@@ -17,6 +17,9 @@ export function useLiveElapsedMs(session: ReadingSession | null | undefined): nu
     if (!session || session.endedAt) return;
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- навмисно лише id/endedAt: новий
+    // об'єкт session з тими самими id/endedAt (наприклад, після рефетчу активної сесії) не
+    // повинен перезапускати setInterval і збивати відлік секунди.
   }, [session?.id, session?.endedAt]);
 
   if (!session) return 0;
