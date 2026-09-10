@@ -106,6 +106,14 @@ sync/catalog backend, але жодна читацька дія (старт се
     фіксованих значень із самого ТЗ. Проставляється ОКРЕМОЮ мутацією
     (`ReadingSessionRepository.setReadingExperience`) вже ПІСЛЯ того, як сесію збережено
     (`finish()`), не є частиною тієї самої транзакції.
+11. **011_revisit_later** — «Повернутися пізніше» (POLYTSIA V1.5, Фаза 11). Додає до `note` і
+    `quote` по одній колонці `revisit_later INTEGER NOT NULL DEFAULT 0` (простий `ALTER TABLE
+    ADD COLUMN` для обох — той самий прапорцевий патерн, що й `is_favorite` у 003: `DEFAULT 0`,
+    а не nullable, бо це "так/ні"-прапорець, а не справді необов'язкове поле на кшталт
+    `reading_experience` з 010; CHECK не потрібен, rebuild таблиці не знадобився). Індекси
+    `idx_note_revisit_later`/`idx_quote_revisit_later` — той самий привід, що й
+    `idx_note_favorite`/`idx_quote_favorite`: `JournalRepository` фільтрує за цим полем
+    (`revisitLaterOnly`) так само, як за `is_favorite`.
 - Усі зовнішні ключі з `PRAGMA foreign_keys = ON`.
 - Дати зберігаються як ISO-8601 `TEXT` (UTC), не Unix timestamp — легше дебажити, легше
   експортувати в JSON/CSV без конвертацій.
@@ -378,7 +386,8 @@ CREATE INDEX idx_progress_user_book ON reading_progress(user_book_id, recorded_a
 -- ПРИМІТКА: показано в актуальному вигляді ПІСЛЯ Migration 003 (`003_journal_entry_extensions.ts`,
 -- Milestone 11) — `type` CHECK і `is_favorite`/`reaction` з'явились там (перебудова таблиці,
 -- та сама причина, що й у 002: SQLite не підтримує ALTER CHECK напряму). Migration 001
--- створює `note` ще без `'moment'`/`is_favorite`/`reaction`.
+-- створює `note` ще без `'moment'`/`is_favorite`/`reaction`. `revisit_later` додано
+-- Migration 011 (POLYTSIA V1.5, Фаза 11) — простим `ALTER TABLE ADD COLUMN`.
 CREATE TABLE note (
   id TEXT PRIMARY KEY,
   user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
@@ -390,6 +399,7 @@ CREATE TABLE note (
   tags TEXT NOT NULL DEFAULT '[]',    -- JSON string[]
   is_favorite INTEGER NOT NULL DEFAULT 0,
   reaction TEXT,                      -- вільний рядок, без CHECK — список ще узгоджується в UI
+  revisit_later INTEGER NOT NULL DEFAULT 0,  -- Migration 011 — «Повернутися пізніше»
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT
@@ -399,10 +409,11 @@ CREATE INDEX idx_note_user_book ON note(user_book_id);
 CREATE INDEX idx_note_type ON note(type);
 CREATE INDEX idx_note_favorite ON note(is_favorite);
 CREATE INDEX idx_note_created_at ON note(created_at);
+CREATE INDEX idx_note_revisit_later ON note(revisit_later);
 
 -- ПРИМІТКА: `progress_percent`/`tags`/`is_favorite`/`reaction` додані Migration 003 —
 -- простим `ALTER TABLE ADD COLUMN` (тут немає CHECK на "тип", тож rebuild не знадобився,
--- на відміну від `note` вище).
+-- на відміну від `note` вище). `revisit_later` додано Migration 011, тим самим способом.
 CREATE TABLE quote (
   id TEXT PRIMARY KEY,
   user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
@@ -415,6 +426,7 @@ CREATE TABLE quote (
   tags TEXT NOT NULL DEFAULT '[]',
   is_favorite INTEGER NOT NULL DEFAULT 0,
   reaction TEXT,
+  revisit_later INTEGER NOT NULL DEFAULT 0,  -- Migration 011 — «Повернутися пізніше»
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT
@@ -423,6 +435,7 @@ CREATE TABLE quote (
 CREATE INDEX idx_quote_user_book ON quote(user_book_id);
 CREATE INDEX idx_quote_favorite ON quote(is_favorite);
 CREATE INDEX idx_quote_created_at ON quote(created_at);
+CREATE INDEX idx_quote_revisit_later ON quote(revisit_later);
 
 CREATE TABLE rating (
   id TEXT PRIMARY KEY,
@@ -566,6 +579,8 @@ CREATE TABLE app_settings (
   `quote(created_at)` (Milestone 11) — фільтр/сортування щоденника (по книзі/сесії через
   `JournalRepository.listPage`, глобально через `JournalRepository.listFeedPage`, Фаза 4) на
   боці SQLite, без сканування в JS.
+- `note(revisit_later)`, `quote(revisit_later)` (POLYTSIA V1.5, Фаза 11) — той самий привід, що
+  й `is_favorite` вище: `revisitLaterOnly` фільтр у тих самих `listPage`/`listFeedPage`.
 - Пагінація скрізь через `LIMIT/OFFSET` з `ORDER BY <indexed column>`, для нескінченного
   скролу — keyset pagination на `updated_at, id` там, де OFFSET стає повільним (>2000 рядків).
   `JournalRepository.listPage`/`listFeedPage` уже реалізують keyset на `(created_at, id)` —

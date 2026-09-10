@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Pressable, FlatList, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, Stack } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { format, isToday, isYesterday, parseISO, startOfDay, startOfWeek, startOfMonth, endOfDay } from 'date-fns';
@@ -17,6 +17,7 @@ import { useTheme } from '@/design/ThemeProvider';
 import { journalEntryTypeLabels } from '@/design/i18n-labels';
 import { REACTION_ORDER, REACTION_META, REACTION_COUNT_FORMS, type ReactionId } from '@/design/reactions';
 import { ReactionToggle } from '@/components/journal/ReactionPicker';
+import { RevisitLaterToggle } from '@/components/journal/RevisitLaterToggle';
 import { getDatabase } from '@/data/db';
 import { WorkRepository, type WorkSearchResult } from '@/data/repositories/WorkRepository';
 import { queryKeys } from '@/lib/queryKeys';
@@ -26,6 +27,7 @@ import {
   useJournalGlobalCount,
   useJournalReactionCounts,
   useToggleJournalFavorite,
+  useToggleJournalRevisitLater,
   useSetJournalReaction,
 } from '@/features/journal/useJournal';
 import { pluralizeUk } from '@/lib/pluralizeUk';
@@ -120,6 +122,7 @@ function feedEntryLabel(entry: JournalFeedEntry): string {
 const JournalEntryRow = React.memo(function JournalEntryRow({ entry }: { entry: JournalFeedEntry }) {
   const theme = useTheme();
   const toggleFavorite = useToggleJournalFavorite();
+  const toggleRevisitLater = useToggleJournalRevisitLater();
   const setReaction = useSetJournalReaction();
 
   return (
@@ -148,9 +151,10 @@ const JournalEntryRow = React.memo(function JournalEntryRow({ entry }: { entry: 
               </AppText>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: -theme.spacing.sm, marginRight: -theme.spacing.sm }}>
-              {/* Той самий порядок "реакція → обране", що й у `SessionJournalEntries`/
-               * `JournalSection` (`app/session/[sessionId].tsx`, `app/work/[workId].tsx`) —
-               * узгоджено між усіма трьома місцями показу записів щоденника. */}
+              {/* Той самий порядок "реакція → повернутися пізніше → обране", що й у
+               * `SessionJournalEntries`/`JournalSection` (`app/session/[sessionId].tsx`,
+               * `app/work/[workId].tsx`) — узгоджено між усіма трьома місцями показу записів
+               * щоденника. */}
               <ReactionToggle
                 value={entry.reaction}
                 onChange={(reaction) =>
@@ -159,6 +163,18 @@ const JournalEntryRow = React.memo(function JournalEntryRow({ entry }: { entry: 
                     kind: entry.kind,
                     userBookId: entry.userBookId,
                     reaction,
+                    sessionId: entry.sessionId,
+                  })
+                }
+              />
+              <RevisitLaterToggle
+                value={entry.revisitLater}
+                onChange={(revisitLater) =>
+                  toggleRevisitLater.mutate({
+                    id: entry.id,
+                    kind: entry.kind,
+                    userBookId: entry.userBookId,
+                    revisitLater,
                     sessionId: entry.sessionId,
                   })
                 }
@@ -391,6 +407,8 @@ function JournalListHeader({
   onTypeFilterChange,
   favoriteOnly,
   onToggleFavoriteOnly,
+  revisitLaterOnly,
+  onToggleRevisitLaterOnly,
   searchQuery,
   onSearchQueryChange,
   reactionFilter,
@@ -405,6 +423,8 @@ function JournalListHeader({
   onTypeFilterChange: (value: TypeFilterValue) => void;
   favoriteOnly: boolean;
   onToggleFavoriteOnly: () => void;
+  revisitLaterOnly: boolean;
+  onToggleRevisitLaterOnly: () => void;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
   reactionFilter: ReactionFilterValue;
@@ -507,6 +527,35 @@ function JournalListHeader({
             Лише обране
           </AppText>
         </Pressable>
+        {/* ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — «У Journal додай filter». Той самий
+         * pill-Pressable-патерн, що й "Лише обране" вище, з іконкою bookmark замість heart. */}
+        <Pressable
+          onPress={onToggleRevisitLaterOnly}
+          accessibilityRole="button"
+          accessibilityState={{ selected: revisitLaterOnly }}
+          accessibilityLabel="Показувати лише «Повернутися пізніше»"
+          style={{
+            alignSelf: 'flex-start',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.spacing.xs,
+            paddingHorizontal: theme.spacing.md,
+            minHeight: theme.minTouchTarget,
+            borderRadius: theme.radius.pill,
+            backgroundColor: revisitLaterOnly ? theme.colors.accent : theme.colors.surface,
+            borderWidth: 1,
+            borderColor: revisitLaterOnly ? theme.colors.accent : theme.colors.border,
+          }}
+        >
+          <Ionicons
+            name={revisitLaterOnly ? 'bookmark' : 'bookmark-outline'}
+            size={14}
+            color={revisitLaterOnly ? theme.colors.onAccent : theme.colors.textSecondary}
+          />
+          <AppText variant="caption" color={revisitLaterOnly ? 'onAccent' : 'secondary'}>
+            Повернутися пізніше
+          </AppText>
+        </Pressable>
         <BookFilterPicker selectedWork={selectedWork} onSelect={onSelectWork} onClear={onClearWork} />
         <ChipSelect
           label="Реакція"
@@ -535,8 +584,16 @@ function JournalListHeader({
 export default function JournalScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  // ТЗ Фази 11 — CTA «Переглянути» на підсумку читання (`app/completion/[workId].tsx`) веде
+  // сюди з `?revisitLater=1`, щоб одразу показати вже відфільтрований список, а не голий
+  // щоденник, у якому користувачу довелось би самому шукати й вмикати фільтр. Читається лише
+  // один раз при монтуванні (початкове значення `useState`) — навмисно, а не постійна
+  // синхронізація з параметром: користувач і далі може сам вимкнути фільтр на цьому екрані,
+  // не борючись із параметром маршруту при кожному рендері.
+  const params = useLocalSearchParams<{ revisitLater?: string }>();
   const [typeFilter, setTypeFilter] = useState<TypeFilterValue>('all');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [revisitLaterOnly, setRevisitLaterOnly] = useState(params.revisitLater === '1');
   const [searchQuery, setSearchQuery] = useState('');
   const [reactionFilter, setReactionFilter] = useState<ReactionFilterValue>('all');
   const [dateFilter, setDateFilter] = useState<DateFilterValue>('all');
@@ -547,6 +604,7 @@ export default function JournalScreen() {
 
   const { data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useJournalFeed({
     favoriteOnly,
+    revisitLaterOnly,
     types: typeFilter === 'all' ? null : [typeFilter],
     query: debouncedQuery.trim() || undefined,
     reaction: reactionFilter === 'all' ? undefined : reactionFilter,
@@ -578,6 +636,7 @@ export default function JournalScreen() {
   const hasActiveFilters =
     typeFilter !== 'all' ||
     favoriteOnly ||
+    revisitLaterOnly ||
     debouncedQuery.trim().length > 0 ||
     reactionFilter !== 'all' ||
     dateFilter !== 'all' ||
@@ -606,6 +665,8 @@ export default function JournalScreen() {
               onTypeFilterChange={setTypeFilter}
               favoriteOnly={favoriteOnly}
               onToggleFavoriteOnly={() => setFavoriteOnly((v) => !v)}
+              revisitLaterOnly={revisitLaterOnly}
+              onToggleRevisitLaterOnly={() => setRevisitLaterOnly((v) => !v)}
               searchQuery={searchQuery}
               onSearchQueryChange={setSearchQuery}
               reactionFilter={reactionFilter}

@@ -67,6 +67,9 @@ export const queryKeys = {
     // цей, щоб глобальна стрічка/бейдж лишались синхронними без окремого дублювання логіки.
     byUserBook: (userBookId: string) => ['journal', 'byUserBook', userBookId] as const,
     favoritesByUserBook: (userBookId: string) => ['journal', 'favoritesByUserBook', userBookId] as const,
+    // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий "малий список по одній книзі"
+    // ключ, що й `favoritesByUserBook` вище.
+    revisitLaterByUserBook: (userBookId: string) => ['journal', 'revisitLaterByUserBook', userBookId] as const,
     countByUserBook: (userBookId: string) => ['journal', 'countByUserBook', userBookId] as const,
     bySession: (sessionId: string) => ['journal', 'bySession', sessionId] as const,
     // Параметризований фільтрами (Фаза 4; розширено пошуковими фільтрами — Фаза 7) — щоб
@@ -76,6 +79,8 @@ export const queryKeys = {
     // набору фільтрів, не лише поточного.
     feed: (filters: {
       favoriteOnly: boolean;
+      // POLYTSIA V1.5, Фаза 11 — той самий "лише позначені" фільтр, що й `favoriteOnly`.
+      revisitLaterOnly: boolean;
       types: string[] | null;
       query?: string | null;
       reaction?: string | null;

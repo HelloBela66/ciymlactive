@@ -128,4 +128,64 @@ describe('migrateDbIfNeeded', () => {
     // fallback-значення (на відміну від `shelf.theme` вище).
     expect(session?.reading_experience).toBeNull();
   });
+
+  it('нова міграція (011: note/quote.revisit_later) застосовується на seed-БД версії 10 без втрати даних', async () => {
+    // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий сценарій "populated DB", що й
+    // тести 009/010 вище: старий рядок note/quote (без `revisit_later`) має після міграції
+    // отримати `0`, а не NULL — це прапорцеве поле (`DEFAULT 0`), той самий вибір, що й
+    // `is_favorite` у 003, а не необов'язкове поле на кшталт `reading_experience` з 010.
+    const db = await openTestDatabase();
+
+    await __applyMigrationsForTests(db, 10);
+    const beforeVersion = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+    expect(beforeVersion?.user_version).toBe(10);
+
+    const now = new Date().toISOString();
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-1',
+      'Книга 1',
+      now,
+      now,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга 1', 'uk', 'paperback', now, now],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,?,?,?,?)`,
+      ['user_book-1', 'edition-1', 'reading', 0, now, now],
+    );
+    // Рядки note/quote, створені "попередньою версією застосунку" — до появи стовпця
+    // `revisit_later`, з уже заповненим `is_favorite` (Migration 003), щоб перевірити, що
+    // rebuild його не зачепив (тут навіть простіше — 011 теж простий `ALTER TABLE ADD COLUMN`).
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, text, is_favorite, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      ['note-1', 'user_book-1', 'thought', 'Нотатка до міграції 011', 1, now, now],
+    );
+    await db.runAsync(
+      `INSERT INTO quote (id, user_book_id, edition_id, text, is_favorite, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      ['quote-1', 'user_book-1', 'edition-1', 'Цитата до міграції 011', 0, now, now],
+    );
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const note = await db.getFirstAsync<{ id: string; text: string; is_favorite: number; revisit_later: number }>(
+      `SELECT id, text, is_favorite, revisit_later FROM note WHERE id = ?`,
+      ['note-1'],
+    );
+    const quote = await db.getFirstAsync<{ id: string; text: string; revisit_later: number }>(
+      `SELECT id, text, revisit_later FROM quote WHERE id = ?`,
+      ['quote-1'],
+    );
+    expect(note).not.toBeNull();
+    expect(note?.text).toBe('Нотатка до міграції 011');
+    expect(note?.is_favorite).toBe(1);
+    expect(note?.revisit_later).toBe(0);
+    expect(quote).not.toBeNull();
+    expect(quote?.text).toBe('Цитата до міграції 011');
+    expect(quote?.revisit_later).toBe(0);
+  });
 });

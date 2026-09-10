@@ -18,6 +18,10 @@ function entry(overrides: Partial<JournalEntry> & Pick<JournalEntry, 'id'>): Jou
     comment: null,
     tags: [],
     isFavorite: false,
+    // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — заглушка на кшталт `isFavorite` вище,
+    // не впливає на позиціонування/категорію маркера, тож не є частиною `overrides` у жодному
+    // з тестів нижче.
+    revisitLater: false,
     reaction: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

@@ -14,6 +14,9 @@ export const QuoteSchema = z.object({
   progressPercent: z.number().nullable(),
   tags: z.array(z.string()),
   isFavorite: z.boolean(),
+  // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий boolean-прапорець-патерн, що й
+  // `isFavorite` вище (`011_revisit_later.ts`).
+  revisitLater: z.boolean(),
   reaction: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -30,9 +30,11 @@ import {
   useJournalEntries,
   useJournalCount,
   useToggleJournalFavorite,
+  useToggleJournalRevisitLater,
   useSetJournalReaction,
 } from '@/features/journal/useJournal';
 import { ReactionToggle } from '@/components/journal/ReactionPicker';
+import { RevisitLaterToggle } from '@/components/journal/RevisitLaterToggle';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { formatDuration } from '@/lib/sessionTiming';
@@ -661,6 +663,7 @@ function JournalSection({ userBookId, editionId }: { userBookId: string; edition
   const removeNote = useRemoveNote();
   const removeQuote = useRemoveQuote();
   const toggleFavorite = useToggleJournalFavorite();
+  const toggleRevisitLater = useToggleJournalRevisitLater();
   const setReaction = useSetJournalReaction();
 
   const { data: categories } = useAllNoteCategories(userBookId);
@@ -792,6 +795,18 @@ function JournalSection({ userBookId, editionId }: { userBookId: string; edition
                 value={entry.reaction}
                 onChange={(reaction) =>
                   setReaction.mutate({ id: entry.id, kind: entry.kind, userBookId, reaction, sessionId: entry.sessionId })
+                }
+              />
+              <RevisitLaterToggle
+                value={entry.revisitLater}
+                onChange={(revisitLater) =>
+                  toggleRevisitLater.mutate({
+                    id: entry.id,
+                    kind: entry.kind,
+                    userBookId,
+                    revisitLater,
+                    sessionId: entry.sessionId,
+                  })
                 }
               />
               <Pressable

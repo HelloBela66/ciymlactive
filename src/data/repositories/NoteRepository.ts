@@ -14,6 +14,7 @@ interface NoteRow {
   text: string;
   tags: string;
   is_favorite: number;
+  revisit_later: number;
   reaction: string | null;
   created_at: string;
   updated_at: string;
@@ -40,6 +41,7 @@ function mapRow(row: NoteRow): Note {
     text: row.text,
     tags: parseTags(row.tags),
     isFavorite: row.is_favorite === 1,
+    revisitLater: row.revisit_later === 1,
     reaction: row.reaction,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -64,8 +66,8 @@ export const NoteRepository = {
     await db.runAsync(
       `INSERT INTO note (
          id, user_book_id, session_id, page, progress_percent, type, category_id, text, tags,
-         is_favorite, reaction, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+         is_favorite, revisit_later, reaction, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, ?)`,
       [
         id,
         input.userBookId,
@@ -92,6 +94,7 @@ export const NoteRepository = {
       text: input.text,
       tags,
       isFavorite: false,
+      revisitLater: false,
       reaction: null,
       createdAt: now,
       updatedAt: now,
@@ -123,5 +126,14 @@ export const NoteRepository = {
    * див. коментар у `003_journal_entry_extensions.ts`. */
   async setReaction(db: SQLiteDatabase, id: string, reaction: string | null): Promise<void> {
     await db.runAsync(`UPDATE note SET reaction = ?, updated_at = ? WHERE id = ?`, [reaction, nowIso(), id]);
+  },
+
+  /** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий патерн, що й `setFavorite` вище. */
+  async setRevisitLater(db: SQLiteDatabase, id: string, revisitLater: boolean): Promise<void> {
+    await db.runAsync(`UPDATE note SET revisit_later = ?, updated_at = ? WHERE id = ?`, [
+      revisitLater ? 1 : 0,
+      nowIso(),
+      id,
+    ]);
   },
 };

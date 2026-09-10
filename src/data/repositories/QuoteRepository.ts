@@ -14,6 +14,7 @@ interface QuoteRow {
   progress_percent: number | null;
   tags: string;
   is_favorite: number;
+  revisit_later: number;
   reaction: string | null;
   created_at: string;
   updated_at: string;
@@ -40,6 +41,7 @@ function mapRow(row: QuoteRow): Quote {
     progressPercent: row.progress_percent,
     tags: parseTags(row.tags),
     isFavorite: row.is_favorite === 1,
+    revisitLater: row.revisit_later === 1,
     reaction: row.reaction,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -61,8 +63,8 @@ export const QuoteRepository = {
     await db.runAsync(
       `INSERT INTO quote (
          id, user_book_id, edition_id, session_id, page, text, comment,
-         progress_percent, tags, is_favorite, reaction, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+         progress_percent, tags, is_favorite, revisit_later, reaction, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, ?)`,
       [
         id,
         input.userBookId,
@@ -89,6 +91,7 @@ export const QuoteRepository = {
       progressPercent,
       tags,
       isFavorite: false,
+      revisitLater: false,
       reaction: null,
       createdAt: now,
       updatedAt: now,
@@ -117,5 +120,14 @@ export const QuoteRepository = {
 
   async setReaction(db: SQLiteDatabase, id: string, reaction: string | null): Promise<void> {
     await db.runAsync(`UPDATE quote SET reaction = ?, updated_at = ? WHERE id = ?`, [reaction, nowIso(), id]);
+  },
+
+  /** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий патерн, що й `setFavorite` вище. */
+  async setRevisitLater(db: SQLiteDatabase, id: string, revisitLater: boolean): Promise<void> {
+    await db.runAsync(`UPDATE quote SET revisit_later = ?, updated_at = ? WHERE id = ?`, [
+      revisitLater ? 1 : 0,
+      nowIso(),
+      id,
+    ]);
   },
 };

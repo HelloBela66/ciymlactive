@@ -19,6 +19,9 @@ describe('invalidateJournal', () => {
     expect(invalidatedKeys(queryClient)).toEqual([
       queryKeys.journal.byUserBook('ub1'),
       queryKeys.journal.favoritesByUserBook('ub1'),
+      // ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий "малий список по одній книзі" ключ, що
+      // й `favoritesByUserBook` вище.
+      queryKeys.journal.revisitLaterByUserBook('ub1'),
       queryKeys.journal.countByUserBook('ub1'),
       ['journal', 'feed'],
       queryKeys.journal.countAll,
@@ -34,7 +37,8 @@ describe('invalidateJournal', () => {
     invalidateJournal(queryClient, 'ub1', 'sess1');
 
     const keys = invalidatedKeys(queryClient);
-    expect(keys).toHaveLength(8);
+    // Фаза 11 додала ще один базовий ключ (`revisitLaterByUserBook`) — було 8, стало 9.
+    expect(keys).toHaveLength(9);
     expect(keys).toContainEqual(queryKeys.journal.bySession('sess1'));
   });
 
@@ -42,7 +46,8 @@ describe('invalidateJournal', () => {
     const queryClient = createMockQueryClient();
     invalidateJournal(queryClient, 'ub1', null);
 
-    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(7);
+    // Фаза 11 додала ще один базовий виклик (`revisitLaterByUserBook`) — було 7, стало 8.
+    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(8);
   });
 
   it('стрічку інвалідує за спільним префіксом ["journal", "feed"], а не за конкретними фільтрами', () => {

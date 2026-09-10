@@ -13,6 +13,7 @@ import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { NoteCategoryPicker, type NoteCategoryValue } from '@/components/session/NoteCategoryPicker';
 import { ReadingExperiencePicker } from '@/components/session/ReadingExperiencePicker';
 import { ReactionChips, ReactionToggle } from '@/components/journal/ReactionPicker';
+import { RevisitLaterToggle } from '@/components/journal/RevisitLaterToggle';
 import { useTheme } from '@/design/ThemeProvider';
 import { REACTION_META, type ReactionId } from '@/design/reactions';
 import type { ReadingExperienceId } from '@/design/readingExperience';
@@ -31,6 +32,7 @@ import { useCreateQuote, useRemoveQuote } from '@/features/quotes/useQuotes';
 import {
   useJournalBySession,
   useToggleJournalFavorite,
+  useToggleJournalRevisitLater,
   useSetJournalReaction,
   useJournalDraft,
   useSaveJournalDraft,
@@ -774,6 +776,7 @@ function SessionJournalEntries({ sessionId, userBookId }: { sessionId: string; u
   const removeNote = useRemoveNote();
   const removeQuote = useRemoveQuote();
   const toggleFavorite = useToggleJournalFavorite();
+  const toggleRevisitLater = useToggleJournalRevisitLater();
   const setReaction = useSetJournalReaction();
 
   if (!entries || entries.length === 0) return null;
@@ -804,6 +807,18 @@ function SessionJournalEntries({ sessionId, userBookId }: { sessionId: string; u
                 value={entry.reaction}
                 onChange={(reaction) =>
                   setReaction.mutate({ id: entry.id, kind: entry.kind, userBookId, reaction, sessionId: entry.sessionId })
+                }
+              />
+              <RevisitLaterToggle
+                value={entry.revisitLater}
+                onChange={(revisitLater) =>
+                  toggleRevisitLater.mutate({
+                    id: entry.id,
+                    kind: entry.kind,
+                    userBookId,
+                    revisitLater,
+                    sessionId: entry.sessionId,
+                  })
                 }
               />
               <Pressable

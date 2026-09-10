@@ -171,3 +171,54 @@ describe('JournalRepository — фільтри пошуку (Фаза 7)', () =>
     expect(noEffect.items.map((i) => i.id).sort()).toEqual(['note-1', 'quote-1']);
   });
 });
+
+/**
+ * ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — `revisitLaterOnly` фільтр у `listPage`/`listFeedPage`
+ * і `listRevisitLaterByUserBookId`. `seedTwoBooksWithEntries` вище нічого не проставляє в
+ * `revisit_later` (стовпець `DEFAULT 0`), тож тут позначаємо конкретні рядки напряму SQL —
+ * той самий підхід, що вже використовує `reaction` у сидінгу вище, лише мутація йде окремим
+ * `UPDATE` після сидінгу, а не в самому INSERT (перевіряє саме шлях "користувач позначив
+ * пізніше", а не "запис одразу створено позначеним").
+ */
+describe('JournalRepository — «Повернутися пізніше» (Фаза 11)', () => {
+  it('listFeedPage: revisitLaterOnly звужує глобальну стрічку до позначених записів', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksWithEntries(db);
+    await db.runAsync(`UPDATE note SET revisit_later = 1 WHERE id = ?`, ['note-1']);
+    await db.runAsync(`UPDATE quote SET revisit_later = 1 WHERE id = ?`, ['quote-2']);
+
+    const revisitLater = await JournalRepository.listFeedPage(db, { revisitLaterOnly: true });
+    expect(revisitLater.items.map((i) => i.id).sort()).toEqual(['note-1', 'quote-2']);
+    expect(revisitLater.items.every((i) => i.revisitLater)).toBe(true);
+
+    // Комбінується з іншими фільтрами (workId) — той самий принцип, що й `favoriteOnly`.
+    const combined = await JournalRepository.listFeedPage(db, { revisitLaterOnly: true, workId: 'work-1' });
+    expect(combined.items.map((i) => i.id)).toEqual(['note-1']);
+  });
+
+  it('listPage: revisitLaterOnly звужує список записів однієї книги', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksWithEntries(db);
+    await db.runAsync(`UPDATE quote SET revisit_later = 1 WHERE id = ?`, ['quote-1']);
+
+    const revisitLater = await JournalRepository.listPage(db, { userBookId: 'user_book-1', revisitLaterOnly: true });
+    expect(revisitLater.items.map((i) => i.id)).toEqual(['quote-1']);
+
+    const none = await JournalRepository.listPage(db, { userBookId: 'user_book-2', revisitLaterOnly: true });
+    expect(none.items).toEqual([]);
+  });
+
+  it('listRevisitLaterByUserBookId: повертає лише позначені записи конкретної книги', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksWithEntries(db);
+    await db.runAsync(`UPDATE note SET revisit_later = 1 WHERE id = ?`, ['note-1']);
+    await db.runAsync(`UPDATE quote SET revisit_later = 1 WHERE id = ?`, ['quote-1']);
+    // work-2 лишається зовсім без позначених — підтверджує, що список саме per-book, а не
+    // глобальний.
+    const book1 = await JournalRepository.listRevisitLaterByUserBookId(db, 'user_book-1');
+    expect(book1.map((i) => i.id).sort()).toEqual(['note-1', 'quote-1']);
+
+    const book2 = await JournalRepository.listRevisitLaterByUserBookId(db, 'user_book-2');
+    expect(book2).toEqual([]);
+  });
+});

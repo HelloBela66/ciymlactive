@@ -16,6 +16,7 @@ interface JournalUnionRow {
   comment: string | null;
   tags: string;
   is_favorite: number;
+  revisit_later: number;
   reaction: string | null;
   created_at: string;
   updated_at: string;
@@ -77,6 +78,7 @@ function mapRow(row: JournalUnionRow): JournalEntry {
     comment: row.comment,
     tags: parseTags(row.tags),
     isFavorite: row.is_favorite === 1,
+    revisitLater: row.revisit_later === 1,
     reaction: row.reaction,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -109,6 +111,9 @@ export interface JournalListPageOptions {
   limit?: number;
   cursor?: JournalEntryCursor | null;
   favoriteOnly?: boolean;
+  /** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий "лише позначені" фільтр, що й
+   * `favoriteOnly`, лише за іншим прапорцем (`revisit_later`, `011_revisit_later.ts`). */
+  revisitLaterOnly?: boolean;
   /** Якщо задано — лишає лише ці типи. `'quote'` вмикає/вимикає всю гілку `quote`
    * (у `quote` немає власного поля `type` — весь рядок за визначенням є цитатою). */
   types?: JournalEntryType[];
@@ -152,6 +157,7 @@ export const JournalRepository = {
   async listPage(db: SQLiteDatabase, options: JournalListPageOptions = {}): Promise<JournalListPageResult> {
     const limit = options.limit ?? 50;
     const favoriteOnly = options.favoriteOnly ?? false;
+    const revisitLaterOnly = options.revisitLaterOnly ?? false;
     const types = options.types;
     const noteTypes = types ? types.filter((t): t is NoteType => t !== 'quote') : null;
     const includeNotesBranch = types ? noteTypes !== null && noteTypes.length > 0 : true;
@@ -164,7 +170,7 @@ export const JournalRepository = {
 
     if (includeNotesBranch) {
       let sql = `SELECT id, 'note' AS kind, user_book_id, NULL AS edition_id, session_id, page,
-                    progress_percent, type, category_id, text, NULL AS comment, tags, is_favorite, reaction,
+                    progress_percent, type, category_id, text, NULL AS comment, tags, is_favorite, revisit_later, reaction,
                     created_at, updated_at
                   FROM note WHERE deleted_at IS NULL`;
       if (options.userBookId) {
@@ -176,6 +182,7 @@ export const JournalRepository = {
         params.push(options.sessionId);
       }
       if (favoriteOnly) sql += ' AND is_favorite = 1';
+      if (revisitLaterOnly) sql += ' AND revisit_later = 1';
       if (noteTypes && noteTypes.length > 0) {
         sql += ` AND ${buildNoteTypeCondition(noteTypes, params, 'type', 'category_id')}`;
       }
@@ -205,7 +212,7 @@ export const JournalRepository = {
     if (includeQuotesBranch) {
       let sql = `SELECT id, 'quote' AS kind, user_book_id, edition_id, session_id, page,
                     progress_percent, 'quote' AS type, NULL AS category_id, text, comment, tags,
-                    is_favorite, reaction, created_at, updated_at
+                    is_favorite, revisit_later, reaction, created_at, updated_at
                   FROM quote WHERE deleted_at IS NULL`;
       if (options.userBookId) {
         sql += ' AND user_book_id = ?';
@@ -216,6 +223,7 @@ export const JournalRepository = {
         params.push(options.sessionId);
       }
       if (favoriteOnly) sql += ' AND is_favorite = 1';
+      if (revisitLaterOnly) sql += ' AND revisit_later = 1';
       if (options.reaction) {
         sql += ' AND reaction = ?';
         params.push(options.reaction);
@@ -267,6 +275,16 @@ export const JournalRepository = {
   /** Для екрана «Спогад про книгу» — вибір карток за принципом "обране спершу" (п.16 ТЗ). */
   async listFavoritesByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<JournalEntry[]> {
     const { items } = await JournalRepository.listPage(db, { userBookId, favoriteOnly: true, limit: 5000 });
+    return items;
+  },
+
+  /** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — записи книги, позначені «Повернутися пізніше». Той
+   * самий "малий список по одній книзі" підхід, що й `listFavoritesByUserBookId` вище —
+   * використовується і для «Ти залишив N записів...» на екрані підсумку читання
+   * (`app/completion/[workId].tsx`), і для секції «Повернутися до цих думок» на Book Memory
+   * screen (`app/memory/[workId].tsx`). */
+  async listRevisitLaterByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<JournalEntry[]> {
+    const { items } = await JournalRepository.listPage(db, { userBookId, revisitLaterOnly: true, limit: 5000 });
     return items;
   },
 
@@ -351,6 +369,7 @@ export const JournalRepository = {
   ): Promise<{ items: JournalFeedEntry[]; nextCursor: JournalEntryCursor | null }> {
     const limit = options.limit ?? 50;
     const favoriteOnly = options.favoriteOnly ?? false;
+    const revisitLaterOnly = options.revisitLaterOnly ?? false;
     const types = options.types;
     const noteTypes = types ? types.filter((t): t is NoteType => t !== 'quote') : null;
     const includeNotesBranch = types ? noteTypes !== null && noteTypes.length > 0 : true;
@@ -374,13 +393,14 @@ export const JournalRepository = {
       let sql = `SELECT t.id AS id, 'note' AS kind, t.user_book_id AS user_book_id, NULL AS edition_id,
                     t.session_id AS session_id, t.page AS page, t.progress_percent AS progress_percent,
                     t.type AS type, t.category_id AS category_id, t.text AS text, NULL AS comment, t.tags AS tags,
-                    t.is_favorite AS is_favorite, t.reaction AS reaction,
+                    t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                     t.created_at AS created_at, t.updated_at AS updated_at,
                     w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
                     w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label
                   FROM note t${bookJoin} ${categoryJoin}
                   WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
+      if (revisitLaterOnly) sql += ' AND t.revisit_later = 1';
       if (noteTypes && noteTypes.length > 0) {
         sql += ` AND ${buildNoteTypeCondition(noteTypes, params, 't.type', 't.category_id')}`;
       }
@@ -415,13 +435,14 @@ export const JournalRepository = {
       let sql = `SELECT t.id AS id, 'quote' AS kind, t.user_book_id AS user_book_id, t.edition_id AS edition_id,
                     t.session_id AS session_id, t.page AS page, t.progress_percent AS progress_percent,
                     'quote' AS type, NULL AS category_id, t.text AS text, t.comment AS comment, t.tags AS tags,
-                    t.is_favorite AS is_favorite, t.reaction AS reaction,
+                    t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                     t.created_at AS created_at, t.updated_at AS updated_at,
                     w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
                     w.cover_fallback_color AS cover_fallback_color, NULL AS category_label
                   FROM quote t${bookJoin}
                   WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
+      if (revisitLaterOnly) sql += ' AND t.revisit_later = 1';
       if (options.reaction) {
         sql += ' AND t.reaction = ?';
         params.push(options.reaction);
@@ -501,7 +522,7 @@ export const JournalRepository = {
         `SELECT t.id AS id, 'note' AS kind, t.user_book_id AS user_book_id, NULL AS edition_id,
                 t.session_id AS session_id, t.page AS page, t.progress_percent AS progress_percent,
                 t.type AS type, t.category_id AS category_id, t.text AS text, NULL AS comment, t.tags AS tags,
-                t.is_favorite AS is_favorite, t.reaction AS reaction,
+                t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                 t.created_at AS created_at, t.updated_at AS updated_at,
                 w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
                 w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label
@@ -516,7 +537,7 @@ export const JournalRepository = {
         `SELECT t.id AS id, 'quote' AS kind, t.user_book_id AS user_book_id, t.edition_id AS edition_id,
                 t.session_id AS session_id, t.page AS page, t.progress_percent AS progress_percent,
                 'quote' AS type, NULL AS category_id, t.text AS text, t.comment AS comment, t.tags AS tags,
-                t.is_favorite AS is_favorite, t.reaction AS reaction,
+                t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                 t.created_at AS created_at, t.updated_at AS updated_at,
                 w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
                 w.cover_fallback_color AS cover_fallback_color, NULL AS category_label
@@ -548,13 +569,13 @@ export const JournalRepository = {
     const placeholders = userBookIds.map(() => '?').join(',');
     const sql = `
       SELECT id, 'note' AS kind, user_book_id, NULL AS edition_id, session_id, page,
-             progress_percent, type, category_id, text, NULL AS comment, tags, is_favorite, reaction,
+             progress_percent, type, category_id, text, NULL AS comment, tags, is_favorite, revisit_later, reaction,
              created_at, updated_at
         FROM note WHERE deleted_at IS NULL AND user_book_id IN (${placeholders})
       UNION ALL
       SELECT id, 'quote' AS kind, user_book_id, edition_id, session_id, page,
              progress_percent, 'quote' AS type, NULL AS category_id, text, comment, tags,
-             is_favorite, reaction, created_at, updated_at
+             is_favorite, revisit_later, reaction, created_at, updated_at
         FROM quote WHERE deleted_at IS NULL AND user_book_id IN (${placeholders})
       ORDER BY created_at DESC`;
 

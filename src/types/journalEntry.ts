@@ -35,6 +35,10 @@ export interface JournalEntry {
   comment: string | null;
   tags: string[];
   isFavorite: boolean;
+  // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — «Ти залишив N записів, до яких хотів
+  // повернутися». Той самий boolean-прапорець-патерн, що й `isFavorite` вище, лише інша UI-дія
+  // («Повернутися пізніше» замість «Обране»); `011_revisit_later.ts`.
+  revisitLater: boolean;
   reaction: string | null;
   createdAt: string;
   updatedAt: string;

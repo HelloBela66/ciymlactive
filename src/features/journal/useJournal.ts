@@ -40,6 +40,21 @@ export function useJournalFavorites(userBookId: string | undefined) {
   });
 }
 
+/** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — записи книги, позначені «Повернутися пізніше»: для
+ * «Ти залишив N записів...» на підсумку читання (`app/completion/[workId].tsx`) і секції
+ * «Повернутися до цих думок» на Book Memory screen (`app/memory/[workId].tsx`). */
+export function useJournalRevisitLater(userBookId: string | undefined) {
+  return useQuery<JournalEntry[]>({
+    queryKey: queryKeys.journal.revisitLaterByUserBook(userBookId ?? ''),
+    queryFn: async () => {
+      if (!userBookId) return [];
+      const db = await getDatabase();
+      return JournalRepository.listRevisitLaterByUserBookId(db, userBookId);
+    },
+    enabled: !!userBookId,
+  });
+}
+
 /** Лічильник для бейджа вкладки "Щоденник" на екрані книги. */
 export function useJournalCount(userBookId: string | undefined) {
   return useQuery<number>({
@@ -93,6 +108,9 @@ export function useJournalReactionCounts() {
 
 export interface JournalFeedFilters {
   favoriteOnly: boolean;
+  /** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — «У Journal додай filter». Той самий "лише позначені"
+   * фільтр, що й `favoriteOnly` вище, за окремим прапорцем. */
+  revisitLaterOnly: boolean;
   /** `null` — усі типи. */
   types: JournalEntryType[] | null;
   /** Пошукові фільтри «Мій щоденник» (ТЗ Фази 7 — text/book/reaction/date; `favorite`/`type`
@@ -112,6 +130,7 @@ export function useJournalFeed(filters: JournalFeedFilters) {
   return useInfiniteQuery({
     queryKey: queryKeys.journal.feed({
       favoriteOnly: filters.favoriteOnly,
+      revisitLaterOnly: filters.revisitLaterOnly,
       types: filters.types,
       query: filters.query ?? null,
       reaction: filters.reaction ?? null,
@@ -123,6 +142,7 @@ export function useJournalFeed(filters: JournalFeedFilters) {
       const db = await getDatabase();
       return JournalRepository.listFeedPage(db, {
         favoriteOnly: filters.favoriteOnly,
+        revisitLaterOnly: filters.revisitLaterOnly,
         types: filters.types ?? undefined,
         query: filters.query,
         reaction: filters.reaction,
@@ -162,6 +182,34 @@ export function useToggleJournalFavorite() {
     mutationFn: async ({ id, kind, isFavorite }) => {
       const db = await getDatabase();
       await repositoryFor(kind).setFavorite(db, id, isFavorite);
+    },
+    onSuccess: (_data, variables) => {
+      invalidateJournal(queryClient, variables.userBookId, variables.sessionId);
+      if (variables.kind === 'note') {
+        queryClient.invalidateQueries({ queryKey: queryKeys.notes.byUserBook(variables.userBookId) });
+      } else {
+        queryClient.invalidateQueries({ queryKey: queryKeys.quotes.byUserBook(variables.userBookId) });
+      }
+    },
+    onError,
+  });
+}
+
+/** ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — «Користувач може позначити будь-який власний journal
+ * entry». Той самий патерн, що й `useToggleJournalFavorite` вище, лише інший прапорець і інша
+ * інвалідація (`revisitLaterByUserBook` замість `favoritesByUserBook`, обидві вже й так змиває
+ * спільний `invalidateJournal`). */
+export function useToggleJournalRevisitLater() {
+  const queryClient = useQueryClient();
+  const onError = useMutationErrorHandler(log, 'Не вдалося оновити позначку «Повернутися пізніше».');
+  return useMutation<
+    void,
+    Error,
+    { id: string; kind: JournalEntryKind; userBookId: string; revisitLater: boolean; sessionId?: string | null }
+  >({
+    mutationFn: async ({ id, kind, revisitLater }) => {
+      const db = await getDatabase();
+      await repositoryFor(kind).setRevisitLater(db, id, revisitLater);
     },
     onSuccess: (_data, variables) => {
       invalidateJournal(queryClient, variables.userBookId, variables.sessionId);

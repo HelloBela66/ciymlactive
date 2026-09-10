@@ -11,6 +11,10 @@ import { queryKeys } from '@/lib/queryKeys';
 export function invalidateJournal(queryClient: QueryClient, userBookId: string, sessionId?: string | null): void {
   queryClient.invalidateQueries({ queryKey: queryKeys.journal.byUserBook(userBookId) });
   queryClient.invalidateQueries({ queryKey: queryKeys.journal.favoritesByUserBook(userBookId) });
+  // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий привід, що й
+  // `favoritesByUserBook` вище: будь-яка мутація note/quote (включно з `setRevisitLater` самою)
+  // могла змінити цей список.
+  queryClient.invalidateQueries({ queryKey: queryKeys.journal.revisitLaterByUserBook(userBookId) });
   queryClient.invalidateQueries({ queryKey: queryKeys.journal.countByUserBook(userBookId) });
   // Префікс, не повний параметризований ключ (Фаза 4 — `queryKeys.journal.feed` тепер бере
   // фільтри) — так змивається стрічка одразу для будь-якої комбінації фільтрів.

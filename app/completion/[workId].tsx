@@ -19,7 +19,7 @@ import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel'
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useRating, useSetRating } from '@/features/book-details/useRating';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
-import { useJournalCount, useJournalEntries, useJournalFavorites } from '@/features/journal/useJournal';
+import { useJournalCount, useJournalEntries, useJournalFavorites, useJournalRevisitLater } from '@/features/journal/useJournal';
 import { useBookMemory, useRemoveBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { formatDuration } from '@/lib/sessionTiming';
 import { pluralizeUk } from '@/lib/pluralizeUk';
@@ -363,6 +363,10 @@ export default function CompletionSummaryScreen() {
 
   const { data: sessions } = useReadingHistory(userBookId);
   const { data: journalCount } = useJournalCount(userBookId);
+  // ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — «При завершенні книги, якщо такі записи є: „Ти
+  // залишив N записів, до яких хотів повернутися.“». Малий список по одній книзі (той самий
+  // патерн, що й `useJournalFavorites` на цьому ж екрані) — нам тут потрібна лише довжина.
+  const { data: revisitLaterEntries } = useJournalRevisitLater(userBookId);
   const { data: rating } = useRating(userBookId);
   const setRating = useSetRating();
 
@@ -474,6 +478,25 @@ export default function CompletionSummaryScreen() {
                 <AppText variant="body" color="secondary" style={{ flex: 1 }}>
                   {journalCount} {pluralizeUk(journalCount, ENTRY_FORMS)} у щоденнику цієї книги
                 </AppText>
+              </Card>
+            ) : null}
+
+            {revisitLaterEntries && revisitLaterEntries.length > 0 ? (
+              <Card style={{ gap: theme.spacing.sm }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+                  <Ionicons name="bookmark" size={20} color={theme.colors.accent} />
+                  <AppText variant="body" color="secondary" style={{ flex: 1 }}>
+                    Ти залишив {revisitLaterEntries.length}{' '}
+                    {pluralizeUk(revisitLaterEntries.length, ENTRY_FORMS)}, до яких хотів повернутися.
+                  </AppText>
+                </View>
+                <Button
+                  label="Переглянути"
+                  variant="secondary"
+                  onPress={() =>
+                    router.push({ pathname: '/journal', params: { revisitLater: '1' } } as unknown as Href)
+                  }
+                />
               </Card>
             ) : null}
 

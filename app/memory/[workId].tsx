@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { View, Linking } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
 import { captureRef } from 'react-native-view-shot';
@@ -13,16 +14,21 @@ import { MemoryCardPreview } from '@/components/memory/MemoryCardPreview';
 import { JournalTimeline } from '@/components/memory/JournalTimeline';
 import { useTheme } from '@/design/ThemeProvider';
 import { memoryCardTemplateLabels, memoryCardTemplateDescriptions } from '@/design/i18n-labels';
+import { REACTION_META, isReactionId } from '@/design/reactions';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useRating } from '@/features/book-details/useRating';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
-import { useJournalEntries } from '@/features/journal/useJournal';
+import { useJournalEntries, useJournalRevisitLater } from '@/features/journal/useJournal';
+import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
+import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { computeBookStats } from '@/lib/bookStats';
 import { shareMemoryCardImage, saveMemoryCardImageToLibrary } from '@/lib/memoryCardFile';
 import { createLogger } from '@/lib/logger';
 import type { MemoryCardTemplateId } from '@/types/bookMemory';
+import type { JournalEntry } from '@/types/journalEntry';
+import type { NoteCategory } from '@/types/noteCategory';
 
 const log = createLogger('app/memory');
 
@@ -37,6 +43,71 @@ const TEMPLATE_OPTIONS: { value: MemoryCardTemplateId; label: string }[] = (
  * і `MediaLibrary.saveToLibraryAsync` (`memoryCardFile.ts`) чекають саме `file://`-шлях з
  * розширенням, а не рядок даних. */
 const CAPTURE_OPTIONS = { format: 'png', quality: 1 } as const;
+
+/** Один рядок запису в розділі "Повернутися до цих думок" — той самий вигляд, що й
+ * `MemoryEntryLine` на `app/completion/[workId].tsx` (тип запису + іконка реакції, якщо є,
+ * далі сам текст), навмисно продубльовано локально, а не імпортовано з іншого екрана: обидва
+ * рядки лишаються маленькими презентаційними компонентами без спільного стану, і зайва
+ * крос-екранна залежність тут не виправдана заради кількох рядків розмітки. */
+function RevisitLaterEntryLine({
+  entry,
+  categoriesById,
+}: {
+  entry: JournalEntry;
+  categoriesById: ReadonlyMap<string, NoteCategory>;
+}) {
+  const theme = useTheme();
+  const reactionMeta = entry.reaction && isReactionId(entry.reaction) ? REACTION_META[entry.reaction] : null;
+
+  return (
+    <View style={{ gap: 2 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        {reactionMeta ? <Ionicons name={reactionMeta.icon} size={12} color={theme.colors.accent} /> : null}
+        <AppText variant="micro" color="accent">
+          {resolveEntryTypeLabel(entry, categoriesById)}
+          {entry.page != null ? ` · с. ${entry.page}` : ''}
+        </AppText>
+      </View>
+      <AppText
+        variant="caption"
+        color="secondary"
+        style={entry.kind === 'quote' ? { fontStyle: 'italic' } : undefined}
+      >
+        {entry.text}
+      </AppText>
+    </View>
+  );
+}
+
+/**
+ * ТЗ Фази 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — «На Book Memory screen додай section: „Повернутися до
+ * цих думок“». Читає той самий union-шар, що й `JournalTimeline` вище на цьому екрані, але
+ * фільтрований лише на `revisitLater`-позначені записи (`useJournalRevisitLater`, той самий
+ * "малий список по одній книзі" хук, що й на екрані підсумку читання). Рендерить `null`, коли
+ * позначених записів нема — та сама умова видимості, що й нова картка на екрані підсумку.
+ */
+function RevisitLaterSection({ userBookId }: { userBookId: string | undefined }) {
+  const theme = useTheme();
+  const { data: entries } = useJournalRevisitLater(userBookId);
+  const { data: categories } = useAllNoteCategories(userBookId);
+  const categoriesById = categoriesToMap(categories);
+
+  if (!entries || entries.length === 0) return null;
+
+  return (
+    <Card style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="bookmark" size={18} color={theme.colors.accent} />
+        <AppText variant="heading">Повернутися до цих думок</AppText>
+      </View>
+      <View style={{ gap: theme.spacing.sm }}>
+        {entries.map((entry) => (
+          <RevisitLaterEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
+        ))}
+      </View>
+    </Card>
+  );
+}
 
 /**
  * Картка-спогад (Milestone 11, Фаза 8-9) — вибір шаблону, живий preview `MemoryCardPreview`,
@@ -245,6 +316,8 @@ export default function MemoryCardScreen() {
               pageCount={data.primaryEdition?.pageCount ?? null}
               userBookId={userBookId}
             />
+
+            <RevisitLaterSection userBookId={userBookId} />
 
             <View style={{ gap: theme.spacing.sm }}>
               <Button

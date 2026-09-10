@@ -18,6 +18,9 @@ export const NoteSchema = z.object({
   tags: z.array(z.string()),
   // Milestone 11 (Мій щоденник) — той самий патерн, що й `user_book.is_favorite`.
   isFavorite: z.boolean(),
+  // POLYTSIA V1.5, Фаза 11 («ПОВЕРНУТИСЯ ПІЗНІШЕ») — той самий boolean-прапорець-патерн, що й
+  // `isFavorite` вище (`011_revisit_later.ts`).
+  revisitLater: z.boolean(),
   // Навмисно вільний рядок, не enum — список реакцій ще узгоджується з UI (Фаза 3+);
   // докладніше — коментар у `003_journal_entry_extensions.ts`.
   reaction: z.string().nullable(),
