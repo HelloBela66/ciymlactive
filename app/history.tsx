@@ -174,6 +174,8 @@ export default function ActivityHistoryScreen() {
             <EmptyState
               title="Тут поки порожньо"
               description="Тут з'являтимуться сесії читання, нові книги, записи щоденника й інша активність — читай і повертайся."
+              actionLabel="До бібліотеки"
+              onAction={() => router.push('/library')}
             />
           </View>
         ) : (
