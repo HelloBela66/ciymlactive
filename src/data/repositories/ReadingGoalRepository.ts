@@ -123,9 +123,14 @@ export const ReadingGoalRepository = {
       return { current: 0, target: goal.target, isComplete: false };
     }
 
-    const sessions = (await ReadingSessionRepository.listAllCompleted(db)).filter(
-      (s) => s.startedAt >= goal.periodStart && s.startedAt < goal.periodEnd,
-    );
+    // minutes/pages/reading_days: період цілі (`periodStart`/`periodEnd`) відомий заздалегідь
+    // — SQL сам звужує вибірку до сесій цього періоду (`listStartedBetween`, той самий запит,
+    // що й Календар), а не завантажує ВСІ завершені сесії (`listAllCompleted`) і фільтрує в
+    // JS. POLYTSIA V1.5, Фаза 15 (PERFORMANCE REVIEW): на заявленому в ТЗ сценарії (5000
+    // сесій) старий шлях означав повне `SELECT *` по всій історії сесій ОКРЕМО на кожну ціль
+    // цих трьох типів (`useGoals` рахує прогрес усіх цілей одним `Promise.all`) — N цілей
+    // = N повних сканувань, замість N вузьких, обмежених періодом запитів.
+    const sessions = await ReadingSessionRepository.listStartedBetween(db, goal.periodStart, goal.periodEnd);
 
     if (goal.type === 'minutes') {
       const totalMinutes = sessions.reduce((sum, s) => sum + Math.round((s.durationSeconds ?? 0) / 60), 0);

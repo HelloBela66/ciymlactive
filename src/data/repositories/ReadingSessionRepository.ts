@@ -240,7 +240,15 @@ export const ReadingSessionRepository = {
   },
 
   /**
-   * Завершені сесії, що почались у діапазоні [startIso, endIso) — для Календаря (Milestone 4).
+   * Завершені сесії, що почались у діапазоні [startIso, endIso) — спершу для Календаря
+   * (Milestone 4), тепер також `ReadingGoalRepository.getProgress` (POLYTSIA V1.5, Фаза 15 —
+   * PERFORMANCE REVIEW): раніше прогрес цілі рахувався через `listAllCompleted(db).filter(...)`
+   * — повне `SELECT *` по ВСІХ завершених сесіях (5000+ рядків на заявленому в ТЗ сценарії),
+   * з фільтром по періоду в JS, ПОВТОРНО на кожну ціль (`useGoals` рахує прогрес усіх цілей
+   * одним `Promise.all`) — N цілей типу minutes/pages/reading_days означали N повних сканувань
+   * усієї історії сесій замість N вузьких запитів. Період цілі відомий заздалегідь, тож той
+   * самий `WHERE started_at >= ? AND started_at < ?`, що вже існував тут для календаря,
+   * закриває обидва випадки одним методом — нового SQL не знадобилось.
    * `started_at` (не `ended_at`) — сесія "належить" дню, коли її почали, навіть якщо вона
    * випадково перетнула північ.
    */
@@ -259,6 +267,10 @@ export const ReadingSessionRepository = {
    * (Milestone 5, `useStatistics.ts`/`streaks.ts`). Дані одного локального користувача,
    * тож повна вибірка без пагінації лишається дешевою; якщо це стане проблемою — перше
    * природне місце для SQL SUM/COUNT замість вибірки в JS.
+   *
+   * Навмисно НЕ використовується там, де відомий вузький діапазон дат (`listStartedBetween`
+   * вище) — саме таке некероване використання (повна вибірка + `.filter()` по періоду в JS)
+   * раніше було в `ReadingGoalRepository.getProgress`, виправлено у Фазі 15.
    */
   async listAllCompleted(db: SQLiteDatabase): Promise<ReadingSession[]> {
     const rows = await db.getAllAsync<ReadingSessionRow>(
