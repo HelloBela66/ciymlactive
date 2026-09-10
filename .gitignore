@@ -31,3 +31,7 @@ yarn-error.*
 
 # Testing
 coverage/
+
+# Supabase CLI local/machine-specific state (project-ref, pooler URL, cached versions —
+# не секрети, але й не частина джерела; регенеруються `supabase link`/`functions deploy`)
+supabase/.temp/

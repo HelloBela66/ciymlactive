@@ -168,7 +168,16 @@ async function fetchIsbndb(path: string): Promise<{ ok: true; json: unknown } | 
     if (!response.ok) {
       // ISBNdb: 404 на /book/{isbn} — "немає такого ISBN у їхній базі" (нормальний результат,
       // не помилка) — той самий нюанс, що був у коментарі мобільного ISBNdbProvider.ts раніше.
-      if (response.status === 404) return { ok: true, json: null };
+      if (response.status === 404) {
+        console.log(`isbndb-proxy: upstream 404 for ${path}`);
+        return { ok: true, json: null };
+      }
+      const bodyText = await response.text().catch(() => '');
+      // Діагностичний лог (2026-09-10, реальний випадок: `/books/{query}` повертав порожній
+      // список без жодної явної помилки — цей рядок і показав чому). Лишається постійно: не
+      // секрет (лише статус ISBNdb + обрізане тіло), а `console.log`/`.error` в Supabase Edge
+      // Functions і так пишеться лише у приватні логи проєкту, не повертається клієнту.
+      console.error(`isbndb-proxy: upstream ${response.status} for ${path}: ${bodyText.slice(0, 300)}`);
       return { ok: false, code: 'upstream_error', detail: `ISBNdb HTTP ${response.status}` };
     }
     let bodyText: string;
@@ -177,6 +186,10 @@ async function fetchIsbndb(path: string): Promise<{ ok: true; json: unknown } | 
     } catch {
       return { ok: false, code: 'response_too_large', detail: 'Відповідь ISBNdb завелика' };
     }
+    // Той самий діагностичний лог для "успішного" (200) випадку — саме такий був реальний баг:
+    // ISBNdb відповідав 200, але з тілом, форму якого `toProxyBook`/`BooksSearchResponseSchema`
+    // не очікували (наприклад, інша назва поля на тарифі без доступу до `/books/{query}`).
+    console.log(`isbndb-proxy: upstream 200 for ${path}: ${bodyText.slice(0, 500)}`);
     try {
       return { ok: true, json: JSON.parse(bodyText) };
     } catch {
