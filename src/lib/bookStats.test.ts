@@ -6,12 +6,13 @@
 // поясі й впасти в іншому.
 process.env.TZ = 'UTC';
 
-// eslint-disable-next-line import/first -- навмисно після встановлення TZ вище: Jest
-// компілює import у require() у тій самій позиції файлу (не справжній ESM-хойстинг), тож
-// порядок тут впливає на те, який TZ побачить модуль під час обчислення дат.
+// Навмисно після встановлення TZ вище: Jest компілює import у require() у тій самій позиції
+// файлу (не справжній ESM-хойстинг), тож порядок тут впливає на те, який TZ побачить модуль
+// під час обчислення дат.
+// eslint-disable-next-line import/first
 import { computeBookStats } from './bookStats';
-// eslint-disable-next-line import/first -- лише типи, стирається при компіляції, але лінт
-// все одно перевіряє синтаксичну позицію.
+// Лише типи, стирається при компіляції, але лінт все одно перевіряє синтаксичну позицію.
+// eslint-disable-next-line import/first
 import type { ReadingSession } from '@/types/readingSession';
 
 function session(overrides: Partial<ReadingSession> = {}): ReadingSession {

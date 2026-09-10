@@ -130,10 +130,11 @@ export default function ActiveSessionScreen() {
   // форма відкрита ЗАРАЗ, а не була відкрита в момент диспетчеризації мутації, інакше
   // відкладена дія (див. чергу нижче) могла б застосуватись до вже застарілого стану екрана.
   const showFinishFormRef = useRef(showFinishForm);
-  // eslint-disable-next-line react-hooks/refs -- навмисний синхронний "мірор" без затримки
-  // ефекту (React-документований патерн: мутація ref під час рендеру, значення читається лише
-  // пізніше в асинхронному `onSettled` вище). Проєкт не використовує React Compiler — це суто
-  // майбутня застереження лінтера, не реальний ризик у поточному рантаймі.
+  // Навмисний синхронний "мірор" без затримки ефекту (React-документований патерн: мутація ref
+  // під час рендеру, значення читається лише пізніше в асинхронному `onSettled` вище). Проєкт
+  // не використовує React Compiler — це суто майбутнє застереження лінтера, не реальний ризик
+  // у поточному рантаймі.
+  // eslint-disable-next-line react-hooks/refs
   showFinishFormRef.current = showFinishForm;
 
   // Захист від подвійного тапу (той самий підхід, що й `ReadingSessionMiniBar.tsx`,
@@ -244,9 +245,10 @@ export default function ActiveSessionScreen() {
 
   const closeFinishForm = () => {
     if (autoPausedRef.current) {
-      // eslint-disable-next-line react-hooks/immutability -- звичайний обробник події (не
-      // рендер): той самий безпечний патерн запису в ref, що й в `onSettled`/ефекті вище.
-      // Проєкт не використовує React Compiler — суто майбутнє застереження лінтера.
+      // Звичайний обробник події (не рендер): той самий безпечний патерн запису в ref, що й в
+      // `onSettled`/ефекті вище. Проєкт не використовує React Compiler — суто майбутнє
+      // застереження лінтера.
+      // eslint-disable-next-line react-hooks/immutability
       autoPausedRef.current = false;
       runPauseOrResume('resume');
     }
@@ -502,10 +504,10 @@ function JournalComposer({ userBookId, editionId, sessionId, currentPage, pageCo
     restoredRef.current = true;
     const draft = draftQuery.data;
     if (draft && (draft.text.trim().length > 0 || (draft.comment ?? '').trim().length > 0)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- одноразова гідратація
-      // локальної форми з чернетки, збереженої в SQLite (асинхронна БД, іншого способу
-      // дістати ці дані до першого рендеру немає); `restoredRef` вище гарантує рівно один
-      // прохід, каскадного ре-рендеру тут не виникає.
+      // Одноразова гідратація локальної форми з чернетки, збереженої в SQLite (асинхронна БД,
+      // іншого способу дістати ці дані до першого рендеру немає); `restoredRef` вище гарантує
+      // рівно один прохід, каскадного ре-рендеру тут не виникає.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setKind(draft.kind);
       // Чернетка зберігає лише вбудований `type` (`journal_draft` таблиця не має власного
       // поля під власну категорію) — власна категорія, яку користувач тапнув перед тим, як

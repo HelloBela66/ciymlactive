@@ -48,9 +48,9 @@ export default function SessionLaunchScreen() {
   const [goalMinutes, setGoalMinutes] = useState('');
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- ініціалізація редагованого
-    // поля значенням, яке приходить асинхронно із запиту (SQLite); стандартний патерн
-    // "заповнити форму щойно прийшли дані", не цикл ре-рендерів.
+    // Ініціалізація редагованого поля значенням, яке приходить асинхронно із запиту (SQLite);
+    // стандартний патерн "заповнити форму щойно прийшли дані", не цикл ре-рендерів.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (data) setStartPage(data.currentPage > 0 ? String(data.currentPage) : '0');
   }, [data]);
 
