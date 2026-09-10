@@ -1,0 +1,65 @@
+# Полиця — CI (POLYTSIA V1.5, Фаза 2)
+#
+# До цієї фази в репозиторії не було ні `.github/`, ні самого git-репозиторію (Фаза 0, повний
+# аудит, `docs/V2_READINESS.md`) — цей файл лише готує конфігурацію; сам `git init`/перший
+# `push` — OWNER ACTION REQUIRED (не можна виконати без shell-доступу до машини власника
+# продукту), докладніше — `docs/CI.md`.
+#
+# Мінімум per ТЗ Фази 2: install (`npm ci`, lockfile — `lockfileVersion: 3`, усі
+# dependencies/devDependencies `package.json` присутні в `package-lock.json` — перевірено
+# програмно перед створенням цього файлу), `tsc --noEmit`, lint (лише тому, що `npm run lint`
+# і `eslint.config.js` дійсно існують, `package.json`), Jest (домен + repository-тести з Фази
+# 3, щойно з'являться — той самий `npm test`, окремого кроку не треба), і Expo health check.
+#
+# "Branches: [main]" нижче — припущення (репозиторію-то ще немає, і default-гілку GitHub
+# сьогодні створює як `main`) — зміни просто, якщо власник продукту ініціалізує репозиторій з
+# інакшою назвою гілки (`master` тощо).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Typecheck, lint, tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # package.json → engines.node: ">=20"
+          node-version: '20'
+          cache: 'npm'
+
+      # `npm ci` тут — перша реальна перевірка, що package.json/package-lock.json насправді
+      # узгоджені (у хмарному середовищі розробки немає доступу до реєстру npm, щоб це
+      # перевірити заздалегідь — лише структурна звірка версій уручну).
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Jest (домен + lib + repository-інтеграційні тести)
+        run: npm test -- --ci
+
+      - name: Expo health check (expo-doctor)
+        # Advisory, не блокує CI: `expo-doctor` частково звертається в мережу (перевірка
+        # актуальності версій) — нестабільна мережа GitHub Actions runner'а не повинна валити
+        # весь пайплайн через щось, що не є реальною помилкою в коді репозиторію. Результат
+        # усе одно видно в логах кожного запуску.
+        run: npx expo-doctor
+        continue-on-error: true

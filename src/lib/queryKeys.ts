@@ -1,0 +1,128 @@
+/**
+ * Централізовані React Query ключі. Один файл замість розкиданих рядкових літералів по
+ * фічах — щоб інвалідація після мутацій (наприклад, після додавання книги) не залежала від
+ * того, чи всі місця написали той самий ключ вручну однаково.
+ */
+export const queryKeys = {
+  works: {
+    all: ['works'] as const,
+    search: (query: string) => ['works', 'search', query] as const,
+    recent: () => ['works', 'recent'] as const,
+    detail: (workId: string) => ['works', 'detail', workId] as const,
+  },
+  userBooks: {
+    all: ['userBooks'] as const,
+    // Milestone 11, доповнення3 — окремий ключ для сортованого "Усі" (`useLibraryByFilter`,
+    // `sortAllLibraryView`), навмисно НЕ той самий, що `all` (яким користується `useLibraryAll`,
+    // з нею — з ІНШИМ, несортованим `queryFn`): один спільний ключ на два різних `queryFn` —
+    // класична пастка React Query, де кеш віддає то сортований, то несортований результат
+    // залежно від того, який хук останнім зробив запит.
+    allSorted: ['userBooks', 'allSorted'] as const,
+    byStatus: (status: string) => ['userBooks', 'byStatus', status] as const,
+    byEdition: (editionId: string) => ['userBooks', 'byEdition', editionId] as const,
+    detail: (userBookId: string) => ['userBooks', 'detail', userBookId] as const,
+  },
+  shelves: {
+    all: ['shelves'] as const,
+    detail: (shelfId: string) => ['shelves', 'detail', shelfId] as const,
+    forUserBook: (userBookId: string) => ['shelves', 'forUserBook', userBookId] as const,
+  },
+  ownedBooks: {
+    byEdition: (editionId: string) => ['ownedBooks', 'byEdition', editionId] as const,
+  },
+  series: {
+    detail: (seriesId: string) => ['series', 'detail', seriesId] as const,
+  },
+  sessions: {
+    active: ['sessions', 'active'] as const,
+    detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
+    history: (userBookId: string) => ['sessions', 'history', userBookId] as const,
+  },
+  notes: {
+    byUserBook: (userBookId: string) => ['notes', 'byUserBook', userBookId] as const,
+  },
+  noteCategories: {
+    // Milestone 11 (доповнення) — власні категорії нотаток користувача, під конкретну книгу.
+    // Окремий ключ для активних (чипи вибору) і всіх включно з видаленими (резолв назви на
+    // старих нотатках, `resolveEntryTypeLabel`) — обидва читаються з тієї самої таблиці, але
+    // різними запитами (`NoteCategoryRepository.listActiveByUserBookId`/`listAllByUserBookId`),
+    // тож кешуються окремо.
+    active: (userBookId: string) => ['noteCategories', 'active', userBookId] as const,
+    all: (userBookId: string) => ['noteCategories', 'all', userBookId] as const,
+  },
+  quotes: {
+    byUserBook: (userBookId: string) => ['quotes', 'byUserBook', userBookId] as const,
+  },
+  journal: {
+    // Milestone 11 (Мій щоденник) — union-читання note+quote (`JournalRepository`).
+    // Мутації notes/quotes (favorite/reaction/create/remove) інвалідують і власний ключ, і
+    // цей, щоб глобальна стрічка/бейдж лишались синхронними без окремого дублювання логіки.
+    byUserBook: (userBookId: string) => ['journal', 'byUserBook', userBookId] as const,
+    favoritesByUserBook: (userBookId: string) => ['journal', 'favoritesByUserBook', userBookId] as const,
+    countByUserBook: (userBookId: string) => ['journal', 'countByUserBook', userBookId] as const,
+    bySession: (sessionId: string) => ['journal', 'bySession', sessionId] as const,
+    // Параметризований фільтрами (Фаза 4) — щоб кожна комбінація тип/обране кешувалась
+    // окремо. Інвалідація йде за спільним префіксом `['journal', 'feed']`
+    // (`journalInvalidation.ts`), а не за цим повним ключем — так одна мутація нотатки/цитати
+    // змиває стрічку одразу для БУДЬ-ЯКОГО набору фільтрів, не лише поточного.
+    feed: (filters: { favoriteOnly: boolean; types: string[] | null }) => ['journal', 'feed', filters] as const,
+    countAll: ['journal', 'countAll'] as const,
+    draft: (userBookId: string) => ['journal', 'draft', userBookId] as const,
+    // Milestone 11, доповнення (реакції) — агрегована статистика "N смішних моментів..." на
+    // екрані щоденника (`app/journal/index.tsx`). Без параметрів, той самий сенс, що й
+    // `countAll` — рахується по всій бібліотеці одразу.
+    reactionCounts: ['journal', 'reactionCounts'] as const,
+  },
+  ratings: {
+    byUserBook: (userBookId: string) => ['ratings', 'byUserBook', userBookId] as const,
+  },
+  bookMemory: {
+    byUserBook: (userBookId: string) => ['bookMemory', 'byUserBook', userBookId] as const,
+  },
+  genres: {
+    all: ['genres', 'all'] as const,
+    byWork: (workId: string) => ['genres', 'byWork', workId] as const,
+  },
+  tags: {
+    byWork: (workId: string) => ['tags', 'byWork', workId] as const,
+  },
+  calendar: {
+    month: (monthKey: string) => ['calendar', 'month', monthKey] as const,
+    day: (dayKey: string) => ['calendar', 'day', dayKey] as const,
+  },
+  goals: {
+    all: ['goals', 'all'] as const,
+  },
+  reminders: {
+    all: ['reminders', 'all'] as const,
+  },
+  statistics: {
+    overall: ['statistics', 'overall'] as const,
+  },
+  tbr: {
+    reality: ['tbr', 'reality'] as const,
+  },
+  wrapped: {
+    year: (year: number) => ['wrapped', 'year', year] as const,
+  },
+  autoBackup: {
+    settings: ['autoBackup', 'settings'] as const,
+  },
+  trends: {
+    // «Тренди» (Milestone 11, доповнення) — топ-N за кількістю пристроїв, що зберегли книгу
+    // (`catalog_top_books`, `SharedCatalogClient.topBooks`). Без параметрів у ключі: єдиний
+    // список на весь застосунок (не залежить від пошукового запиту користувача).
+    top: ['trends', 'top'] as const,
+  },
+  providerSearch: {
+    byProvider: (providerId: string, query: string) => ['providerSearch', providerId, query] as const,
+    // Префікс (без тексту запиту) — навмисно окремий ключ, а не похідне зрізання
+    // `byProvider(...)`: React Query інвалідовує за префіксом масиву, тож
+    // `invalidateQueries({ queryKey: providerSearch.sharedCatalogAll })` зносить кеш ВСІХ
+    // раніше виконаних пошукових запитів по спільному каталогу одразу, незалежно від тексту
+    // (Milestone 8.3 — після публікації/позначки "додано" в каталог, `staleTime` 5 хв у
+    // `useProviderSearch` інакше й далі показував би застарілий, "порожній" результат для
+    // того самого тексту пошуку).
+    sharedCatalogAll: ['providerSearch', 'shared_catalog'] as const,
+  },
+};

@@ -1,0 +1,101 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import Constants from 'expo-constants';
+import { format } from 'date-fns';
+import { getDatabase, LATEST_SCHEMA_VERSION } from '@/data/db';
+import { BackupRepository } from '@/data/repositories/BackupRepository';
+import {
+  serializeBackup,
+  parseBackupJson,
+  checkSchemaCompatibility,
+  type BackupEnvelope,
+} from '@/lib/backupSerializer';
+import { writeAndShareBackupFile, pickBackupFileAsync } from '@/lib/backupFile';
+import { createLogger } from '@/lib/logger';
+import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
+
+const log = createLogger('features/backup');
+
+/** Експорт: дамп усієї БД → JSON-конверт (`docs/BACKUP_FORMAT.md`) → файл → системний
+ * "Поділитися" (щоб користувач сам обрав, куди зберегти — Файли, хмара, месенджер тощо). */
+export function useExportBackup() {
+  const onError = useMutationErrorHandler(log, 'Не вдалося створити резервну копію. Спробуй ще раз.');
+  return useMutation({
+    mutationFn: async () => {
+      const db = await getDatabase();
+      const data = await BackupRepository.exportAll(db);
+      const json = serializeBackup({
+        schemaVersion: LATEST_SCHEMA_VERSION,
+        appVersion: Constants.expoConfig?.version ?? '0.0.0',
+        data,
+      });
+      const filename = `polytsya-backup-${format(new Date(), 'yyyy-MM-dd-HHmm')}.json`;
+      return writeAndShareBackupFile(json, filename);
+    },
+    onError,
+  });
+}
+
+export interface PendingRestore {
+  envelope: BackupEnvelope;
+  summary: { works: number; userBooks: number; sessions: number; notes: number };
+}
+
+export type PickBackupResult = { kind: 'cancelled' } | { kind: 'error'; message: string } | { kind: 'ready'; pending: PendingRestore };
+
+/** Обирає файл і одразу перевіряє/парсить його (`docs/BACKUP_FORMAT.md` §Restore, кроки 1-3)
+ * — але НЕ пише в БД. UI показує підтвердження з `pending.summary` перш ніж викликати
+ * `useRestoreBackup` — застосунок ніколи не перезаписує дані без явного підтвердження
+ * (вимога п.35 ТЗ, без винятків). */
+export function usePickBackupFile() {
+  // Очікувані "поганого файлу" випадки вже повертаються як `{ kind: 'error', message }`
+  // (нижче) — не кидаються, тож `onError` тут лише на неочікуваний виняток (наприклад,
+  // системний пікер файлів сам відмовив несподівано).
+  const onError = useMutationErrorHandler(log, 'Не вдалося відкрити файл резервної копії.');
+  return useMutation<PickBackupResult, Error, void>({
+    mutationFn: async () => {
+      const picked = await pickBackupFileAsync();
+      if (!picked) return { kind: 'cancelled' };
+
+      const parsed = parseBackupJson(picked.content);
+      if (!parsed.ok) return { kind: 'error', message: parsed.error };
+
+      const compatibility = checkSchemaCompatibility(parsed.envelope.schemaVersion, LATEST_SCHEMA_VERSION);
+      if (compatibility === 'needs_app_update') {
+        return {
+          kind: 'error',
+          message: 'Цей файл створено новішою версією застосунку — онови застосунок, щоб відновити з нього.',
+        };
+      }
+      if (compatibility === 'needs_data_migration') {
+        return { kind: 'error', message: 'Формат файлу застарілий і поки не підтримується автоматичним оновленням.' };
+      }
+
+      return { kind: 'ready', pending: { envelope: parsed.envelope, summary: BackupRepository.summarize(parsed.envelope.data) } };
+    },
+    onError,
+  });
+}
+
+/** Сам запис — replace-all в одній транзакції (`BackupRepository.restoreAll`) — якщо щось
+ * впаде посеред запису, транзакція відкочується і бібліотека лишається такою, якою була до
+ * спроби відновлення (звідси конкретний текст повідомлення нижче — це не загальне "щось
+ * пішло не так", а гарантія, яку дає сам код). Після успіху інвалідує геть увесь React
+ * Query кеш: replace-all міняє практично всі дані застосунку одразу, тож перелічувати
+ * десятки query key namespace-ів вручну немає сенсу. */
+export function useRestoreBackup() {
+  const queryClient = useQueryClient();
+  const onError = useMutationErrorHandler(
+    log,
+    'Не вдалося відновити дані з резервної копії. Бібліотека лишилась незмінною — спробуй ще раз.',
+  );
+  return useMutation({
+    mutationFn: async (envelope: BackupEnvelope) => {
+      const db = await getDatabase();
+      await BackupRepository.restoreAll(db, envelope.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+    },
+    onError,
+  });
+}

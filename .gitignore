@@ -1,0 +1,33 @@
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.orig.*
+
+# Native
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# macOS
+.DS_Store
+
+# Env
+.env
+.env.local
+.env.admin
+
+# Logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Local SQLite artifacts (if ever dumped for debugging)
+*.db
+*.sqlite
+
+# Testing
+coverage/
