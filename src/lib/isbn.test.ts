@@ -2,7 +2,7 @@ import { isValidIsbn, isbn10To13, isbn13To10, isbnEquivalents, normalizeIsbn } f
 
 describe('normalizeIsbn', () => {
   it('прибирає дефіси, пробіли, приводить до верхнього регістру', () => {
-    expect(normalizeIsbn('978-966-03-9500-2')).toBe('9789660395002');
+    expect(normalizeIsbn('978-966-03-9500-8')).toBe('9789660395008');
     expect(normalizeIsbn('0 306 40615 2')).toBe('0306406152');
     expect(normalizeIsbn('080442957x')).toBe('080442957X');
   });
@@ -15,7 +15,7 @@ describe('isValidIsbn', () => {
   });
 
   it('коректний ISBN-13', () => {
-    expect(isValidIsbn('978-966-03-9500-2')).toBe(true);
+    expect(isValidIsbn('978-966-03-9500-8')).toBe(true);
     expect(isValidIsbn('9780306406157')).toBe(true);
   });
 
