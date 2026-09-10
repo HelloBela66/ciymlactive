@@ -42,21 +42,10 @@ const migrations: Migration[] = [
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;
 
-/**
- * Застосовує всі міграції з версією > поточного PRAGMA user_version, послідовно, кожну у
- * власній транзакції. Це офіційно рекомендований Expo SQLite патерн (PRAGMA user_version).
- */
-export async function migrateDbIfNeeded(db: SQLiteDatabase): Promise<number> {
-  const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  let currentVersion = row?.user_version ?? 0;
-
-  const pending = migrations.filter((m) => m.version > currentVersion).sort((a, b) => a.version - b.version);
-
-  if (pending.length === 0) {
-    log.debug('Схема БД уже актуальна', { currentVersion });
-    return currentVersion;
-  }
-
+/** Застосовує задані міграції послідовно, кожну у власній транзакції (крім
+ * `manualTransaction`), і після кожної одразу проставляє `PRAGMA user_version`. Спільна для
+ * `migrateDbIfNeeded` і тестового `__applyMigrationsForTests` нижче. */
+async function applyMigrations(db: SQLiteDatabase, pending: Migration[]): Promise<void> {
   for (const migration of pending) {
     log.info('Застосовую міграцію', { version: migration.version });
     if (migration.manualTransaction) {
@@ -67,9 +56,38 @@ export async function migrateDbIfNeeded(db: SQLiteDatabase): Promise<number> {
       });
     }
     await db.execAsync(`PRAGMA user_version = ${migration.version}`);
-    currentVersion = migration.version;
+  }
+}
+
+/**
+ * Застосовує всі міграції з версією > поточного PRAGMA user_version, послідовно, кожну у
+ * власній транзакції. Це офіційно рекомендований Expo SQLite патерн (PRAGMA user_version).
+ */
+export async function migrateDbIfNeeded(db: SQLiteDatabase): Promise<number> {
+  const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+  const currentVersion = row?.user_version ?? 0;
+
+  const pending = migrations.filter((m) => m.version > currentVersion).sort((a, b) => a.version - b.version);
+
+  if (pending.length === 0) {
+    log.debug('Схема БД уже актуальна', { currentVersion });
+    return currentVersion;
   }
 
-  log.info('Міграції застосовано', { currentVersion });
-  return currentVersion;
+  await applyMigrations(db, pending);
+  const finalVersion = pending[pending.length - 1]?.version ?? currentVersion;
+  log.info('Міграції застосовано', { currentVersion: finalVersion });
+  return finalVersion;
+}
+
+/**
+ * Лише для тестів (Фаза 3, п.44 ТЗ) — застосовує міграції включно до `upToVersion`,
+ * незалежно від поточного `PRAGMA user_version`. Дозволяє підготувати в тесті "seed-БД
+ * попередньої версії" (усі міграції, КРІМ найновішої) і потім прогнати саме
+ * `migrateDbIfNeeded` на ній — так само, як це відбулося б на реальному пристрої власника
+ * продукту після оновлення застосунку з даними, створеними попередньою версією схеми.
+ */
+export async function __applyMigrationsForTests(db: SQLiteDatabase, upToVersion: number): Promise<void> {
+  const pending = migrations.filter((m) => m.version <= upToVersion).sort((a, b) => a.version - b.version);
+  await applyMigrations(db, pending);
 }
