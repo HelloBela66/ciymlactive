@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { MemoryCardPreview } from '@/components/memory/MemoryCardPreview';
+import { JournalTimeline } from '@/components/memory/JournalTimeline';
 import { useTheme } from '@/design/ThemeProvider';
 import { memoryCardTemplateLabels, memoryCardTemplateDescriptions } from '@/design/i18n-labels';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
@@ -231,6 +232,19 @@ export default function MemoryCardScreen() {
                 {memoryCardTemplateDescriptions[displayedTemplate]}
               </AppText>
             </Card>
+
+            {/* Фаза 10 (JOURNAL MEMORY TIMELINE) — шкала записів щоденника 0-100% книги,
+             * окремо від вибору шаблону картки й вище кнопок поділитись/зберегти: це
+             * самостійна допоміжна візуалізація ("Timeline є supplementary visualization"),
+             * не частина самої картки-спогаду (`selectedEntries`/`memory.entryRefs` — лише
+             * записи, ОБРАНІ для картки; шкала ж показує ВСІ записи щоденника книги,
+             * `allEntries`). Рендерить `null` сама, коли позиціонувати нічого — тому
+             * умовного `{allEntries?.length ? ... : null}` тут не потрібно. */}
+            <JournalTimeline
+              entries={allEntries ?? []}
+              pageCount={data.primaryEdition?.pageCount ?? null}
+              userBookId={userBookId}
+            />
 
             <View style={{ gap: theme.spacing.sm }}>
               <Button
