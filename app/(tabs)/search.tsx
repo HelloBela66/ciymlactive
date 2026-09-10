@@ -8,12 +8,18 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { useTheme } from '@/design/ThemeProvider';
-import { useBookSearch, useRecentWorks } from '@/features/search/useBookSearch';
+import { journalEntryTypeLabels } from '@/design/i18n-labels';
+import { useRecentWorks } from '@/features/search/useBookSearch';
 import { useProviderSearch } from '@/features/search/useProviderSearch';
+import { usePersonalSearch, type PersonalSearchResult } from '@/features/search/usePersonalSearch';
 import { useImportDraftStore } from '@/stores/importDraftStore';
 import { GoogleBooksProvider, ISBNdbProvider, SharedCatalogProvider, CuratedCatalogProvider } from '@/data/providers';
 import type { BookMetadataProvider, RawProviderBook } from '@/data/providers';
 import type { WorkSearchResult } from '@/data/repositories/WorkRepository';
+import type { Series } from '@/types/series';
+import type { ShelfWithCount } from '@/types/shelf';
+import type { JournalFeedEntry } from '@/types/journalEntry';
+import { pluralizeUk } from '@/lib/pluralizeUk';
 
 function WorkResultRow({ work }: { work: WorkSearchResult }) {
   const theme = useTheme();
@@ -40,6 +46,109 @@ function WorkResultRow({ work }: { work: WorkSearchResult }) {
           ) : null}
         </View>
         <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+      </Card>
+    </Pressable>
+  );
+}
+
+/** Проста рядок-плашка з іконкою — той самий вигляд, що й пункти меню Профілю
+ * (`app/(tabs)/profile/index.tsx`, `MENU_ITEMS`): для серій/полиць обкладинки немає сенсу
+ * показувати (`Series.coverUrl`/`Shelf` без власного зображення в більшості випадків), тому
+ * рядок — іконка + назва замість `CoverThumbnail`. */
+function IconResultRow({
+  icon,
+  label,
+  caption,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  caption?: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
+        <Ionicons name={icon} size={20} color={theme.colors.textSecondary} />
+        <View style={{ flex: 1 }}>
+          <AppText variant="body">{label}</AppText>
+          {caption ? (
+            <AppText variant="caption" color="secondary">
+              {caption}
+            </AppText>
+          ) : null}
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+      </Card>
+    </Pressable>
+  );
+}
+
+function SeriesResultRow({ series }: { series: Series }) {
+  return (
+    <IconResultRow
+      icon="layers-outline"
+      label={series.name}
+      onPress={() => router.push({ pathname: '/series/[seriesId]', params: { seriesId: series.id } })}
+    />
+  );
+}
+
+const SHELF_BOOK_FORMS = ['книга', 'книги', 'книг'] as const;
+
+function ShelfResultRow({ shelf }: { shelf: ShelfWithCount }) {
+  return (
+    <IconResultRow
+      icon="bookmark-outline"
+      label={shelf.name}
+      caption={`${shelf.bookCount} ${pluralizeUk(shelf.bookCount, SHELF_BOOK_FORMS)}`}
+      onPress={() => router.push({ pathname: '/shelf/[shelfId]', params: { shelfId: shelf.id } })}
+    />
+  );
+}
+
+/** Мітка типу/категорії запису — той самий принцип, що й приватна `feedEntryLabel` у
+ * `app/journal/index.tsx`: `JournalFeedEntry.categoryLabel` уже резолвлена прямо в SQL
+ * (`JournalRepository.searchFeed`, той самий `LEFT JOIN note_category`, що й `listFeedPage`),
+ * тож тут лише вибір між нею і вбудованою міткою типу — без додаткового запиту. */
+function entryTypeLabel(entry: JournalFeedEntry): string {
+  if (entry.categoryId && entry.categoryLabel) return entry.categoryLabel;
+  return journalEntryTypeLabels[entry.type];
+}
+
+/** Рядок результату пошуку по щоденнику (нотатка чи цитата) — спрощена версія
+ * `JournalEntryRow` (`app/journal/index.tsx`): це РЕЗУЛЬТАТ ПОШУКУ, не сам щоденник, тож без
+ * керування реакцією/обраним просто веде на книгу (той самий маршрут, що й повна стрічка
+ * щоденника — власного екрана для окремого запису немає). */
+function JournalResultRow({ entry }: { entry: JournalFeedEntry }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={() => router.push({ pathname: '/work/[workId]', params: { workId: entry.workId } })}
+      accessibilityRole="button"
+      accessibilityLabel={`${entry.workTitle}: ${entryTypeLabel(entry)}`}
+    >
+      <Card style={{ flexDirection: 'row', gap: theme.spacing.md }}>
+        <CoverThumbnail
+          coverUrl={entry.coverUrl}
+          title={entry.workTitle}
+          fallbackColor={entry.coverFallbackColor}
+          width={36}
+          height={52}
+        />
+        <View style={{ flex: 1, gap: theme.spacing.xs }}>
+          <AppText variant="caption" color="accent">
+            {entryTypeLabel(entry)} · {entry.workTitle}
+          </AppText>
+          <AppText
+            variant="body"
+            numberOfLines={2}
+            style={entry.kind === 'quote' ? { fontStyle: 'italic' } : undefined}
+          >
+            {entry.text}
+          </AppText>
+        </View>
       </Card>
     </Pressable>
   );
@@ -168,28 +277,122 @@ function withSeen(books: RawProviderBook[] | undefined, seen: ReadonlySet<string
   return next;
 }
 
+type SearchMode = 'personal' | 'catalog';
+
+function PersonalSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const theme = useTheme();
+  return (
+    <View style={{ gap: theme.spacing.sm }}>
+      <AppText variant="caption" color="tertiary">
+        {title}
+      </AppText>
+      {children}
+    </View>
+  );
+}
+
 /**
- * Пошук: локальний каталог одразу (Milestone 1) + спільний каталог, власна добірка «Полиці»
- * (Milestone 11, доповнення) і зовнішні провайдери Google Books/ISBNdb (Milestone 7 і 8.2,
- * docs/BOOK_PROVIDERS.md; Open Library прибрано з пошуку в Milestone 10 fix6 —
- * `docs/STATUS_V1.md`) від 3 символів, кожен у своїй секції. Порядок секцій — спільний
- * каталог, потім добірка «Полиці» (обидва — власний Supabase, без квоти й майже миттєво),
- * потім Google Books, і лише останньою — платний ISBNdb. Тап на зовнішній результат веде на
- * екран підтвердження (`/import/review`) — ніколи не зберігає без перегляду користувачем.
+ * Особистий пошук, згруповано рівно як вимагає ТЗ Фази 6: Книги/Щоденник/Цитати/Серії/Полиці —
+ * лише непорожні секції. `undefined` (ще не прийшла відповідь) і `isLoading` розрізнені: перший
+ * рендер під час дебаунсу нічого не блимає порожнім станом.
+ */
+function PersonalSearchSections({
+  result,
+  isLoading,
+}: {
+  result: PersonalSearchResult | undefined;
+  isLoading: boolean;
+}) {
+  const theme = useTheme();
+
+  if (!result && isLoading) {
+    return (
+      <AppText variant="caption" color="tertiary">
+        Шукаю…
+      </AppText>
+    );
+  }
+
+  const books = result?.books ?? [];
+  const notes = result?.notes ?? [];
+  const quotes = result?.quotes ?? [];
+  const series = result?.series ?? [];
+  const shelves = result?.shelves ?? [];
+  const isEmpty = books.length === 0 && notes.length === 0 && quotes.length === 0 && series.length === 0 && shelves.length === 0;
+
+  if (isEmpty) {
+    return (
+      <AppText variant="body" color="secondary">
+        Нічого не знайдено серед твоїх книг, нотаток, цитат, серій і полиць.
+      </AppText>
+    );
+  }
+
+  return (
+    <View style={{ gap: theme.spacing.lg }}>
+      {books.length > 0 ? (
+        <PersonalSection title="Книги">
+          {books.map((work) => (
+            <WorkResultRow key={work.id} work={work} />
+          ))}
+        </PersonalSection>
+      ) : null}
+      {notes.length > 0 ? (
+        <PersonalSection title="Щоденник">
+          {notes.map((entry) => (
+            <JournalResultRow key={entry.id} entry={entry} />
+          ))}
+        </PersonalSection>
+      ) : null}
+      {quotes.length > 0 ? (
+        <PersonalSection title="Цитати">
+          {quotes.map((entry) => (
+            <JournalResultRow key={entry.id} entry={entry} />
+          ))}
+        </PersonalSection>
+      ) : null}
+      {series.length > 0 ? (
+        <PersonalSection title="Серії">
+          {series.map((item) => (
+            <SeriesResultRow key={item.id} series={item} />
+          ))}
+        </PersonalSection>
+      ) : null}
+      {shelves.length > 0 ? (
+        <PersonalSection title="Полиці">
+          {shelves.map((item) => (
+            <ShelfResultRow key={item.id} shelf={item} />
+          ))}
+        </PersonalSection>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Пошук (POLYTSIA V1.5, Фаза 6 — Global Personal Search): два явно розділені режими, щоб не
+ * змішувати "що я вже маю" з "що можна додати" (вимога ТЗ — "Не змішуй external catalog results
+ * із personal results хаотично"):
  *
- * Усі три результати підняті сюди (а не отримуються кожною секцією окремо) з двох причин
- * одразу: 1) щоб порахувати gate для ISBNdb (Milestone 8.2, не витрачати платний запит, доки
- * спільний каталог і Google Books ще не показали, що книги немає ніде), як і раніше; 2) щоб
- * прибрати дублікати між секціями за ISBN (Milestone 10 fix6, `docs/STATUS_V1.md` п. 3.2,
- * докладніше — коментар над `dedupeAgainst` вище) — сам факт підняття цих хуків сюди НЕ додає
- * нових мережевих запитів, `useProviderSearch` і так викликався б у кожній секції окремо.
+ * «Особисте» (за замовчуванням) — офлайн-пошук лише по тому, що вже є в застосунку: книги й
+ * автори (`WorkRepository.search`, той самий метод, що раніше показувався як "у твоєму
+ * каталозі"), серії, полиці, нотатки й цитати щоденника (`usePersonalSearch`). Коли запит
+ * порожній — "Останні додані" (`useRecentWorks`, поведінка не змінилась).
+ *
+ * «Каталог» — раніше існуючий пошук ДЛЯ ДОДАВАННЯ нової книги (Milestone 1/7/8.2): спільний
+ * каталог, власна добірка «Полиці», Google Books, і лише останньою — платний ISBNdb, від 3
+ * символів, кожен у своїй секції. Ця гілка НЕ змінена — той самий порядок/дедуплікація/gate
+ * для ISBNdb, що й раніше (докладніше — коментарі при `dedupeAgainst`/`isbndbEnabled` нижче).
+ * Тап на зовнішній результат веде на екран підтвердження (`/import/review`) — ніколи не зберігає
+ * без перегляду користувачем.
  */
 export default function SearchScreen() {
   const theme = useTheme();
   const [query, setQuery] = useState('');
+  const [mode, setMode] = useState<SearchMode>('personal');
 
-  const searchResult = useBookSearch(query);
   const recentResult = useRecentWorks();
+  const personalSearch = usePersonalSearch(query);
 
   const catalogResult = useProviderSearch(SharedCatalogProvider, query);
   const curatedResult = useProviderSearch(CuratedCatalogProvider, query);
@@ -212,8 +415,7 @@ export default function SearchScreen() {
 
   const showProviderSections = query.trim().length >= 3;
   const isSearching = query.trim().length > 0;
-  const results = isSearching ? searchResult.data ?? [] : recentResult.data ?? [];
-  const isLoading = isSearching ? searchResult.isLoading : recentResult.isLoading;
+  const hasRecent = (recentResult.data?.length ?? 0) > 0;
 
   return (
     <ScreenContainer topInset>
@@ -236,7 +438,7 @@ export default function SearchScreen() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Назва або автор"
+          placeholder="Назва, автор, серія, полиця, нотатка…"
           placeholderTextColor={theme.colors.textTertiary}
           style={{
             flex: 1,
@@ -244,9 +446,24 @@ export default function SearchScreen() {
             color: theme.colors.textPrimary,
             fontSize: theme.typography.scale.body.size,
           }}
-          accessibilityLabel="Пошук книг"
+          accessibilityLabel="Пошук"
           returnKeyType="search"
           autoCapitalize="none"
+        />
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.lg }}>
+        <Button
+          label="Особисте"
+          variant={mode === 'personal' ? 'primary' : 'secondary'}
+          onPress={() => setMode('personal')}
+          style={{ flex: 1, paddingHorizontal: theme.spacing.sm }}
+        />
+        <Button
+          label="Каталог"
+          variant={mode === 'catalog' ? 'primary' : 'secondary'}
+          onPress={() => setMode('catalog')}
+          style={{ flex: 1, paddingHorizontal: theme.spacing.sm }}
         />
       </View>
 
@@ -266,30 +483,28 @@ export default function SearchScreen() {
       </View>
 
       <View style={{ marginTop: theme.spacing.xl, gap: theme.spacing.lg }}>
-        <View style={{ gap: theme.spacing.sm }}>
-          {!isLoading && isSearching && results.length === 0 ? (
-            <AppText variant="body" color="secondary">
-              Нічого не знайдено в твоєму каталозі.
-            </AppText>
-          ) : null}
-
-          {!isSearching && results.length > 0 ? (
-            <AppText variant="caption" color="tertiary">
-              Останні додані
-            </AppText>
-          ) : null}
-          {isSearching && results.length > 0 ? (
-            <AppText variant="caption" color="tertiary">
-              У твоєму каталозі
-            </AppText>
-          ) : null}
-
-          {results.map((work) => (
-            <WorkResultRow key={work.id} work={work} />
-          ))}
-        </View>
-
-        {isSearching ? (
+        {mode === 'personal' ? (
+          isSearching ? (
+            <PersonalSearchSections result={personalSearch.data} isLoading={personalSearch.isLoading} />
+          ) : (
+            <>
+              {hasRecent ? (
+                <View style={{ gap: theme.spacing.sm }}>
+                  <AppText variant="caption" color="tertiary">
+                    Останні додані
+                  </AppText>
+                  {(recentResult.data ?? []).map((work) => (
+                    <WorkResultRow key={work.id} work={work} />
+                  ))}
+                </View>
+              ) : !recentResult.isLoading ? (
+                <AppText variant="body" color="tertiary" style={{ textAlign: 'center', marginTop: theme.spacing.xxl }}>
+                  Шукай серед своїх книг, нотаток, цитат, серій і полиць — щойно щось додаси до бібліотеки.
+                </AppText>
+              ) : null}
+            </>
+          )
+        ) : isSearching ? (
           <>
             {/* Спільний каталог першим (Milestone 8.2): дешевий і швидкий запит до власного
                 Supabase, книги, додані іншими користувачами, — зверху списку. Далі Google
@@ -321,14 +536,13 @@ export default function SearchScreen() {
               show={showProviderSections}
             />
           </>
-        ) : null}
+        ) : (
+          <AppText variant="body" color="tertiary" style={{ textAlign: 'center', marginTop: theme.spacing.xxl }}>
+            Введи назву або автора, щоб знайти книгу для додавання — у спільній базі застосунку чи
+            одразу в Google Books.
+          </AppText>
+        )}
       </View>
-
-      {!isSearching && !isLoading && results.length === 0 ? (
-        <AppText variant="body" color="tertiary" style={{ textAlign: 'center', marginTop: theme.spacing.xxl }}>
-          Пошук по твоїй бібліотеці, спільній базі застосунку й одразу в Google Books.
-        </AppText>
-      ) : null}
     </ScreenContainer>
   );
 }

@@ -353,6 +353,73 @@ export const JournalRepository = {
   },
 
   /**
+   * Текстовий пошук по щоденнику для Global Personal Search (POLYTSIA V1.5, Фаза 6) — LIKE по
+   * `text` (і, для цитат, ще й по `comment`), окремо notes/quotes: Personal Search групує їх
+   * як два різні розділи результатів — "Щоденник" і "Цитати" (ТЗ Фази 6). Той самий
+   * `bookJoin`/`categoryJoin`, що й `listFeedPage` вище, — щоб рядок результату ніс назву й
+   * обкладинку книги без окремого N+1 запиту.
+   *
+   * Навмисно ОКРЕМИЙ метод, не розширення `listFeedPage`: інша вісь фільтрації (текст, не
+   * тип/обране/курсор), і обидві гілки (note+quote) тут завжди потрібні одночасно, на відміну
+   * від `listFeedPage`, де набір гілок залежить від `options.types`.
+   *
+   * `LIKE '%…%'` без FTS5 — свідомо мінімальна реалізація для Фази 6 (проста глобальна
+   * знахідка, невеликий `limit`). Повний аналіз масштабованості для 10 000+ записів (чи
+   * виправдана FTS5-міграція) — явно відкладений на Фазу 7 (JOURNAL SEARCH), яка ТЗ вимагає
+   * спершу перевірити розмір поточної моделі даних, перш ніж вводити FTS.
+   */
+  async searchFeed(
+    db: SQLiteDatabase,
+    query: string,
+    limit = 10,
+  ): Promise<{ notes: JournalFeedEntry[]; quotes: JournalFeedEntry[] }> {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return { notes: [], quotes: [] };
+    const pattern = `%${trimmed}%`;
+
+    const bookJoin = `
+      JOIN user_book ub ON ub.id = t.user_book_id
+      JOIN edition e ON e.id = ub.edition_id
+      JOIN work w ON w.id = e.work_id`;
+    const categoryJoin = `LEFT JOIN note_category nc ON nc.id = t.category_id`;
+
+    const [noteRows, quoteRows] = await Promise.all([
+      db.getAllAsync<JournalUnionRow & FeedJoinRow>(
+        `SELECT t.id AS id, 'note' AS kind, t.user_book_id AS user_book_id, NULL AS edition_id,
+                t.session_id AS session_id, t.page AS page, t.progress_percent AS progress_percent,
+                t.type AS type, t.category_id AS category_id, t.text AS text, NULL AS comment, t.tags AS tags,
+                t.is_favorite AS is_favorite, t.reaction AS reaction,
+                t.created_at AS created_at, t.updated_at AS updated_at,
+                w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
+                w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label
+         FROM note t${bookJoin} ${categoryJoin}
+         WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL
+           AND t.text LIKE ?
+         ORDER BY t.created_at DESC
+         LIMIT ?`,
+        [pattern, limit],
+      ),
+      db.getAllAsync<JournalUnionRow & FeedJoinRow>(
+        `SELECT t.id AS id, 'quote' AS kind, t.user_book_id AS user_book_id, t.edition_id AS edition_id,
+                t.session_id AS session_id, t.page AS page, t.progress_percent AS progress_percent,
+                'quote' AS type, NULL AS category_id, t.text AS text, t.comment AS comment, t.tags AS tags,
+                t.is_favorite AS is_favorite, t.reaction AS reaction,
+                t.created_at AS created_at, t.updated_at AS updated_at,
+                w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
+                w.cover_fallback_color AS cover_fallback_color, NULL AS category_label
+         FROM quote t${bookJoin}
+         WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL
+           AND (t.text LIKE ? OR t.comment LIKE ?)
+         ORDER BY t.created_at DESC
+         LIMIT ?`,
+        [pattern, pattern, limit],
+      ),
+    ]);
+
+    return { notes: noteRows.map(mapFeedRow), quotes: quoteRows.map(mapFeedRow) };
+  },
+
+  /**
    * Кількість записів по кожній реакції, по всій бібліотеці (Milestone 11, доповнення —
    * агрегована статистика "N смішних моментів..." на екрані щоденника). `GROUP BY reaction`
    * над union `note`+`quote`, лише непорожні (`reaction IS NOT NULL`). Ключі результату — сирі

@@ -105,6 +105,27 @@ export const ShelfRepository = {
     return rows.map((row) => ({ ...mapRow(row), bookCount: row.book_count }));
   },
 
+  /**
+   * Пошук полиць за назвою (POLYTSIA V1.5, Фаза 6 — Global Personal Search, домен "Полиці") —
+   * той самий JOIN+COUNT, що й `listAll`, лише з `WHERE s.name LIKE ?`.
+   */
+  async search(db: SQLiteDatabase, query: string, limit = 20): Promise<ShelfWithCount[]> {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return [];
+    const pattern = `%${trimmed}%`;
+    const rows = await db.getAllAsync<ShelfRow & { book_count: number }>(
+      `SELECT s.*, COUNT(sb.user_book_id) as book_count
+       FROM shelf s
+       LEFT JOIN shelf_book sb ON sb.shelf_id = s.id
+       WHERE s.name LIKE ?
+       GROUP BY s.id
+       ORDER BY s.sort_order ASC
+       LIMIT ?`,
+      [pattern, limit],
+    );
+    return rows.map((row) => ({ ...mapRow(row), bookCount: row.book_count }));
+  },
+
   async addBook(db: SQLiteDatabase, shelfId: string, userBookId: string): Promise<void> {
     await db.runAsync(
       `INSERT OR IGNORE INTO shelf_book (shelf_id, user_book_id, added_at) VALUES (?, ?, ?)`,

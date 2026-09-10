@@ -64,6 +64,23 @@ export const SeriesRepository = {
     return row ? mapSeriesRow(row) : null;
   },
 
+  /**
+   * Пошук серій за назвою (POLYTSIA V1.5, Фаза 6 — Global Personal Search, домен "Серії").
+   * Той самий підхід, що й `WorkRepository.search`/`ShelfRepository.search`: проста
+   * `LIKE '%…%'` без FTS — для кількості серій одного користувача (десятки, не тисячі)
+   * додаткова складність невиправдана.
+   */
+  async search(db: SQLiteDatabase, query: string, limit = 20): Promise<Series[]> {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return [];
+    const pattern = `%${trimmed}%`;
+    const rows = await db.getAllAsync<SeriesRow>(
+      `SELECT * FROM series WHERE name LIKE ? ORDER BY updated_at DESC LIMIT ?`,
+      [pattern, limit],
+    );
+    return rows.map(mapSeriesRow);
+  },
+
   async findOrCreateByName(db: SQLiteDatabase, name: string): Promise<Series> {
     const trimmed = name.trim();
     const existing = await SeriesRepository.findByName(db, trimmed);

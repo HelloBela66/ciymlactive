@@ -114,6 +114,12 @@ export const queryKeys = {
     // список на весь застосунок (не залежить від пошукового запиту користувача).
     top: ['trends', 'top'] as const,
   },
+  search: {
+    // POLYTSIA V1.5, Фаза 6 — Global Personal Search: окремий концепт від зовнішнього
+    // `providerSearch` нижче — шукає лише по вже наявних даних користувача (книги/автори,
+    // серії, полиці, щоденник, цитати), повністю офлайн.
+    personal: (query: string) => ['search', 'personal', query] as const,
+  },
   providerSearch: {
     byProvider: (providerId: string, query: string) => ['providerSearch', providerId, query] as const,
     // Префікс (без тексту запиту) — навмисно окремий ключ, а не похідне зрізання
