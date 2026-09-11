@@ -110,7 +110,19 @@ const config: ExpoConfig = {
         isAccessMediaLocationEnabled: false,
       },
     ],
+    // Milestone 11 (Фаза 4 «Капсула книги» — картка-спогад, і Фаза 5 «Recall» — «Поділитися»):
+    // `expo-image`/`expo-sharing` уже були прямими залежностями (`package.json`) без запису тут
+    // — `npx expo install --fix` (2026-09-11, вирівнювання версій під SDK 57) сам захотів
+    // дописати обидва в `plugins`, але не зміг — `app.config.ts` динамічний (TS), а не
+    // статичний `app.json`, автозапис підтримує лише останній. Проєкт без committed `ios/`/
+    // `android/` (керований CNG-workflow — `expo prebuild`/EAS Build генерують нативний код із
+    // цього конфігу щоразу), тож без явного запису тут native-конфіг цих двох плагінів (навіть
+    // якщо для обох він порожній — жоден не потребує додаткових дозволів/опцій) просто не
+    // застосується при наступному prebuild/EAS-білді. Дописано вручну, без опцій (як і хотів
+    // `expo install --fix`) — обом нічого конфігурувати.
+    'expo-image',
     'expo-secure-store',
+    'expo-sharing',
   ],
   experiments: {
     typedRoutes: true,
