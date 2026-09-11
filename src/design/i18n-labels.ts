@@ -74,6 +74,8 @@ export const memoryCardTemplateLabels = {
   quote: 'Цитата',
   stats: 'Статистика',
   minimal: 'Мінімалістична',
+  // POLYTSIA V1.6, Фаза 6 («До/Після») — п'ятий шаблон, SHARE CARD ТЗ: "«До / Після»".
+  beforeAfter: 'До / Після',
 } as const;
 
 export type MemoryCardTemplateLabel = keyof typeof memoryCardTemplateLabels;
@@ -84,6 +86,7 @@ export const memoryCardTemplateDescriptions = {
   quote: 'Улюблена цитата чи нотатка — головна на картці',
   stats: 'Час читання, сторінки й дні',
   minimal: 'Лише обкладинка й назва — без зайвого',
+  beforeAfter: 'Чого чекав від книги — і що вийшло насправді',
 } as const;
 
 export const readingGoalTypeLabels = {

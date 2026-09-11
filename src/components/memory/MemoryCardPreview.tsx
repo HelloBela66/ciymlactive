@@ -39,6 +39,14 @@ export interface MemoryCardPreviewProps {
    * водяного знаку (`moodSeedValues`), щоб та сама книга завжди виглядала однаково, а різні
    * книги — по-різному. */
   workId: string;
+  /** POLYTSIA V1.6, Фаза 6 («До/Після») — короткий "before"-текст для однойменного шаблону
+   * (`pickBeforeCardText`, `src/lib/beforeAfter.ts`); `reflection` вище тут-таки править за
+   * "after" (той самий `book_memory.reflection`, що вже показують решта шаблонів) — нового
+   * поля для "після" немає (ТЗ Фази 6, п. "Не створюй таблицю для derived analytics"). `null`,
+   * коли `pre_reading_reflection` немає взагалі, — шаблон сам показує ввічливий порожній стан
+   * замість того, щоб зникати з вибору (той самий підхід, що й шаблон "Цитата" без обраних
+   * записів). */
+  beforeText: string | null;
 }
 
 function StarRow({ value }: { value: number }) {
@@ -212,6 +220,7 @@ export function MemoryCardPreview({
   stats,
   genres,
   workId,
+  beforeText,
 }: MemoryCardPreviewProps) {
   const theme = useTheme();
   const accentColor = work.coverFallbackColor ?? theme.colors.accent;
@@ -412,6 +421,75 @@ export function MemoryCardPreview({
               ) : null}
               <SectionRule color={accentColor} />
             </View>
+          </View>
+        ) : null}
+
+        {template === 'beforeAfter' ? (
+          <View style={{ flex: 1, gap: theme.spacing.sm }}>
+            <View style={{ alignItems: 'center', gap: 2 }}>
+              <CoverThumbnail
+                coverUrl={work.coverUrl}
+                title={work.title}
+                fallbackColor={work.coverFallbackColor}
+                width={64}
+                height={94}
+                borderRadius={theme.radius.sm}
+              />
+              <AppText variant="heading" style={{ textAlign: 'center' }} numberOfLines={2}>
+                {work.title}
+              </AppText>
+              <SectionRule color={accentColor} />
+            </View>
+            <View style={{ flex: 1, gap: theme.spacing.sm, justifyContent: 'center' }}>
+              <View
+                style={{
+                  backgroundColor: theme.colors.accentSoft,
+                  borderRadius: theme.radius.md,
+                  padding: theme.spacing.sm,
+                  gap: 2,
+                }}
+              >
+                <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+                  ДО
+                </AppText>
+                {beforeText ? (
+                  <AppText variant="caption" style={{ fontStyle: 'italic' }} numberOfLines={3}>
+                    «{beforeText}»
+                  </AppText>
+                ) : (
+                  <AppText variant="micro" color="tertiary">
+                    Ще не заповнено на Book Details.
+                  </AppText>
+                )}
+              </View>
+              <View
+                style={{
+                  borderRadius: theme.radius.md,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  padding: theme.spacing.sm,
+                  gap: 2,
+                }}
+              >
+                <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+                  ПІСЛЯ
+                </AppText>
+                {reflection ? (
+                  <AppText variant="caption" style={{ fontStyle: 'italic' }} numberOfLines={3}>
+                    «{reflection}»
+                  </AppText>
+                ) : (
+                  <AppText variant="micro" color="tertiary">
+                    Ще нічого не написано.
+                  </AppText>
+                )}
+              </View>
+            </View>
+            {rating != null ? (
+              <View style={{ alignItems: 'center' }}>
+                <StarRow value={rating} />
+              </View>
+            ) : null}
           </View>
         ) : null}
 

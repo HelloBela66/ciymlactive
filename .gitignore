@@ -35,3 +35,8 @@ coverage/
 # Supabase CLI local/machine-specific state (project-ref, pooler URL, cached versions —
 # не секрети, але й не частина джерела; регенеруються `supabase link`/`functions deploy`)
 supabase/.temp/
+
+# Десктоп-застосунок Claude (Cowork) сам створює цю теку в корені проєкту — плоскі копії
+# щойно створених файлів на момент збереження на пристрій. Не частина джерела, не варто
+# комітити (і псує Jest — див. коментар біля testPathIgnorePatterns у jest.config.js).
+/Claude outputs/

@@ -24,7 +24,9 @@ import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel'
 import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { useBookCapsule } from '@/features/memory/useBookCapsule';
+import { usePreReadingReflection } from '@/features/memory/usePreReadingReflection';
 import { canCreateCapsule } from '@/lib/bookCapsule';
+import { pickBeforeCardText } from '@/lib/beforeAfter';
 import { computeBookStats } from '@/lib/bookStats';
 import { shareMemoryCardImage, saveMemoryCardImageToLibrary } from '@/lib/memoryCardFile';
 import { createLogger } from '@/lib/logger';
@@ -33,6 +35,7 @@ import type { MemoryCardTemplateId } from '@/types/bookMemory';
 import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
 import type { UserBookStatus } from '@/types/userBook';
+import type { PreReadingReflection } from '@/types/preReadingReflection';
 
 const log = createLogger('app/memory');
 
@@ -172,6 +175,78 @@ function BookCapsuleSection({
 }
 
 /**
+ * «До / Після» (POLYTSIA V1.6, Фаза 6 ТЗ) — порівняння `pre_reading_reflection` (заповнено на
+ * Book Details, `app/work/[workId].tsx`, ще ДО фінішу) з тим, що вже й так зібрано ПІСЛЯ фінішу
+ * на цьому самому екрані — власною рефлексією спогаду (`memory.reflection`, Фаза 7) і фактичною
+ * оцінкою (`rating.value`, п.23 ТЗ). Свідомо БЕЗ нового "after"-поля/таблиці — ТЗ прямо каже
+ * "Book Memory МОЖЕ показати" порівняння, а не збирати ще один текст; `book_memory`/`rating` —
+ * уже єдине джерело правди для "після" тут. Рендериться лише коли `pre_reading_reflection`
+ * узагалі існує — без нього порівнювати нічого (запрошення створити його — на Book Details,
+ * поки книга "Читаю", `docs/BEFORE_AFTER.md`).
+ */
+function BeforeAfterSection({
+  reflection,
+  afterText,
+  actualRating,
+}: {
+  reflection: PreReadingReflection;
+  afterText: string | null;
+  actualRating: number | null;
+}) {
+  const theme = useTheme();
+
+  return (
+    <Card style={{ gap: theme.spacing.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="swap-horizontal-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="heading">До / Після</AppText>
+      </View>
+
+      <View style={{ gap: theme.spacing.xs }}>
+        <AppText variant="caption" color="secondary" style={{ fontWeight: '600' }}>
+          До читання
+        </AppText>
+        {reflection.reasonText ? (
+          <AppText variant="body" style={{ fontStyle: 'italic' }}>
+            «{reflection.reasonText}»
+          </AppText>
+        ) : null}
+        {reflection.expectationText ? (
+          <AppText variant="body" style={{ fontStyle: 'italic' }}>
+            «{reflection.expectationText}»
+          </AppText>
+        ) : null}
+        {reflection.expectedRating != null ? (
+          <AppText variant="caption" color="secondary">
+            Очікував(ла): {reflection.expectedRating}
+          </AppText>
+        ) : null}
+      </View>
+
+      <View style={{ gap: theme.spacing.xs }}>
+        <AppText variant="caption" color="secondary" style={{ fontWeight: '600' }}>
+          Після читання
+        </AppText>
+        {afterText ? (
+          <AppText variant="body" style={{ fontStyle: 'italic' }}>
+            «{afterText}»
+          </AppText>
+        ) : (
+          <AppText variant="caption" color="tertiary">
+            Ще нічого не написано — додай кілька слів у спогад вище.
+          </AppText>
+        )}
+        {actualRating != null ? (
+          <AppText variant="caption" color="secondary">
+            Насправді: {actualRating}
+          </AppText>
+        ) : null}
+      </View>
+    </Card>
+  );
+}
+
+/**
  * Картка-спогад (Milestone 11, Фаза 8-9) — вибір шаблону, живий preview `MemoryCardPreview`,
  * і тепер (Фаза 9) — "Поділитися"/"Зберегти в галерею" повноцінним зображенням. Дані для
  * картки вже зібрані Фазою 7 (`book_memory.reflection`/`entry_refs`) — тут лише "яким
@@ -189,6 +264,7 @@ export default function MemoryCardScreen() {
   const { data: allEntries } = useJournalEntries(userBookId);
   const { data: sessions } = useReadingHistory(userBookId);
   const { data: rating } = useRating(userBookId);
+  const { data: preReadingReflection } = usePreReadingReflection(userBookId);
   // Лише для "вайбу" водяного знаку картки (`MemoryCardPreview`) — порожній масив за
   // замовчуванням (доки завантажується/якщо жанрів нема) коректний сам по собі: тоді вайб
   // просто детермінований за `workId`, а не за жанром (`pickCardMood`).
@@ -350,6 +426,7 @@ export default function MemoryCardScreen() {
                 stats={stats}
                 genres={genres ?? []}
                 workId={workId}
+                beforeText={pickBeforeCardText(preReadingReflection ?? null)}
               />
             </View>
 
@@ -378,6 +455,14 @@ export default function MemoryCardScreen() {
               pageCount={data.primaryEdition?.pageCount ?? null}
               userBookId={userBookId}
             />
+
+            {preReadingReflection ? (
+              <BeforeAfterSection
+                reflection={preReadingReflection}
+                afterText={memory.reflection}
+                actualRating={rating?.value ?? null}
+              />
+            ) : null}
 
             <RevisitLaterSection userBookId={userBookId} />
 

@@ -35,6 +35,10 @@ const BACKUP_TABLE_ORDER = [
   'note',
   'quote',
   'rating',
+  // POLYTSIA V1.6, Фаза 6 («До/Після») — одразу після `rating` (той самий сусід `user_book`,
+  // `014_pre_reading_reflection.ts`): `pre_reading_reflection` посилається лише на `user_book`
+  // (реальний FK), уже присутній у масиві раніше цього рядка.
+  'pre_reading_reflection',
   'book_memory',
   // POLYTSIA V1.6, Фаза 4 («Капсула книги») — одразу після `book_memory` (той самий сусід
   // `user_book`, `012_book_capsule.ts`): `book_capsule` посилається на `user_book` (реальний

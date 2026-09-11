@@ -16,7 +16,8 @@
     "series": [...], "series_entry": [...],
     "user_book": [...], "shelf": [...], "shelf_book": [...],
     "reading_session": [...], "reading_progress": [...],
-    "note_category": [...], "note": [...], "quote": [...], "rating": [...], "book_memory": [...],
+    "note_category": [...], "note": [...], "quote": [...], "rating": [...],
+    "pre_reading_reflection": [...], "book_memory": [...],
     "book_capsule": [...], "capsule_recall": [...],
     "owned_book": [...], "loan": [...],
     "reading_goal": [...], "reminder": [...],
@@ -60,6 +61,9 @@
    відновлюється звичайною вставкою, без окремого post-restore кроку: на відміну від капсул
    вище, у записів recall немає ні `expo-notifications`-стану, ні будь-чого прив'язаного до
    конкретного пристрою/запуску.
+8. POLYTSIA V1.6, Фаза 6 — `pre_reading_reflection` (нотатка "До читання", `docs/BEFORE_AFTER.md`)
+   відновлюється звичайною вставкою, той самий "без окремого кроку" випадок, що й `capsule_recall`
+   вище.
 
 ## Backup Health UX (Фаза 13)
 

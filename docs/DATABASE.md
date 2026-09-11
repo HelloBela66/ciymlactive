@@ -139,6 +139,15 @@ sync/catalog backend, але жодна читацька дія (старт се
     патерн, що й `reading_progress` → `reading_session`. `current_memory_text` — те, що
     користувач написав у відповідь на «Що ти пам'ятаєш зараз?» (optional, `NULL` коли порожнє
     — сам рядок все одно створюється, факт спроби важливий незалежно від тексту).
+14. **014_pre_reading_reflection** — «До/Після» (POLYTSIA V1.6, Фаза 6). Нова таблиця
+    `pre_reading_reflection`: pre-reading-нотатка, заповнювана на Book Details ПОКИ книга
+    "Читаю" (`docs/BEFORE_AFTER.md`). `UNIQUE(user_book_id)` — той самий сенс, що й
+    `rating`/`book_memory`: один живий стан, не накопичувана історія (на відміну від
+    `capsule_recall`), тому `upsert`. `reason_text`/`expectation_text` — два окремі nullable
+    поля один-в-один із питаннями ТЗ; `expected_rating` — той самий CHECK/крок 0.5, що й
+    `rating.value`, але `NULL`-able (необов'язкова, на відміну від фактичної оцінки). Немає
+    окремого поля для "після" — порівняння на `app/memory/[workId].tsx` бере "після" з уже
+    наявних `book_memory.reflection`/`rating.value`, докладніше — `docs/BEFORE_AFTER.md`.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -490,6 +499,22 @@ CREATE TABLE rating (
   updated_at TEXT NOT NULL
 );
 
+-- «До/Після» (`014_pre_reading_reflection.ts`, POLYTSIA V1.6 Фаза 6) — той самий
+-- UNIQUE(user_book_id)-патерн, що й rating вище (один живий стан, upsert, не історія).
+-- expected_rating — той самий CHECK/крок 0.5, що й rating.value, але IS NULL-able.
+CREATE TABLE pre_reading_reflection (
+  id TEXT PRIMARY KEY,
+  user_book_id TEXT NOT NULL UNIQUE REFERENCES user_book(id) ON DELETE CASCADE,
+  reason_text TEXT,
+  expectation_text TEXT,
+  expected_rating REAL CHECK (
+    expected_rating IS NULL
+    OR (expected_rating >= 0.5 AND expected_rating <= 5 AND (expected_rating * 2) = CAST(expected_rating * 2 AS INTEGER))
+  ),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- «Спогад про книгу» (`004_book_memory.ts` + `005_book_memory_template.ts`, Milestone 11
 -- Фаза 7-8) — щонайбільше один на книгу, той самий UNIQUE(user_book_id)-патерн, що й у rating
 -- вище. entry_refs — JSON-масив {id, kind} з ПОСИЛАННЯМИ на note/quote (не копія тексту) —
@@ -692,7 +717,9 @@ CREATE TABLE app_settings (
 вставки (`docs/BOOK_CAPSULES.md` §Бекап). `capsule_recall` (POLYTSIA V1.6 Фаза 5) — так само в
 бекапі, одразу після `book_capsule` — уся історія "спроб згадати" відновлюється разом з
 капсулами, жодного окремого post-restore кроку (на відміну від нагадувань) тут не потрібно —
-записи `capsule_recall` не мають ні власного OS-стану, ні сповіщень. Усе разом обгорнуто у:
+записи `capsule_recall` не мають ні власного OS-стану, ні сповіщень. `pre_reading_reflection`
+(POLYTSIA V1.6 Фаза 6) — одразу після `rating` (`docs/BACKUP_FORMAT.md`), той самий "жодного
+власного OS-стану" post-restore крок (простіше — жодного кроку взагалі). Усе разом обгорнуто у:
 
 ```json
 { "schemaVersion": 1, "exportedAt": "...", "app": "polytsya", "data": { "work": [...], "edition": [...], ... } }

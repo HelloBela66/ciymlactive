@@ -108,6 +108,12 @@ export const queryKeys = {
     // `BookCapsuleRepository.getByUserBookId` сама бере найновішу.
     byUserBook: (userBookId: string) => ['bookCapsule', 'byUserBook', userBookId] as const,
   },
+  preReadingReflection: {
+    // POLYTSIA V1.6, Фаза 6 («До/Після») — той самий "малий запит по одній книзі" сенс, що й
+    // `ratings.byUserBook`/`bookCapsule.byUserBook` вище (`pre_reading_reflection.user_book_id`
+    // — UNIQUE, `014_pre_reading_reflection.ts`).
+    byUserBook: (userBookId: string) => ['preReadingReflection', 'byUserBook', userBookId] as const,
+  },
   genres: {
     all: ['genres', 'all'] as const,
     byWork: (workId: string) => ['genres', 'byWork', workId] as const,

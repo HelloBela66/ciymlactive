@@ -16,7 +16,7 @@ export interface BookMemoryEntryRef {
  * (докладніше — коментар у міграції), тож розширення списку новим шаблоном ніколи не
  * вимагатиме rebuild-міграції, лише новий case у TypeScript.
  */
-export type MemoryCardTemplateId = 'classic' | 'quote' | 'stats' | 'minimal';
+export type MemoryCardTemplateId = 'classic' | 'quote' | 'stats' | 'minimal' | 'beforeAfter';
 
 /**
  * «Спогад про книгу» (Milestone 11, Фаза 7-8) — те, що користувач сам компонує на екрані

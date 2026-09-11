@@ -23,6 +23,12 @@ import { useActiveSession } from '@/features/reading-session/useActiveSession';
 import { useStartSession } from '@/features/reading-session/useSessionMutations';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
 import { useRating, useSetRating, useRemoveRating } from '@/features/book-details/useRating';
+import {
+  usePreReadingReflection,
+  useSavePreReadingReflection,
+  useRemovePreReadingReflection,
+} from '@/features/memory/usePreReadingReflection';
+import { canEditPreReadingReflection } from '@/lib/beforeAfter';
 import { useAllGenres, useGenresForWork, useToggleWorkGenre, useAddCustomGenre } from '@/features/book-details/useGenres';
 import { useTagsForWork, useAddTagToWork, useRemoveTagFromWork } from '@/features/book-details/useTags';
 import { useCreateNote, useRemoveNote } from '@/features/notes/useNotes';
@@ -512,6 +518,154 @@ function LibrarySection({
           />
         )
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * «До читання» (POLYTSIA V1.6, Фаза 6 ТЗ: "Для книги, яку користувач тільки починає,
+ * запропонуй optional pre-reading note. НЕ блокуй start reading."). Інлайн "розгорнути форму"
+ * патерн, той самий, що й `BookMemorySection` (`app/completion/[workId].tsx`) — не окремий
+ * маршрут (на відміну від Капсули, тут лише три легких поля, окремий екран був би зайвим).
+ * Статус уже реально змінюється тапом на чіп у `LibrarySection` вище незалежно від цієї форми
+ * (`handleStatusChange`) — форма лише запрошує, ніколи не блокує.
+ *
+ * Видима лише поки книга РЕАЛЬНО "Читаю" (`canEditPreReadingReflection`) — після завершення
+ * форма ховається: писати "до" заднім числом, уже знаючи фінал, підважило б сам сенс
+ * порівняння До/Після на Book Memory (`docs/BEFORE_AFTER.md` §Відомі обмеження). Уже збережена
+ * нотатка лишається видимою (лише для читання) — форма редагування ж доступна тільки поки
+ * умова вище виконується.
+ */
+function PreReadingReflectionSection({ userBookId, status }: { userBookId: string; status: UserBookStatus }) {
+  const theme = useTheme();
+  const { data: reflection, isLoading } = usePreReadingReflection(userBookId);
+  const save = useSavePreReadingReflection();
+  const remove = useRemovePreReadingReflection();
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [reasonText, setReasonText] = useState('');
+  const [expectationText, setExpectationText] = useState('');
+  const [expectedRating, setExpectedRating] = useState<number | null>(null);
+
+  const canEdit = canEditPreReadingReflection(status);
+
+  if (isLoading) return null;
+  if (!reflection && !canEdit) return null;
+
+  const startEditing = () => {
+    setReasonText(reflection?.reasonText ?? '');
+    setExpectationText(reflection?.expectationText ?? '');
+    setExpectedRating(reflection?.expectedRating ?? null);
+    setIsEditing(true);
+  };
+
+  const handleSave = () => {
+    save.mutate(
+      {
+        userBookId,
+        reasonText: reasonText.trim() || null,
+        expectationText: expectationText.trim() || null,
+        expectedRating,
+      },
+      { onSuccess: () => setIsEditing(false) },
+    );
+  };
+
+  const handleRemove = () => {
+    if (!reflection) return;
+    remove.mutate({ id: reflection.id, userBookId }, { onSuccess: () => setIsEditing(false) });
+  };
+
+  return (
+    <View style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="hourglass-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="heading">До читання</AppText>
+      </View>
+
+      {isEditing ? (
+        <Card style={{ gap: theme.spacing.sm }}>
+          <LabeledInput
+            label="Чому хочеш прочитати цю книгу? (необов'язково)"
+            value={reasonText}
+            onChangeText={setReasonText}
+            multiline
+            style={{ minHeight: 56, paddingTop: theme.spacing.sm, textAlignVertical: 'top' }}
+          />
+          <LabeledInput
+            label="Чого очікуєш? Який настрій хочеш зловити? (необов'язково)"
+            value={expectationText}
+            onChangeText={setExpectationText}
+            multiline
+            style={{ minHeight: 56, paddingTop: theme.spacing.sm, textAlignVertical: 'top' }}
+          />
+          <View style={{ gap: theme.spacing.xs }}>
+            <AppText variant="caption" color="secondary">
+              Очікувана оцінка (необов'язково)
+            </AppText>
+            <StarRating value={expectedRating} onChange={setExpectedRating} />
+            {expectedRating != null ? (
+              <Pressable
+                onPress={() => setExpectedRating(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Прибрати очікувану оцінку"
+              >
+                <AppText variant="caption" color="secondary">
+                  Прибрати оцінку
+                </AppText>
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <Button label={save.isPending ? 'Зберігаю…' : 'Зберегти'} onPress={handleSave} disabled={save.isPending} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Скасувати" variant="secondary" onPress={() => setIsEditing(false)} />
+            </View>
+          </View>
+          {reflection ? (
+            <Pressable onPress={handleRemove} accessibilityRole="button" accessibilityLabel='Видалити нотатку "До читання"'>
+              <AppText variant="caption" color="danger" style={{ textAlign: 'center' }}>
+                Видалити нотатку
+              </AppText>
+            </Pressable>
+          ) : null}
+        </Card>
+      ) : reflection ? (
+        <Card style={{ gap: theme.spacing.sm }}>
+          {reflection.reasonText ? (
+            <AppText variant="body" color="secondary" style={{ fontStyle: 'italic' }}>
+              «{reflection.reasonText}»
+            </AppText>
+          ) : null}
+          {reflection.expectationText ? (
+            <AppText variant="body" style={{ fontStyle: 'italic' }}>
+              «{reflection.expectationText}»
+            </AppText>
+          ) : null}
+          {reflection.expectedRating != null ? (
+            <AppText variant="caption" color="secondary">
+              Очікувана оцінка: {reflection.expectedRating}
+            </AppText>
+          ) : null}
+          {canEdit ? (
+            <Pressable onPress={startEditing} accessibilityRole="button" accessibilityLabel='Редагувати нотатку "До читання"'>
+              <AppText variant="caption" color="accent" style={{ textAlign: 'center' }}>
+                Редагувати
+              </AppText>
+            </Pressable>
+          ) : null}
+        </Card>
+      ) : (
+        <Card style={{ gap: theme.spacing.sm, alignItems: 'center' }}>
+          <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+            Запиши, чому обрав цю книгу й чого від неї чекаєш — потім зможеш порівняти з тим,
+            як усе вийшло насправді.
+          </AppText>
+          <Button label="Додати нотатку" variant="secondary" onPress={startEditing} />
+        </Card>
+      )}
     </View>
   );
 }
@@ -1069,6 +1223,10 @@ export default function BookDetailsScreen() {
                 userBook={data.userBook}
                 ownedBook={data.ownedBook}
               />
+            ) : null}
+
+            {data.userBook ? (
+              <PreReadingReflectionSection userBookId={data.userBook.id} status={data.userBook.status} />
             ) : null}
 
             {data.userBook && data.primaryEdition ? (

@@ -252,6 +252,13 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     ['rating-1', 'user_book-2', 4.5, 'Перечитував не раз.', t1, t1],
   );
 
+  // ---- нотатка "До читання" (POLYTSIA V1.6, Фаза 6) ----
+  await db.runAsync(
+    `INSERT INTO pre_reading_reflection (id, user_book_id, reason_text, expectation_text, expected_rating, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?)`,
+    ['pre-reading-1', 'user_book-2', 'Порадили друзі.', 'Чекаю щось атмосферне й неспішне.', 4, t0, t0],
+  );
+
   // ---- спогад про книгу ----
   await db.runAsync(
     `INSERT INTO book_memory (id, user_book_id, reflection, entry_refs, created_at, updated_at, template_id) VALUES (?,?,?,?,?,?,?)`,
@@ -372,6 +379,7 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
     expect(exported.quote?.some((r) => r.reaction != null)).toBe(true); // реакції (quote)
     expect(exported.reading_goal).toHaveLength(1); // цілі
     expect(exported.rating).toHaveLength(1); // рейтинги
+    expect(exported.pre_reading_reflection).toHaveLength(1); // нотатка "До читання" (Фаза 6)
     expect(exported.book_capsule).toHaveLength(1); // капсула книги (Фаза 4)
     expect(exported.capsule_recall).toHaveLength(1); // спроба згадати книгу (Фаза 5)
     expect(exported.loan).toHaveLength(1); // позики
