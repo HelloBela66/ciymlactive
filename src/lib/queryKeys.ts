@@ -114,6 +114,15 @@ export const queryKeys = {
     // — UNIQUE, `014_pre_reading_reflection.ts`).
     byUserBook: (userBookId: string) => ['preReadingReflection', 'byUserBook', userBookId] as const,
   },
+  loreEntities: {
+    // POLYTSIA V1.6, Фаза 9-10 («Персонажі» → PERSONAL LORE) — той самий рівень, що й
+    // `genres.byWork`/`tags.byWork` нижче: `lore_entity.work_id`, не `user_book_id`
+    // (`015_lore_entity.ts`).
+    byWork: (workId: string) => ['loreEntities', 'byWork', workId] as const,
+    // Персонажі, пов'язані з конкретним записом щоденника (`journal_lore_link`) — той самий
+    // "малий запит по одному запису" сенс, що й `journal.bySession`.
+    linkedEntries: (loreEntityId: string) => ['loreEntities', 'linkedEntries', loreEntityId] as const,
+  },
   genres: {
     all: ['genres', 'all'] as const,
     byWork: (workId: string) => ['genres', 'byWork', workId] as const,

@@ -25,6 +25,7 @@ import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel'
 import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { useBookCapsule } from '@/features/memory/useBookCapsule';
+import { useLoreEntities } from '@/features/lore/useLoreEntities';
 import { usePreReadingReflection } from '@/features/memory/usePreReadingReflection';
 import { canCreateCapsule } from '@/lib/bookCapsule';
 import { pickBeforeCardText } from '@/lib/beforeAfter';
@@ -171,6 +172,36 @@ function BookCapsuleSection({
           onPress={() => router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)}
         />
       ) : null}
+    </Card>
+  );
+}
+
+/**
+ * «Персонажі» (POLYTSIA V1.6, Фаза 9 ТЗ, entry point #2 — Book Memory screen). Та сама
+ * компактна картка, що й `CharactersSection` на `app/work/[workId].tsx` (Book Details),
+ * навмисно продубльована локально — той самий підхід, що й `BookCapsuleSection`/
+ * `RevisitLaterEntryLine` вище на цьому екрані.
+ */
+function CharactersSection({ workId }: { workId: string }) {
+  const theme = useTheme();
+  const { data: entities, isLoading } = useLoreEntities(workId);
+  if (isLoading) return null;
+
+  const count = (entities ?? []).filter((entity) => entity.type === 'character').length;
+
+  return (
+    <Card style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="people-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="body" color="secondary" style={{ flex: 1 }}>
+          {count > 0 ? `Персонажів додано: ${count}.` : 'Ще не додано жодного персонажа.'}
+        </AppText>
+      </View>
+      <Button
+        label="Керувати персонажами"
+        variant="secondary"
+        onPress={() => router.push({ pathname: '/characters/[workId]', params: { workId } } as unknown as Href)}
+      />
     </Card>
   );
 }
@@ -474,6 +505,8 @@ export default function MemoryCardScreen() {
             ) : null}
 
             <RevisitLaterSection userBookId={userBookId} />
+
+            <CharactersSection workId={data.work.id} />
 
             <BookCapsuleSection
               userBookId={data.userBook.id}

@@ -30,6 +30,7 @@ import {
 } from '@/features/memory/usePreReadingReflection';
 import { canEditPreReadingReflection } from '@/lib/beforeAfter';
 import { computeStaleReadingInfo, describeStaleReading } from '@/lib/staleReading';
+import { useLoreEntities } from '@/features/lore/useLoreEntities';
 import { useAllGenres, useGenresForWork, useToggleWorkGenre, useAddCustomGenre } from '@/features/book-details/useGenres';
 import { useTagsForWork, useAddTagToWork, useRemoveTagFromWork } from '@/features/book-details/useTags';
 import { useCreateNote, useRemoveNote } from '@/features/notes/useNotes';
@@ -561,6 +562,42 @@ function StaleReadingSection({
         label="Згадати, де я зупинився"
         variant="secondary"
         onPress={() => router.push({ pathname: '/recap/[workId]', params: { workId } } as unknown as Href)}
+      />
+    </Card>
+  );
+}
+
+/**
+ * «Персонажі» (POLYTSIA V1.6, Фаза 9 ТЗ: "На Book Details/Memory: «Персонажі»") — компактна
+ * картка: кількість уже доданих персонажів (0, якщо ще нема жодного) і кнопка на повний список
+ * (`app/characters/[workId].tsx`). Той самий "компактна картка + посилання на власний екран"
+ * підхід, що й `BookCapsuleSection` (`app/memory/[workId].tsx`) — навмисно продубльована
+ * локально на обох екранах (той самий house-патерн, що й `RevisitLaterEntryLine`/
+ * `StaleReadingSection`).
+ *
+ * Доступна незалежно від статусу книги (на відміну від `StaleReadingSection`/
+ * `PreReadingReflectionSection`) — персонажів можна занотовувати в будь-який момент, той самий
+ * рівень, що й жанри/теги твору.
+ */
+function CharactersSection({ workId }: { workId: string }) {
+  const theme = useTheme();
+  const { data: entities, isLoading } = useLoreEntities(workId);
+  if (isLoading) return null;
+
+  const count = (entities ?? []).filter((entity) => entity.type === 'character').length;
+
+  return (
+    <Card style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="people-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="body" color="secondary" style={{ flex: 1 }}>
+          {count > 0 ? `Персонажів додано: ${count}.` : 'Ще не додано жодного персонажа.'}
+        </AppText>
+      </View>
+      <Button
+        label="Керувати персонажами"
+        variant="secondary"
+        onPress={() => router.push({ pathname: '/characters/[workId]', params: { workId } } as unknown as Href)}
       />
     </Card>
   );
@@ -1272,6 +1309,8 @@ export default function BookDetailsScreen() {
             {data.userBook ? (
               <StaleReadingSection status={data.userBook.status} sessions={sessions} workId={data.work.id} />
             ) : null}
+
+            <CharactersSection workId={data.work.id} />
 
             {data.userBook ? (
               <PreReadingReflectionSection userBookId={data.userBook.id} status={data.userBook.status} />

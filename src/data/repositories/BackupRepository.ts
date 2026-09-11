@@ -20,6 +20,11 @@ const BACKUP_TABLE_ORDER = [
   'work',
   'work_author',
   'work_genre',
+  // POLYTSIA V1.6, Фаза 9-10 («Персонажі» → PERSONAL LORE) — одразу після `work_genre` (той
+  // самий сусід, `015_lore_entity.ts`): `lore_entity` посилається лише на `work` (реальний FK),
+  // уже присутній у масиві раніше цього рядка. `journal_lore_link` — нижче, поруч із `note`/
+  // `quote` (потребує ОБОХ `lore_entity` і `note`/`quote` для коректного insert-порядку).
+  'lore_entity',
   'edition',
   'edition_translator',
   'field_provenance',
@@ -50,6 +55,11 @@ const BACKUP_TABLE_ORDER = [
   // `capsule_recall` посилається на `book_capsule` РЕАЛЬНИМ FK (`ON DELETE CASCADE`), який уже
   // присутній у масиві раніше цього рядка, тож insert-порядок (батьки перед дітьми) не порушується.
   'capsule_recall',
+  // POLYTSIA V1.6, Фаза 9-10 — одразу після `capsule_recall` (`015_lore_entity.ts`):
+  // `journal_lore_link` посилається РЕАЛЬНИМ FK на `lore_entity` (`ON DELETE CASCADE`, вставлено
+  // вище, поруч із `work_genre`) і М'ЯКО на `note`/`quote` (без FK, `entry_kind`/`entry_id`, той
+  // самий підхід, що й `tagged_item`) — усі трое вже присутні в масиві раніше цього рядка.
+  'journal_lore_link',
   'owned_book',
   'loan',
   'reading_goal',

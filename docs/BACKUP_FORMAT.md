@@ -11,14 +11,14 @@
   "data": {
     "author": [...], "publisher": [...], "translator": [...], "genre": [...],
     "book_recommendation_shown": [...], "tag": [...],
-    "work": [...], "work_author": [...], "work_genre": [...],
+    "work": [...], "work_author": [...], "work_genre": [...], "lore_entity": [...],
     "edition": [...], "edition_translator": [...], "book_source": [...], "field_provenance": [...],
     "series": [...], "series_entry": [...],
     "user_book": [...], "shelf": [...], "shelf_book": [...],
     "reading_session": [...], "reading_progress": [...],
     "note_category": [...], "note": [...], "quote": [...], "rating": [...],
     "pre_reading_reflection": [...], "book_memory": [...],
-    "book_capsule": [...], "capsule_recall": [...],
+    "book_capsule": [...], "capsule_recall": [...], "journal_lore_link": [...],
     "owned_book": [...], "loan": [...],
     "reading_goal": [...], "reminder": [...],
     "app_settings": [...]
@@ -64,6 +64,10 @@
 8. POLYTSIA V1.6, Фаза 6 — `pre_reading_reflection` (нотатка "До читання", `docs/BEFORE_AFTER.md`)
    відновлюється звичайною вставкою, той самий "без окремого кроку" випадок, що й `capsule_recall`
    вище.
+9. POLYTSIA V1.6, Фаза 9-10 — `lore_entity`/`journal_lore_link` («Персонажі» → PERSONAL LORE,
+   `docs/PERSONAL_LORE.md`) відновлюються звичайною вставкою, той самий "без окремого кроку"
+   випадок, що й `capsule_recall`/`pre_reading_reflection` вище — жодного `expo-notifications`-
+   стану чи будь-чого прив'язаного до конкретного пристрою/запуску.
 
 ## Backup Health UX (Фаза 13)
 

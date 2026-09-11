@@ -290,6 +290,19 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     ['recall-1', 'capsule-1', 'Пам\'ятаю дощ на початку.', t1, t1],
   );
 
+  // ---- персонажі / PERSONAL LORE (POLYTSIA V1.6, Фаза 9-10) ----
+  await db.runAsync(
+    `INSERT INTO lore_entity (
+       id, work_id, type, name, description, first_seen_page, first_seen_progress, reaction,
+       is_favorite, created_at, updated_at, deleted_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ['lore-1', 'work-2', 'character', 'Фродо Беггінс', 'Носій персня.', 12, 1, 'like', 1, t0, t0, null],
+  );
+  await db.runAsync(
+    `INSERT INTO journal_lore_link (id, lore_entity_id, entry_kind, entry_id, created_at) VALUES (?,?,?,?,?)`,
+    ['journal-lore-link-1', 'lore-1', 'quote', 'quote-1', t1],
+  );
+
   // ---- фізична бібліотека (позики) ----
   await db.runAsync(
     `INSERT INTO owned_book (id, edition_id, condition, location, purchase_date, purchase_price, purchase_currency,
@@ -382,6 +395,8 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
     expect(exported.pre_reading_reflection).toHaveLength(1); // нотатка "До читання" (Фаза 6)
     expect(exported.book_capsule).toHaveLength(1); // капсула книги (Фаза 4)
     expect(exported.capsule_recall).toHaveLength(1); // спроба згадати книгу (Фаза 5)
+    expect(exported.lore_entity).toHaveLength(1); // персонажі (Фаза 9-10)
+    expect(exported.journal_lore_link).toHaveLength(1); // зв'язок персонажа із записом щоденника
     expect(exported.loan).toHaveLength(1); // позики
     expect(exported.app_settings).toHaveLength(1); // налаштування
     expect(exported.app_settings?.[0]?.theme).toBe('dark');

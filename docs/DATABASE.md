@@ -148,6 +148,18 @@ sync/catalog backend, але жодна читацька дія (старт се
     `rating.value`, але `NULL`-able (необов'язкова, на відміну від фактичної оцінки). Немає
     окремого поля для "після" — порівняння на `app/memory/[workId].tsx` бере "після" з уже
     наявних `book_memory.reflection`/`rating.value`, докладніше — `docs/BEFORE_AFTER.md`.
+15. **015_lore_entity** — «Персонажі» (POLYTSIA V1.6, Фаза 9), уніфіковано одразу як PERSONAL
+    LORE (Фаза 10 ТЗ) — `docs/PERSONAL_LORE.md`. Дві нові таблиці: `lore_entity` (`work_id` →
+    `work`, `ON DELETE CASCADE` — той самий рівень, що й жанри/теги, НЕ `user_book_id`; `type`
+    — вільний `TEXT` без CHECK, фіксований лише `LoreEntityType`, `src/types/loreEntity.ts` —
+    Фаза 9 UI показує лише `'character'`, `place`/`term`/`organization` прийдуть у Фазі 10 без
+    нової міграції; `reaction` — той самий "вільний TEXT" підхід, що й `note.reaction`) і
+    `journal_lore_link` (полiморфний зв'язок персонажа із записом щоденника — `lore_entity_id`
+    РЕАЛЬНИЙ FK, `entry_kind`/`entry_id` — м'яке посилання БЕЗ FK, той самий підхід, що й
+    `tagged_item`; `UNIQUE(lore_entity_id, entry_kind, entry_id)` для ідемпотентного
+    зв'язування). Одна таблиця замість окремої `character`-таблиці — ТЗ Фази 10 прямо застерігає
+    "не створюй duplicate schema лише тому, що prompt спочатку називає Character", докладне
+    обґрунтування — `docs/PERSONAL_LORE.md` §Архітектура.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
