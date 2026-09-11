@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getDatabase } from '@/data/db';
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { EditionRepository } from '@/data/repositories/EditionRepository';
+import { DnfReflectionRepository } from '@/data/repositories/DnfReflectionRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { createLogger } from '@/lib/logger';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
@@ -32,9 +33,23 @@ export function useUpdateUserBookStatus() {
     mutationFn: async ({ id, status }) => {
       const db = await getDatabase();
       await UserBookRepository.updateStatus(db, id, status);
+      // DNF IMPROVEMENT (Фаза 12) — фіксує сторінку/дату "миті DNF" рівно один раз, у тій самій
+      // мутації, що й сам перехід статусу (той самий момент, що й `started_at`/`finished_at`
+      // усередині `updateStatus`). Читаємо оновлений `user_book` ПІСЛЯ `updateStatus`, а не
+      // `current_page` з аргументів мутації — цей хук міняє лише статус, поточна сторінка тут
+      // не проп, тож єдине надійне джерело "сторінки на момент DNF" — сам рядок у БД.
+      if (status === 'did_not_finish') {
+        const userBook = await UserBookRepository.getById(db, id);
+        if (userBook) {
+          await DnfReflectionRepository.captureIfMissing(db, id, userBook.currentPage);
+        }
+      }
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       invalidate();
+      if (variables.status === 'did_not_finish') {
+        queryClient.invalidateQueries({ queryKey: queryKeys.dnfReflection.byUserBook(variables.id) });
+      }
       // Пряма зміна статусу (Milestone 10 fix6, `docs/STATUS_V1.md` п. 3.4) — на відміну від
       // завершення сесії читання (`useFinishSession`, `useSessionMutations.ts`), тут немає
       // окремого запису reading_session, за яким статистика/цілі/Wrapped рахувались би

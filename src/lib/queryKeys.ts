@@ -114,6 +114,12 @@ export const queryKeys = {
     // — UNIQUE, `014_pre_reading_reflection.ts`).
     byUserBook: (userBookId: string) => ['preReadingReflection', 'byUserBook', userBookId] as const,
   },
+  dnfReflection: {
+    // POLYTSIA V1.6, Фаза 12 (DNF IMPROVEMENT) — той самий "малий запит по одній книзі" сенс,
+    // що й `preReadingReflection.byUserBook` вище (`dnf_reflection.user_book_id` — UNIQUE,
+    // `017_dnf_reflection.ts`).
+    byUserBook: (userBookId: string) => ['dnfReflection', 'byUserBook', userBookId] as const,
+  },
   loreEntities: {
     // POLYTSIA V1.6, Фаза 9-10 («Персонажі» → PERSONAL LORE) — той самий рівень, що й
     // `genres.byWork`/`tags.byWork` нижче: `lore_entity.work_id`, не `user_book_id`

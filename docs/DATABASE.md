@@ -166,6 +166,15 @@ sync/catalog backend, але жодна читацька дія (старт се
     каже "Default: ON для active books". Рівень — `user_book`, не `work`: те саме поняття
     "поточного прогресу" (`current_page`), з яким порівнюється позиція записів, уже живе на
     цьому рівні.
+17. **017_dnf_reflection** — DNF IMPROVEMENT (POLYTSIA V1.6, Фаза 12) — `docs/DNF_IMPROVEMENT.md`.
+    Нова таблиця `dnf_reflection` (`user_book_id` — UNIQUE, `ON DELETE CASCADE`, той самий
+    "щонайбільше один рядок на книгу" підхід, що й `pre_reading_reflection`). `page` — `NOT
+    NULL` (на відміну від `lore_entity.first_seen_page`): це автоматичний знімок
+    `user_book.current_page` у мить переходу статусу в "Не дочитав"
+    (`DnfReflectionRepository.captureIfMissing`, викликається з `useUpdateUserBookStatus`), не
+    поле форми — сторінка тут завжди відома. `reason` — вільний `TEXT` без CHECK, фіксований
+    лише `DnfReasonId` (`src/design/dnfReason.ts`, сім причин ТЗ); `note` — окреме вільне поле
+    (ТЗ: "Optional free text").
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12

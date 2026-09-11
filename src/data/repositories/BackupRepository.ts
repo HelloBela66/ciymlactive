@@ -44,6 +44,10 @@ const BACKUP_TABLE_ORDER = [
   // `014_pre_reading_reflection.ts`): `pre_reading_reflection` посилається лише на `user_book`
   // (реальний FK), уже присутній у масиві раніше цього рядка.
   'pre_reading_reflection',
+  // POLYTSIA V1.6, Фаза 12 (DNF IMPROVEMENT) — той самий сусід `user_book`, що й
+  // `pre_reading_reflection` вище (`017_dnf_reflection.ts`): `dnf_reflection` посилається лише
+  // на `user_book` (реальний FK), уже присутній у масиві раніше цього рядка.
+  'dnf_reflection',
   'book_memory',
   // POLYTSIA V1.6, Фаза 4 («Капсула книги») — одразу після `book_memory` (той самий сусід
   // `user_book`, `012_book_capsule.ts`): `book_capsule` посилається на `user_book` (реальний

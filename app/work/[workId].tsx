@@ -34,6 +34,9 @@ import {
   useRemovePreReadingReflection,
 } from '@/features/memory/usePreReadingReflection';
 import { canEditPreReadingReflection } from '@/lib/beforeAfter';
+import { useDnfReflection, useSaveDnfReflectionDetails } from '@/features/memory/useDnfReflection';
+import { canEditDnfReflection, computeDnfProgressPercent } from '@/lib/dnfReflection';
+import { DNF_REASON_META, DNF_REASON_ORDER, isDnfReasonId, type DnfReasonId } from '@/design/dnfReason';
 import { computeStaleReadingInfo, describeStaleReading } from '@/lib/staleReading';
 import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { useLoreEntities } from '@/features/lore/useLoreEntities';
@@ -70,6 +73,16 @@ const JOURNAL_KIND_OPTIONS: { value: JournalEntryKind; label: string }[] = [
 const STATUS_OPTIONS = (Object.keys(userBookStatusLabels) as UserBookStatus[]).map((value) => ({
   value,
   label: userBookStatusLabels[value],
+}));
+
+/** DNF IMPROVEMENT (Фаза 12) — рівно сім причин ТЗ, у тому самому порядку. Тип чипів —
+ * `DnfReasonId | ''` (не лише `DnfReasonId`) — на відміну від `STATUS_OPTIONS` вище, причина
+ * DNF необов'язкова (ТЗ: "optional reason"), а `ChipSelect` завжди показує рівно один вибраний
+ * чип; `''` — сентинел "нічого не обрано", якому свідомо НЕ відповідає жоден пункт списку, тож
+ * жоден чип не підсвічується, поки користувач сам щось не натисне. */
+const DNF_REASON_OPTIONS: { value: DnfReasonId; label: string }[] = DNF_REASON_ORDER.map((id) => ({
+  value: id,
+  label: DNF_REASON_META[id].label,
 }));
 
 /** `''`/пробіли/сміття — усі рівнозначно "сторінку не вказано" (той самий підхід, що й
@@ -804,6 +817,131 @@ function PreReadingReflectionSection({ userBookId, status }: { userBookId: strin
 }
 
 /**
+ * «Не дочитав» (POLYTSIA V1.6, Фаза 12 ТЗ: DNF IMPROVEMENT). ТЗ §UX PRINCIPLE: "DNF не є
+ * failure. Microcopy повинна бути neutral... Не використовуй broken streak/negative
+ * achievement" — жодних сумних ілюстрацій чи докорів, той самий нейтральний тон, що вже
+ * усталений для інших "стан книги" секцій (`StaleReadingSection`: "Не використовуй guilt
+ * language").
+ *
+ * На відміну від `PreReadingReflectionSection` вище, рядок `dnf_reflection` завжди вже існує
+ * (щойно статус хоч раз став "Не дочитав") — `useDnfReflection`, автоматично зафіксований
+ * `DnfReflectionRepository.captureIfMissing` усередині `useUpdateUserBookStatus`, а не формою.
+ * Тому тут немає "запрошення почати" — лише "додати деталі" (причина/нотатка) до вже існуючого
+ * знімка сторінки й дати. Сторінка/дата НЕ редагуються — лише причина й нотатка
+ * (`useSaveDnfReflectionDetails`).
+ *
+ * Видима лише коли `dnf_reflection` уже існує (`reflection != null`) — для книги, яка ніколи не
+ * була "Не дочитав", секції просто нема, той самий "quiet degradation" підхід, що й решта
+ * секцій цього екрана. Форма редагування — лише поки статус РЕАЛЬНО "Не дочитав"
+ * (`canEditDnfReflection`); сам запис лишається видимим (read-only) і після зміни статусу —
+ * той самий підхід, що й `canEdit`/`reflection` у `PreReadingReflectionSection`.
+ */
+function DnfReflectionSection({
+  userBookId,
+  status,
+  pageCount,
+}: {
+  userBookId: string;
+  status: UserBookStatus;
+  pageCount: number | null;
+}) {
+  const theme = useTheme();
+  const { data: reflection, isLoading } = useDnfReflection(userBookId);
+  const save = useSaveDnfReflectionDetails();
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [reason, setReason] = useState<DnfReasonId | ''>('');
+  const [note, setNote] = useState('');
+
+  const canEdit = canEditDnfReflection(status);
+
+  if (isLoading) return null;
+  if (!reflection) return null;
+
+  const hasDetails = reflection.reason != null || reflection.note != null;
+  const reasonMeta = reflection.reason && isDnfReasonId(reflection.reason) ? DNF_REASON_META[reflection.reason] : null;
+  const progressPercent = computeDnfProgressPercent(reflection.page, pageCount);
+
+  const startEditing = () => {
+    setReason(reflection.reason && isDnfReasonId(reflection.reason) ? reflection.reason : '');
+    setNote(reflection.note ?? '');
+    setIsEditing(true);
+  };
+
+  const handleSave = () => {
+    save.mutate(
+      { userBookId, reason: reason || null, note: note.trim() || null },
+      { onSuccess: () => setIsEditing(false) },
+    );
+  };
+
+  return (
+    <View style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="bookmark-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="heading">Не дочитав</AppText>
+      </View>
+
+      {isEditing ? (
+        <Card style={{ gap: theme.spacing.sm }}>
+          <ChipSelect
+            label="Причина (необов'язково)"
+            options={DNF_REASON_OPTIONS}
+            value={reason}
+            onChange={setReason}
+            disabled={save.isPending}
+          />
+          <LabeledInput
+            label="Нотатка (необов'язково)"
+            value={note}
+            onChangeText={setNote}
+            multiline
+            style={{ minHeight: 56, paddingTop: theme.spacing.sm, textAlignVertical: 'top' }}
+          />
+          <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <Button label={save.isPending ? 'Зберігаю…' : 'Зберегти'} onPress={handleSave} disabled={save.isPending} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Скасувати" variant="secondary" onPress={() => setIsEditing(false)} />
+            </View>
+          </View>
+        </Card>
+      ) : (
+        <Card style={{ gap: theme.spacing.sm }}>
+          <AppText variant="caption" color="secondary">
+            Зупинився на сторінці {reflection.page}
+            {progressPercent != null ? ` (${Math.round(progressPercent)}%)` : ''}
+          </AppText>
+          {reasonMeta ? <AppText variant="body">{reasonMeta.label}</AppText> : null}
+          {reflection.note ? (
+            <AppText variant="body" color="secondary" style={{ fontStyle: 'italic' }}>
+              «{reflection.note}»
+            </AppText>
+          ) : null}
+          {!hasDetails ? (
+            <AppText variant="caption" color="tertiary" style={{ textAlign: 'center' }}>
+              Не кожна книга має бути дочитана.
+            </AppText>
+          ) : null}
+          {canEdit ? (
+            <Pressable
+              onPress={startEditing}
+              accessibilityRole="button"
+              accessibilityLabel={hasDetails ? 'Редагувати нотатку про незакінчене читання' : 'Додати причину чи нотатку'}
+            >
+              <AppText variant="caption" color="accent" style={{ textAlign: 'center' }}>
+                {hasDetails ? 'Редагувати' : 'Додати причину чи нотатку'}
+              </AppText>
+            </Pressable>
+          ) : null}
+        </Card>
+      )}
+    </View>
+  );
+}
+
+/**
  * Кнопка старту/продовження читання (Milestone 3). Активна сесія в застосунку щонайбільше
  * одна — якщо вона належить іншій книзі, тут просто повідомляємо про це замість того, щоб
  * дозволити почати другу паралельну сесію (докладніше — ReadingSessionRepository).
@@ -1405,6 +1543,14 @@ export default function BookDetailsScreen() {
 
             {data.userBook ? (
               <PreReadingReflectionSection userBookId={data.userBook.id} status={data.userBook.status} />
+            ) : null}
+
+            {data.userBook ? (
+              <DnfReflectionSection
+                userBookId={data.userBook.id}
+                status={data.userBook.status}
+                pageCount={data.primaryEdition?.pageCount ?? null}
+              />
             ) : null}
 
             {data.userBook && data.primaryEdition ? (

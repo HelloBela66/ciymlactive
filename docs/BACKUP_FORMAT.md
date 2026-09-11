@@ -17,7 +17,7 @@
     "user_book": [...], "shelf": [...], "shelf_book": [...],
     "reading_session": [...], "reading_progress": [...],
     "note_category": [...], "note": [...], "quote": [...], "rating": [...],
-    "pre_reading_reflection": [...], "book_memory": [...],
+    "pre_reading_reflection": [...], "dnf_reflection": [...], "book_memory": [...],
     "book_capsule": [...], "capsule_recall": [...], "journal_lore_link": [...],
     "owned_book": [...], "loan": [...],
     "reading_goal": [...], "reminder": [...],
@@ -68,6 +68,9 @@
    `docs/PERSONAL_LORE.md`) відновлюються звичайною вставкою, той самий "без окремого кроку"
    випадок, що й `capsule_recall`/`pre_reading_reflection` вище — жодного `expo-notifications`-
    стану чи будь-чого прив'язаного до конкретного пристрою/запуску.
+10. POLYTSIA V1.6, Фаза 12 — `dnf_reflection` (знімок DNF, `docs/DNF_IMPROVEMENT.md`)
+    відновлюється звичайною вставкою, той самий "без окремого кроку" випадок, що й решта пункту
+    вище.
 
 ## Backup Health UX (Фаза 13)
 

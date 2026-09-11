@@ -259,6 +259,13 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     ['pre-reading-1', 'user_book-2', 'Порадили друзі.', 'Чекаю щось атмосферне й неспішне.', 4, t0, t0],
   );
 
+  // ---- знімок DNF (POLYTSIA V1.6, Фаза 12) — прив'язаний до user_book-2 лише для перевірки
+  // round-trip самої таблиці; реальний статус user_book-2 тут значення не має. ----
+  await db.runAsync(
+    `INSERT INTO dnf_reflection (id, user_book_id, page, reason, note, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    ['dnf-1', 'user_book-2', 340, 'too_complex', 'Загубив нитку сюжету після третьої частини.', t0, t0],
+  );
+
   // ---- спогад про книгу ----
   await db.runAsync(
     `INSERT INTO book_memory (id, user_book_id, reflection, entry_refs, created_at, updated_at, template_id) VALUES (?,?,?,?,?,?,?)`,
@@ -393,6 +400,7 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
     expect(exported.reading_goal).toHaveLength(1); // цілі
     expect(exported.rating).toHaveLength(1); // рейтинги
     expect(exported.pre_reading_reflection).toHaveLength(1); // нотатка "До читання" (Фаза 6)
+    expect(exported.dnf_reflection).toHaveLength(1); // знімок DNF (Фаза 12)
     expect(exported.book_capsule).toHaveLength(1); // капсула книги (Фаза 4)
     expect(exported.capsule_recall).toHaveLength(1); // спроба згадати книгу (Фаза 5)
     expect(exported.lore_entity).toHaveLength(1); // персонажі (Фаза 9-10)
