@@ -14,6 +14,7 @@ import { BackupExportStatusStorage } from '@/lib/backupExportStatusStorage';
 import { createLogger } from '@/lib/logger';
 import { queryKeys } from '@/lib/queryKeys';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
+import { rebuildCapsuleRemindersAsync } from '@/features/memory/useBookCapsule';
 
 const log = createLogger('features/backup');
 
@@ -108,6 +109,20 @@ export function useRestoreBackup() {
     mutationFn: async (envelope: BackupEnvelope) => {
       const db = await getDatabase();
       await BackupRepository.restoreAll(db, envelope.data);
+      // POLYTSIA V1.6, Фаза 4, п.36 ТЗ — дані капсул щойно відновлено, але OS-розклад їхніх
+      // сповіщень (`notification_identifier` у файлі) належить іншому запуску/пристрою: тихо
+      // (без запиту дозволу) перепланувати майбутні нагадування на щойно відновлених даних.
+      // `restoreAll` уже завершився успішно на цей момент (дані бібліотеки відновлені) — збій
+      // САМЕ цього допоміжного кроку (напр. `expo-notifications` недоступний) не повинен
+      // показувати користувачу "не вдалося відновити дані", тож ловимо тут, а не даємо
+      // випливти назовні в `onError` цієї мутації.
+      try {
+        await rebuildCapsuleRemindersAsync(db);
+      } catch (error) {
+        log.error('Не вдалося перепланувати нагадування капсул після відновлення', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries();

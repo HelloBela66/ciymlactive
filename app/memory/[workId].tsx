@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { View, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
 import { captureRef } from 'react-native-view-shot';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
@@ -23,12 +23,16 @@ import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
+import { useBookCapsule } from '@/features/memory/useBookCapsule';
+import { canCreateCapsule } from '@/lib/bookCapsule';
 import { computeBookStats } from '@/lib/bookStats';
 import { shareMemoryCardImage, saveMemoryCardImageToLibrary } from '@/lib/memoryCardFile';
 import { createLogger } from '@/lib/logger';
+import type { Href } from 'expo-router';
 import type { MemoryCardTemplateId } from '@/types/bookMemory';
 import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
+import type { UserBookStatus } from '@/types/userBook';
 
 const log = createLogger('app/memory');
 
@@ -105,6 +109,51 @@ function RevisitLaterSection({ userBookId }: { userBookId: string | undefined })
           <RevisitLaterEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
         ))}
       </View>
+    </Card>
+  );
+}
+
+/**
+ * «Капсула книги» (POLYTSIA V1.6, Фаза 4, п.2 ТЗ — entry point #2, Book Memory screen).
+ * Компактна версія тієї самої секції, що й `BookCapsuleSection` на
+ * `app/completion/[workId].tsx` (запрошення створити капсулу / коротке посилання на вже
+ * створену) — навмисно продубльована локально, той самий підхід, що й `RevisitLaterEntryLine`
+ * вище: маленький презентаційний блок без спільного стану, зайва крос-екранна залежність тут
+ * не виправдана.
+ */
+function BookCapsuleSection({
+  userBookId,
+  workId,
+  status,
+}: {
+  userBookId: string;
+  workId: string;
+  status: UserBookStatus;
+}) {
+  const theme = useTheme();
+  const { data: capsule, isLoading } = useBookCapsule(userBookId);
+
+  if (isLoading) return null;
+  if (!capsule && !canCreateCapsule(status)) return null;
+
+  return (
+    <Card style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="cube-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="body" color="secondary" style={{ flex: 1 }}>
+          {capsule ? 'У цієї книги вже є капсула.' : "Залиш капсулу з кількома деталями на пам'ять."}
+        </AppText>
+      </View>
+      <Button
+        label={capsule ? 'Переглянути капсулу' : 'Створити капсулу'}
+        variant="secondary"
+        onPress={() =>
+          router.push({
+            pathname: capsule ? '/capsule/[workId]' : '/capsule/[workId]/edit',
+            params: { workId },
+          } as unknown as Href)
+        }
+      />
     </Card>
   );
 }
@@ -318,6 +367,12 @@ export default function MemoryCardScreen() {
             />
 
             <RevisitLaterSection userBookId={userBookId} />
+
+            <BookCapsuleSection
+              userBookId={data.userBook.id}
+              workId={data.work.id}
+              status={data.userBook.status}
+            />
 
             <View style={{ gap: theme.spacing.sm }}>
               <Button

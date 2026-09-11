@@ -130,6 +130,16 @@ export interface SeriesEntrySnapshotRow {
   workId: string;
 }
 
+/** POLYTSIA V1.6, Фаза 4 («Капсула книги») — лише колонки, потрібні перевіркам нижче
+ * (`012_book_capsule.ts`). `journalEntryId` без `journalEntryKind` тут не розрізняється (обидва
+ * `null` або обидва задані за конструкцією репозиторія) — досить самого id для перевірки
+ * існування. */
+export interface BookCapsuleSnapshotRow {
+  id: string;
+  userBookId: string;
+  journalEntryId: string | null;
+}
+
 export interface DataIntegritySnapshot {
   userBooks: UserBookSnapshotRow[];
   editions: EditionSnapshotRow[];
@@ -142,6 +152,10 @@ export interface DataIntegritySnapshot {
   shelfBooks: ShelfBookSnapshotRow[];
   seriesIds: string[];
   seriesEntries: SeriesEntrySnapshotRow[];
+  // POLYTSIA V1.6, Фаза 4 — необов'язкове поле (не всі виклики snapshot зобов'язані його
+  // передавати; існуючі фікстури тестів Фази 5, написані ДО цієї фази, лишаються валідними
+  // без змін, `bookCapsules` за замовчуванням трактується як порожній список нижче).
+  bookCapsules?: BookCapsuleSnapshotRow[];
 }
 
 function isValidPausedIntervals(raw: string): boolean {
@@ -423,6 +437,29 @@ export function runDataIntegrityCheck(snapshot: DataIntegritySnapshot): DataInte
         code: 'series_entry_deleted_work',
         message: `Запис серії ${entry.id} посилається на видалений твір ${entry.workId}.`,
         link: { type: 'series', seriesId: entry.seriesId },
+      });
+    }
+  }
+
+  // ---- Капсули книги (POLYTSIA V1.6, Фаза 4) ----
+  const noteIdSet = new Set(snapshot.notes.map((n) => n.id));
+  const quoteIdSet = new Set(snapshot.quotes.map((q) => q.id));
+  for (const capsule of snapshot.bookCapsules ?? []) {
+    const userBook = userBookById.get(capsule.userBookId);
+    if (userBook?.deletedAt) {
+      issues.push({
+        category: 'books',
+        code: 'capsule_references_deleted_book',
+        message: `Капсула ${capsule.id} посилається на видалену книгу ${capsule.userBookId}.`,
+        link: workLink(capsule.userBookId),
+      });
+    }
+    if (capsule.journalEntryId && !noteIdSet.has(capsule.journalEntryId) && !quoteIdSet.has(capsule.journalEntryId)) {
+      issues.push({
+        category: 'journal',
+        code: 'capsule_orphan_journal_entry',
+        message: `Капсула ${capsule.id} посилається на неіснуючий запис щоденника ${capsule.journalEntryId}.`,
+        link: workLink(capsule.userBookId),
       });
     }
   }

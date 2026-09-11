@@ -35,6 +35,15 @@ export async function requestNotificationPermissionAsync(): Promise<boolean> {
   return requested.granted;
 }
 
+/** Перевіряє дозвіл, НЕ запитуючи його (на відміну від `requestNotificationPermissionAsync`
+ * вище) — POLYTSIA V1.6, Фаза 4, п.36 ТЗ: тихе перепланування нагадувань капсул після
+ * відновлення бекапу ніколи не повинно самé спливати системним запитом дозволу; якщо дозволу
+ * немає — просто пропускаємо перепланування (`useBookCapsule.ts`, `rebuildCapsuleRemindersAsync`). */
+export async function hasNotificationPermissionAsync(): Promise<boolean> {
+  const current = await Notifications.getPermissionsAsync();
+  return current.granted;
+}
+
 function parseTimeOfDay(timeOfDay: string): { hour: number; minute: number } {
   const [hourStr, minuteStr] = timeOfDay.split(':');
   return { hour: Number(hourStr) || 0, minute: Number(minuteStr) || 0 };
@@ -72,6 +81,23 @@ export async function scheduleWeekdayReminderAsync(
     ),
   );
   return ids.join(',');
+}
+
+/**
+ * Планує ОДНОРАЗОВЕ сповіщення на конкретну дату/час (POLYTSIA V1.6, Фаза 4 — «Капсула
+ * книги», п.10 ТЗ: "reopenAt"-нагадування через 3/6/12 місяців). На відміну від
+ * `scheduleDailyReminderAsync`/`scheduleWeekdayReminderAsync` вище — не повторюване, один
+ * конкретний момент у майбутньому (`Notifications.SchedulableTriggerInputTypes.DATE`).
+ * Скасовується так само, як і решта нагадувань — `cancelReminderAsync` нижче (той самий
+ * `notification_identifier`-патерн, попри назву функції — вона однаково працює для будь-якого
+ * одиночного id, не лише `reminder`).
+ */
+export async function scheduleDateReminderAsync(fireAt: Date, title: string, body: string): Promise<string> {
+  await ensureAndroidChannelAsync();
+  return Notifications.scheduleNotificationAsync({
+    content: { title, body },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt },
+  });
 }
 
 export async function cancelReminderAsync(notificationIdentifier: string | null): Promise<void> {

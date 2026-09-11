@@ -13,6 +13,7 @@ import {
   type NoteCategorySnapshotRow,
   type ShelfBookSnapshotRow,
   type SeriesEntrySnapshotRow,
+  type BookCapsuleSnapshotRow,
 } from '@/domain/dataIntegrityDoctor';
 
 /**
@@ -144,6 +145,16 @@ function mapSeriesEntry(row: SeriesEntryRow): SeriesEntrySnapshotRow {
   return { id: row.id, seriesId: row.series_id, workId: row.work_id };
 }
 
+/** POLYTSIA V1.6, Фаза 4 («Капсула книги»). */
+interface BookCapsuleRow {
+  id: string;
+  user_book_id: string;
+  journal_entry_id: string | null;
+}
+function mapBookCapsule(row: BookCapsuleRow): BookCapsuleSnapshotRow {
+  return { id: row.id, userBookId: row.user_book_id, journalEntryId: row.journal_entry_id };
+}
+
 async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapshot> {
   const [
     userBookRows,
@@ -157,6 +168,7 @@ async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapsho
     shelfBookRows,
     seriesRows,
     seriesEntryRows,
+    bookCapsuleRows,
   ] = await Promise.all([
     db.getAllAsync<UserBookRow>('SELECT id, edition_id, status, started_at, finished_at, current_page, deleted_at FROM user_book'),
     db.getAllAsync<EditionRow>('SELECT id, work_id, isbn10, isbn13, page_count, deleted_at FROM edition'),
@@ -171,6 +183,7 @@ async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapsho
     db.getAllAsync<ShelfBookRow>('SELECT shelf_id, user_book_id FROM shelf_book'),
     db.getAllAsync<{ id: string }>('SELECT id FROM series'),
     db.getAllAsync<SeriesEntryRow>('SELECT id, series_id, work_id FROM series_entry'),
+    db.getAllAsync<BookCapsuleRow>('SELECT id, user_book_id, journal_entry_id FROM book_capsule'),
   ]);
 
   return {
@@ -185,6 +198,7 @@ async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapsho
     shelfBooks: shelfBookRows.map(mapShelfBook),
     seriesIds: seriesRows.map((row) => row.id),
     seriesEntries: seriesEntryRows.map(mapSeriesEntry),
+    bookCapsules: bookCapsuleRows.map(mapBookCapsule),
   };
 }
 

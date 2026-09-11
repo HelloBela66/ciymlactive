@@ -21,12 +21,15 @@ import { useRating, useSetRating } from '@/features/book-details/useRating';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
 import { useJournalCount, useJournalEntries, useJournalFavorites, useJournalRevisitLater } from '@/features/journal/useJournal';
 import { useBookMemory, useRemoveBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
+import { useBookCapsule } from '@/features/memory/useBookCapsule';
+import { canCreateCapsule } from '@/lib/bookCapsule';
 import { formatDuration } from '@/lib/sessionTiming';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 import { computeBookStats } from '@/lib/bookStats';
 import { REACTION_META, isReactionId } from '@/design/reactions';
 import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
+import type { UserBookStatus } from '@/types/userBook';
 
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
 const ENTRY_FORMS = ['запис', 'записи', 'записів'] as const;
@@ -340,6 +343,67 @@ function BookMemorySection({ userBookId, workId }: { userBookId: string; workId:
 }
 
 /**
+ * «Капсула книги» (POLYTSIA V1.6, Фаза 4, п.1 ТЗ — entry point #1, "запрошення одразу після
+ * завершення читання"). Не рендериться, поки капсула ще завантажується (уникає "блимання"
+ * запрошення → готова капсула одразу після монтування), і не рендериться взагалі для книг, які
+ * не `finished` і ще не мають капсули (`canCreateCapsule` — та сама умова, що й друга лінія
+ * захисту на самій формі, `app/capsule/[workId]/edit.tsx`; вже створена капсула лишається
+ * видимою тут незалежно від того, чи статус книги згодом змінився).
+ */
+function BookCapsuleSection({
+  userBookId,
+  workId,
+  status,
+}: {
+  userBookId: string;
+  workId: string;
+  status: UserBookStatus;
+}) {
+  const theme = useTheme();
+  const { data: capsule, isLoading } = useBookCapsule(userBookId);
+
+  if (isLoading) return null;
+  if (!capsule && !canCreateCapsule(status)) return null;
+
+  return (
+    <View style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="cube-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="heading">Капсула книги</AppText>
+      </View>
+      {capsule ? (
+        <Card style={{ gap: theme.spacing.sm, alignItems: 'center' }}>
+          <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+            Капсулу створено {format(parseISO(capsule.createdAt), 'd MMMM yyyy', { locale: uk })}.
+          </AppText>
+          <Button
+            label="Переглянути капсулу"
+            variant="secondary"
+            onPress={() =>
+              router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)
+            }
+          />
+        </Card>
+      ) : (
+        <Card style={{ gap: theme.spacing.sm, alignItems: 'center' }}>
+          <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+            Залиш кілька особистих деталей на пам&apos;ять — стійку думку, улюбленого героя,
+            момент, до якого захочеш повернутися.
+          </AppText>
+          <Button
+            label="Створити капсулу"
+            variant="secondary"
+            onPress={() =>
+              router.push({ pathname: '/capsule/[workId]/edit', params: { workId } } as unknown as Href)
+            }
+          />
+        </Card>
+      )}
+    </View>
+  );
+}
+
+/**
  * Підсумок читання книги (Milestone 11, Фаза 6) — "Book Completion Summary" з ТЗ. Той самий
  * дух, що й річний Wrapped (`app/wrapped/[year].tsx`, `StatTile`-сітка), лише про одну книгу
  * й з єдиним реальним тригером у цьому застосунку: `user_book.status` переходить у `'finished'`
@@ -501,6 +565,12 @@ export default function CompletionSummaryScreen() {
             ) : null}
 
             <BookMemorySection userBookId={data.userBook.id} workId={data.work.id} />
+
+            <BookCapsuleSection
+              userBookId={data.userBook.id}
+              workId={data.work.id}
+              status={data.userBook.status}
+            />
 
             <View style={{ gap: theme.spacing.sm }}>
               <AppText variant="heading">{rating ? 'Твоя оцінка' : 'Постав оцінку'}</AppText>

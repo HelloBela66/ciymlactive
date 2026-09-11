@@ -17,6 +17,7 @@
     "user_book": [...], "shelf": [...], "shelf_book": [...],
     "reading_session": [...], "reading_progress": [...],
     "note_category": [...], "note": [...], "quote": [...], "rating": [...], "book_memory": [...],
+    "book_capsule": [...],
     "owned_book": [...], "loan": [...],
     "reading_goal": [...], "reminder": [...],
     "app_settings": [...]
@@ -49,6 +50,12 @@
 4. Вставка в транзакції: якщо щось падає — повний rollback, стан БД до restore незмінний.
 5. Наразі restore — це **replace all** (простіше й безпечніше за merge для одного
    користувача); merge-режим — можлива майбутня функція, не в V1.
+6. POLYTSIA V1.6, Фаза 4 — одразу після вставки `rebuildCapsuleRemindersAsync`
+   (`src/features/memory/useBookCapsule.ts`) тихо (без системного запиту дозволу) перепланує
+   `expo-notifications`-нагадування для щойно відновлених капсул книги, чий `reopenAt` — у
+   майбутньому: `notification_identifier` у файлі належить іншому запуску/пристрою, тож сам по
+   собі нічого вже не заплановує. Минулі `reopenAt` свідомо пропускаються. Збій саме цього кроку
+   не позначає весь restore невдалим (докладніше — `docs/BOOK_CAPSULES.md` §Бекап).
 
 ## Backup Health UX (Фаза 13)
 

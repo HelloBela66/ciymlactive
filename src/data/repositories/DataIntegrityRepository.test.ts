@@ -67,6 +67,12 @@ describe('DataIntegrityRepository.runCheck', () => {
       NOW,
       NOW,
     ]);
+    // POLYTSIA V1.6, Фаза 4 — капсула, коректно прив'язана до реальної нотатки цієї ж книги.
+    await db.runAsync(
+      `INSERT INTO book_capsule (id, user_book_id, journal_entry_kind, journal_entry_id, reopen_option, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      ['capsule-1', 'user_book-1', 'note', 'note-1', 'none', NOW, NOW],
+    );
 
     const report = await DataIntegrityRepository.runCheck(db);
     expect(report.hasIssues).toBe(false);
@@ -132,6 +138,14 @@ describe('DataIntegrityRepository.runCheck', () => {
     );
     await db.execAsync('PRAGMA foreign_keys = ON;');
 
+    // --- Капсула книги (Фаза 4): посилається на неіснуючий запис щоденника (не FK-enforced,
+    // м'яке посилання — `012_book_capsule.ts` — не потребує PRAGMA foreign_keys = OFF). ---
+    await db.runAsync(
+      `INSERT INTO book_capsule (id, user_book_id, journal_entry_kind, journal_entry_id, reopen_option, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      ['capsule-orphan', 'user_book-1', 'note', 'does-not-exist', 'none', NOW, NOW],
+    );
+
     const report = await DataIntegrityRepository.runCheck(db);
 
     expect(report.hasIssues).toBe(true);
@@ -140,7 +154,9 @@ describe('DataIntegrityRepository.runCheck', () => {
       expect.arrayContaining(['session_without_valid_book', 'negative_duration']),
     );
     expect(report.byCategory.progress.map((i) => i.code)).toContain('progress_exceeds_page_count');
-    expect(report.byCategory.journal.map((i) => i.code)).toContain('note_orphan_category');
+    expect(report.byCategory.journal.map((i) => i.code)).toEqual(
+      expect.arrayContaining(['note_orphan_category', 'capsule_orphan_journal_entry']),
+    );
     expect(report.byCategory.shelves.map((i) => i.code)).toContain('shelf_book_missing_user_book');
     expect(report.byCategory.series.map((i) => i.code)).toContain('series_entry_missing_series');
 

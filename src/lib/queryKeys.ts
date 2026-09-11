@@ -101,6 +101,13 @@ export const queryKeys = {
   bookMemory: {
     byUserBook: (userBookId: string) => ['bookMemory', 'byUserBook', userBookId] as const,
   },
+  bookCapsule: {
+    // POLYTSIA V1.6, Фаза 4 («Капсула книги») — "поточна" (найновіша) капсула книги, той
+    // самий "малий запит по одній книзі" сенс, що й `bookMemory.byUserBook` вище, навіть
+    // попри те, що `book_capsule.user_book_id` НЕ унікальний (`012_book_capsule.ts`) —
+    // `BookCapsuleRepository.getByUserBookId` сама бере найновішу.
+    byUserBook: (userBookId: string) => ['bookCapsule', 'byUserBook', userBookId] as const,
+  },
   genres: {
     all: ['genres', 'all'] as const,
     byWork: (workId: string) => ['genres', 'byWork', workId] as const,

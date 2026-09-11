@@ -339,4 +339,40 @@ describe('runDataIntegrityCheck', () => {
       expect(report.byCategory.series.map((i) => i.code)).toContain('series_entry_deleted_work');
     });
   });
+
+  // POLYTSIA V1.6, Фаза 4 («Капсула книги»).
+  describe('капсули книги', () => {
+    it('капсула посилається на видалену книгу', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ deletedAt: '2026-01-01T00:00:00.000Z' })];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: null }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('capsule_references_deleted_book');
+    });
+
+    it('капсула посилається на неіснуючий запис щоденника', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: 'does-not-exist' }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.journal.map((i) => i.code)).toContain('capsule_orphan_journal_entry');
+    });
+
+    it('капсула посилається на існуючу нотатку — жодної проблеми', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.notes = [{ id: 'note1', userBookId: 'ub1', sessionId: null, categoryId: null }];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: 'note1' }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.hasIssues).toBe(false);
+    });
+
+    it('капсула без journalEntryId і на непошкоджену книгу — жодної проблеми', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: null }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.hasIssues).toBe(false);
+    });
+  });
 });

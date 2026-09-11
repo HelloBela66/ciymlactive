@@ -36,6 +36,12 @@ const BACKUP_TABLE_ORDER = [
   'quote',
   'rating',
   'book_memory',
+  // POLYTSIA V1.6, Фаза 4 («Капсула книги») — одразу після `book_memory` (той самий сусід
+  // `user_book`, `012_book_capsule.ts`): `book_capsule` посилається на `user_book` (реальний
+  // FK) і М'ЯКО на `note`/`quote` (без FK, `journal_entry_kind`/`journal_entry_id`) — усі
+  // трое вже присутні в масиві раніше цього рядка, тож insert-порядок (батьки перед дітьми)
+  // не порушується.
+  'book_capsule',
   'owned_book',
   'loan',
   'reading_goal',

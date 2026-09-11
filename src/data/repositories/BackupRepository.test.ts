@@ -262,6 +262,20 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     ],
   );
 
+  // ---- капсула книги (POLYTSIA V1.6, Фаза 4) ----
+  await db.runAsync(
+    `INSERT INTO book_capsule (
+       id, user_book_id, lasting_thought, one_sentence_memory, favorite_character_text,
+       favorite_lore_entity_id, journal_entry_kind, journal_entry_id, reopen_option, reopen_at,
+       opened_at, notification_identifier, completed_at, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      'capsule-1', 'user_book-2', 'Ця книга навчила мене чекати.', 'Про дорослішання.', 'Пол Атрідес',
+      null, 'quote', 'quote-1', '6_months', '2027-01-01T00:00:00.000Z',
+      null, 'notif-capsule-1', t1, t1, t1,
+    ],
+  );
+
   // ---- фізична бібліотека (позики) ----
   await db.runAsync(
     `INSERT INTO owned_book (id, edition_id, condition, location, purchase_date, purchase_price, purchase_currency,
@@ -351,6 +365,7 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
     expect(exported.quote?.some((r) => r.reaction != null)).toBe(true); // реакції (quote)
     expect(exported.reading_goal).toHaveLength(1); // цілі
     expect(exported.rating).toHaveLength(1); // рейтинги
+    expect(exported.book_capsule).toHaveLength(1); // капсула книги (Фаза 4)
     expect(exported.loan).toHaveLength(1); // позики
     expect(exported.app_settings).toHaveLength(1); // налаштування
     expect(exported.app_settings?.[0]?.theme).toBe('dark');

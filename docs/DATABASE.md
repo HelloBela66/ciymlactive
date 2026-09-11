@@ -114,6 +114,22 @@ sync/catalog backend, але жодна читацька дія (старт се
     `idx_note_revisit_later`/`idx_quote_revisit_later` — той самий привід, що й
     `idx_note_favorite`/`idx_quote_favorite`: `JournalRepository` фільтрує за цим полем
     (`revisitLaterOnly`) так само, як за `is_favorite`.
+12. **012_book_capsule** — «Капсула книги» (POLYTSIA V1.6, Фаза 4). Нова таблиця
+    `book_capsule`: приватний snapshot вражень від прочитаної книги (стійка думка, речення-
+    формулювання, улюблений персонаж вільним текстом, посилання на один момент щоденника, коли
+    нагадати). На відміну від `book_memory` — БЕЗ `UNIQUE(user_book_id)`: застосунок не має
+    окремої сутності "прочитання"/"reading run" (`user_book.finished_at` — дата ПЕРШОГО
+    завершення, ніколи не оновлюється при перечитуванні), тож капсулу неможливо надійно
+    прив'язати до конкретного прочитання — унікальність навмисно не вводиться, щоб не
+    заблокувати другу капсулу після перечитування (задокументоване обмеження, `docs/BOOK_CAPSULES.md`
+    §Архітектура). `journal_entry_kind`/`journal_entry_id` — те саме м'яке (без SQL FK)
+    посилання на `note`/`quote`, що й `book_memory.entry_refs`. `favorite_lore_entity_id` —
+    порожня колонка "про запас" під майбутній Personal Lore (Фази 9-10 ТЗ). `reopen_option`
+    зберігається окремо від обчисленого `reopen_at` — потрібно знати, чи користувач ЗМІНИВ
+    пресет при редагуванні, щоб перепланувати `expo-notifications`-нагадування лише тоді, коли
+    це справді потрібно (`notification_identifier` — той самий патерн, що й `reminder`).
+    `completed_at` — знімок `user_book.finished_at` на момент СТВОРЕННЯ капсули, не live
+    посилання.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -156,6 +172,7 @@ UserBook 1---* Note
 UserBook 1---* Quote
 UserBook 1---0..1 Rating
 UserBook 1---0..1 BookMemory        (Milestone 11 Фаза 7 — рефлексія + посилання на записи щоденника)
+UserBook 1---* BookCapsule           (POLYTSIA V1.6 Фаза 4 — БЕЗ UNIQUE, перечитування може мати кілька)
 UserBook *---* Shelf (через ShelfBook)
 
 OwnedBook 1---1 Edition
@@ -481,6 +498,32 @@ CREATE TABLE book_memory (
   updated_at TEXT NOT NULL
 );
 
+-- «Капсула книги» (`012_book_capsule.ts`, POLYTSIA V1.6 Фаза 4) — на відміну від book_memory
+-- вище, БЕЗ UNIQUE(user_book_id): немає надійного способу прив'язати капсулу до конкретного
+-- прочитання (user_book.finished_at не оновлюється при перечитуванні), тож "поточна" капсула —
+-- найновіша за created_at (BookCapsuleRepository.getByUserBookId). journal_entry_kind/
+-- journal_entry_id — м'яке посилання на note/quote, той самий патерн, що й entry_refs вище.
+CREATE TABLE book_capsule (
+  id TEXT PRIMARY KEY,
+  user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
+  lasting_thought TEXT,
+  one_sentence_memory TEXT,
+  favorite_character_text TEXT,
+  favorite_lore_entity_id TEXT,       -- заготовка під Personal Lore (Фази 9-10), поки не заповнюється
+  journal_entry_kind TEXT CHECK (journal_entry_kind IN ('note','quote')),
+  journal_entry_id TEXT,
+  reopen_option TEXT NOT NULL DEFAULT 'none' CHECK (reopen_option IN ('none','3_months','6_months','1_year')),
+  reopen_at TEXT,
+  opened_at TEXT,
+  notification_identifier TEXT,
+  completed_at TEXT,                  -- знімок user_book.finished_at на момент створення капсули
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_book_capsule_user_book ON book_capsule(user_book_id);
+CREATE INDEX idx_book_capsule_reopen_at ON book_capsule(reopen_at);
+
 -- ============ ФІЗИЧНА БІБЛІОТЕКА ============
 
 CREATE TABLE owned_book (
@@ -620,7 +663,11 @@ CREATE TABLE app_settings (
 які експортуються як частина `edition`, і крім `journal_draft` (Milestone 11) — чернетка
 композера є лише локальним незбереженим станом пристрою, не даними, які користувач свідомо
 зберіг). `book_memory` (Фаза 7), на відміну від `journal_draft`, у бекапі є — це свідомо
-збережені дані користувача, а не чернетка. Усе разом обгорнуто у:
+збережені дані користувача, а не чернетка. `book_capsule` (POLYTSIA V1.6 Фаза 4) — так само в
+бекапі, одразу після `book_memory` (`docs/BACKUP_FORMAT.md`); restore відновлює лише ДАНІ
+капсул, не OS-розклад їхніх сповіщень (`notification_identifier` у файлі належить іншому
+запуску/пристрою) — `useRestoreBackup` тихо перепланує майбутні нагадування одразу після
+вставки (`docs/BOOK_CAPSULES.md` §Бекап). Усе разом обгорнуто у:
 
 ```json
 { "schemaVersion": 1, "exportedAt": "...", "app": "polytsya", "data": { "work": [...], "edition": [...], ... } }
