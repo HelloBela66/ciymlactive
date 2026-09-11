@@ -29,6 +29,7 @@ import {
   useRemovePreReadingReflection,
 } from '@/features/memory/usePreReadingReflection';
 import { canEditPreReadingReflection } from '@/lib/beforeAfter';
+import { computeStaleReadingInfo, describeStaleReading } from '@/lib/staleReading';
 import { useAllGenres, useGenresForWork, useToggleWorkGenre, useAddCustomGenre } from '@/features/book-details/useGenres';
 import { useTagsForWork, useAddTagToWork, useRemoveTagFromWork } from '@/features/book-details/useTags';
 import { useCreateNote, useRemoveNote } from '@/features/notes/useNotes';
@@ -519,6 +520,49 @@ function LibrarySection({
         )
       ) : null}
     </View>
+  );
+}
+
+/**
+ * «Давно не читав» (POLYTSIA V1.6, Фаза 8 ТЗ) — ненав'язлива підказка повернутися до книги
+ * зі статусом "Читаю"/"Перечитую", яку давно не відкривали. `sessions` — той самий піднятий до
+ * `BookDetailsScreen` список, що й `FinishPredictionSection`/`ReadingHistorySection` нижче, не
+ * окремий запит; `sessions[0]` — найновіша завершена сесія (`ReadingSessionRepository.
+ * listByUserBookId` сортує найновішими зверху). Нейтральний тон, без "streak"/окличних знаків
+ * (ТЗ: "Не використовуй guilt language") — уся формула тексту й сам поріг "давно" винесені в
+ * `src/lib/staleReading.ts`.
+ */
+function StaleReadingSection({
+  status,
+  sessions,
+  workId,
+}: {
+  status: UserBookStatus;
+  sessions: ReadingSession[] | undefined;
+  workId: string;
+}) {
+  const theme = useTheme();
+
+  if (status !== 'reading' && status !== 'rereading') return null;
+  if (!sessions || sessions.length === 0) return null;
+
+  const info = computeStaleReadingInfo(sessions[0] ?? null, new Date());
+  if (!info) return null;
+
+  return (
+    <Card style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing.sm }}>
+        <Ionicons name="time-outline" size={18} color={theme.colors.accent} style={{ marginTop: 2 }} />
+        <AppText variant="body" color="secondary" style={{ flex: 1 }}>
+          {describeStaleReading(info)}
+        </AppText>
+      </View>
+      <Button
+        label="Згадати, де я зупинився"
+        variant="secondary"
+        onPress={() => router.push({ pathname: '/recap/[workId]', params: { workId } } as unknown as Href)}
+      />
+    </Card>
   );
 }
 
@@ -1223,6 +1267,10 @@ export default function BookDetailsScreen() {
                 userBook={data.userBook}
                 ownedBook={data.ownedBook}
               />
+            ) : null}
+
+            {data.userBook ? (
+              <StaleReadingSection status={data.userBook.status} sessions={sessions} workId={data.work.id} />
             ) : null}
 
             {data.userBook ? (
