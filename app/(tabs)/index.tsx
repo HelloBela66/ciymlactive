@@ -15,6 +15,7 @@ import { useReadingContinuity } from '@/features/reading-session/useReadingConti
 import { useLibraryByStatus } from '@/features/library/useLibrary';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
 import { useJournalGlobalCount } from '@/features/journal/useJournal';
+import { OnThisDayCard } from '@/components/home/OnThisDayCard';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 import { computeProgressPercent } from '@/lib/progressPercent';
 import { formatLastReadLabel } from '@/lib/lastReadLabel';
@@ -361,6 +362,18 @@ export default function HomeScreen() {
       <TodayStatsRow />
 
       <CurrentlyReadingList />
+
+      {/* POLYTSIA V1.6, Фаза 3 («Цей день у твоєму читанні») — контекстна картка, сама вирішує
+          свою видимість (`return null`, коли на сьогодні немає жодного спогаду з минулих
+          років, п.1/19 ТЗ). Розміщена ПІСЛЯ активного читання (найдієвіший розділ Home лишається
+          першим) і ПЕРЕД завжди-видимими "вхід до…"-картками нижче — своя, менш повсякденна
+          категорія контенту. Формального "показуй щонайбільше одну контекстну картку" механізму
+          (п.18 ТЗ) тут поки нема — жодна з конкуруючих фіч цього списку (stale reading/capsule/
+          goal/TBR) ще не реалізована в цьому мілстоуні, тож поки немає з чим конкурувати за
+          єдиний слот. */}
+      <View style={{ marginTop: theme.spacing.lg }}>
+        <OnThisDayCard />
+      </View>
 
       <View style={{ marginTop: theme.spacing.xl, gap: theme.spacing.sm }}>
         <JournalEntryPointCard />

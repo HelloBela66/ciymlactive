@@ -4,6 +4,9 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
+  // Глушить console.info/console.debug (див. коментар у файлі) — прибирає шквал
+  // `[db/migrations] ...` логів, що робив повний вивід `npm test` непридатним для копіювання.
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   // Раніше тут був власний `transformIgnorePatterns`, що ПЕРЕКРИВАВ (а не доповнював) той,
   // що дає `preset: 'jest-expo'` — власний regex не враховував нескоуп-пакети вигляду
   // `expo-modules-core`/`expo-router`/`expo-sqlite` тощо (лише буквально "expo" чи
