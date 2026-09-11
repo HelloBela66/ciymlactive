@@ -601,7 +601,7 @@ function PreReadingReflectionSection({ userBookId, status }: { userBookId: strin
           />
           <View style={{ gap: theme.spacing.xs }}>
             <AppText variant="caption" color="secondary">
-              Очікувана оцінка (необов'язково)
+              Очікувана оцінка (необов&apos;язково)
             </AppText>
             <StarRating value={expectedRating} onChange={setExpectedRating} />
             {expectedRating != null ? (
