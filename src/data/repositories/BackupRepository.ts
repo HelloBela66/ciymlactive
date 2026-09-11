@@ -42,6 +42,10 @@ const BACKUP_TABLE_ORDER = [
   // трое вже присутні в масиві раніше цього рядка, тож insert-порядок (батьки перед дітьми)
   // не порушується.
   'book_capsule',
+  // POLYTSIA V1.6, Фаза 5 («Книга через час») — одразу після `book_capsule` (`013_capsule_recall.ts`):
+  // `capsule_recall` посилається на `book_capsule` РЕАЛЬНИМ FK (`ON DELETE CASCADE`), який уже
+  // присутній у масиві раніше цього рядка, тож insert-порядок (батьки перед дітьми) не порушується.
+  'capsule_recall',
   'owned_book',
   'loan',
   'reading_goal',

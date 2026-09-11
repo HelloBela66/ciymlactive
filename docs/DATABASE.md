@@ -130,6 +130,15 @@ sync/catalog backend, але жодна читацька дія (старт се
     це справді потрібно (`notification_identifier` — той самий патерн, що й `reminder`).
     `completed_at` — знімок `user_book.finished_at` на момент СТВОРЕННЯ капсули, не live
     посилання.
+13. **013_capsule_recall** — «Книга через час» (POLYTSIA V1.6, Фаза 5). Нова таблиця
+    `capsule_recall`: історія "спроб згадати" вже створену капсулу (`docs/RECALL.md`) — один
+    рядок на кожне проходження recall-флоу (`app/recall/[workId].tsx`), не одне поле, що
+    перезаписується (капсулу можна проходити повторно, п.5 ТЗ Фази 5). `book_capsule_id` —
+    РЕАЛЬНИЙ SQL FK (`ON DELETE CASCADE`), на відміну від м'яких посилань на `note`/`quote` у
+    `book_capsule` вище: це звичайний дочірній рядок однієї конкретної капсули, той самий
+    патерн, що й `reading_progress` → `reading_session`. `current_memory_text` — те, що
+    користувач написав у відповідь на «Що ти пам'ятаєш зараз?» (optional, `NULL` коли порожнє
+    — сам рядок все одно створюється, факт спроби важливий незалежно від тексту).
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -524,6 +533,19 @@ CREATE TABLE book_capsule (
 CREATE INDEX idx_book_capsule_user_book ON book_capsule(user_book_id);
 CREATE INDEX idx_book_capsule_reopen_at ON book_capsule(reopen_at);
 
+-- «Книга через час» (`013_capsule_recall.ts`, POLYTSIA V1.6 Фаза 5) — історія "спроб згадати"
+-- капсулу вище; book_capsule_id — РЕАЛЬНИЙ FK (на відміну від м'яких journal_entry_kind/id у
+-- book_capsule) — звичайний дочірній рядок, ON DELETE CASCADE прибирає історію разом з капсулою.
+CREATE TABLE capsule_recall (
+  id TEXT PRIMARY KEY,
+  book_capsule_id TEXT NOT NULL REFERENCES book_capsule(id) ON DELETE CASCADE,
+  current_memory_text TEXT,
+  recalled_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_capsule_recall_book_capsule ON capsule_recall(book_capsule_id);
+
 -- ============ ФІЗИЧНА БІБЛІОТЕКА ============
 
 CREATE TABLE owned_book (
@@ -667,7 +689,10 @@ CREATE TABLE app_settings (
 бекапі, одразу після `book_memory` (`docs/BACKUP_FORMAT.md`); restore відновлює лише ДАНІ
 капсул, не OS-розклад їхніх сповіщень (`notification_identifier` у файлі належить іншому
 запуску/пристрою) — `useRestoreBackup` тихо перепланує майбутні нагадування одразу після
-вставки (`docs/BOOK_CAPSULES.md` §Бекап). Усе разом обгорнуто у:
+вставки (`docs/BOOK_CAPSULES.md` §Бекап). `capsule_recall` (POLYTSIA V1.6 Фаза 5) — так само в
+бекапі, одразу після `book_capsule` — уся історія "спроб згадати" відновлюється разом з
+капсулами, жодного окремого post-restore кроку (на відміну від нагадувань) тут не потрібно —
+записи `capsule_recall` не мають ні власного OS-стану, ні сповіщень. Усе разом обгорнуто у:
 
 ```json
 { "schemaVersion": 1, "exportedAt": "...", "app": "polytsya", "data": { "work": [...], "edition": [...], ... } }

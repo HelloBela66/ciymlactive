@@ -349,6 +349,10 @@ function BookMemorySection({ userBookId, workId }: { userBookId: string; workId:
  * не `finished` і ще не мають капсули (`canCreateCapsule` — та сама умова, що й друга лінія
  * захисту на самій формі, `app/capsule/[workId]/edit.tsx`; вже створена капсула лишається
  * видимою тут незалежно від того, чи статус книги згодом змінився).
+ *
+ * POLYTSIA V1.6, Фаза 5 («Книга через час») — той самий вибір, що й `BookCapsuleSection` на
+ * `app/memory/[workId].tsx`: основна дія для вже створеної капсули — «Згадати книгу»
+ * (`app/recall/[workId].tsx`), простий перегляд — другорядна дія нижче.
  */
 function BookCapsuleSection({
   userBookId,
@@ -377,8 +381,13 @@ function BookCapsuleSection({
             Капсулу створено {format(parseISO(capsule.createdAt), 'd MMMM yyyy', { locale: uk })}.
           </AppText>
           <Button
-            label="Переглянути капсулу"
+            label="Згадати книгу"
             variant="secondary"
+            onPress={() => router.push({ pathname: '/recall/[workId]', params: { workId } } as unknown as Href)}
+          />
+          <Button
+            label="Переглянути деталі"
+            variant="ghost"
             onPress={() =>
               router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)
             }

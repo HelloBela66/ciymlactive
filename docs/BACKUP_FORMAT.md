@@ -17,7 +17,7 @@
     "user_book": [...], "shelf": [...], "shelf_book": [...],
     "reading_session": [...], "reading_progress": [...],
     "note_category": [...], "note": [...], "quote": [...], "rating": [...], "book_memory": [...],
-    "book_capsule": [...],
+    "book_capsule": [...], "capsule_recall": [...],
     "owned_book": [...], "loan": [...],
     "reading_goal": [...], "reminder": [...],
     "app_settings": [...]
@@ -56,6 +56,10 @@
    майбутньому: `notification_identifier` у файлі належить іншому запуску/пристрою, тож сам по
    собі нічого вже не заплановує. Минулі `reopenAt` свідомо пропускаються. Збій саме цього кроку
    не позначає весь restore невдалим (докладніше — `docs/BOOK_CAPSULES.md` §Бекап).
+7. POLYTSIA V1.6, Фаза 5 — `capsule_recall` (історія "спроб згадати" капсулу, `docs/RECALL.md`)
+   відновлюється звичайною вставкою, без окремого post-restore кроку: на відміну від капсул
+   вище, у записів recall немає ні `expo-notifications`-стану, ні будь-чого прив'язаного до
+   конкретного пристрою/запуску.
 
 ## Backup Health UX (Фаза 13)
 

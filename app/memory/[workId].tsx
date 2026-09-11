@@ -120,6 +120,12 @@ function RevisitLaterSection({ userBookId }: { userBookId: string | undefined })
  * створену) — навмисно продубльована локально, той самий підхід, що й `RevisitLaterEntryLine`
  * вище: маленький презентаційний блок без спільного стану, зайва крос-екранна залежність тут
  * не виправдана.
+ *
+ * POLYTSIA V1.6, Фаза 5 («Книга через час») — коли капсула вже існує, основна дія тепер
+ * «Згадати книгу» (`app/recall/[workId].tsx`, п.2 ТЗ Фази 5: "відкрити вручну у будь-який
+ * момент"), а не прямий перегляд: сам recall-флоу вже показує весь вміст капсули на кроці
+ * reveal, тож окремий перегляд лишається другорядною дією ("Переглянути деталі" — той самий
+ * View screen, що й раніше, для швидкого редагування/видалення без гри в згадування).
  */
 function BookCapsuleSection({
   userBookId,
@@ -145,15 +151,22 @@ function BookCapsuleSection({
         </AppText>
       </View>
       <Button
-        label={capsule ? 'Переглянути капсулу' : 'Створити капсулу'}
+        label={capsule ? 'Згадати книгу' : 'Створити капсулу'}
         variant="secondary"
         onPress={() =>
           router.push({
-            pathname: capsule ? '/capsule/[workId]' : '/capsule/[workId]/edit',
+            pathname: capsule ? '/recall/[workId]' : '/capsule/[workId]/edit',
             params: { workId },
           } as unknown as Href)
         }
       />
+      {capsule ? (
+        <Button
+          label="Переглянути деталі"
+          variant="ghost"
+          onPress={() => router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)}
+        />
+      ) : null}
     </Card>
   );
 }

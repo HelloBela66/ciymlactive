@@ -12,6 +12,7 @@ import * as migration009 from './migrations/009_shelf_theme';
 import * as migration010 from './migrations/010_reading_experience';
 import * as migration011 from './migrations/011_revisit_later';
 import * as migration012 from './migrations/012_book_capsule';
+import * as migration013 from './migrations/013_capsule_recall';
 
 const log = createLogger('db/migrations');
 
@@ -44,6 +45,7 @@ const migrations: Migration[] = [
   { version: migration010.version, up: migration010.up },
   { version: migration011.version, up: migration011.up },
   { version: migration012.version, up: migration012.up },
+  { version: migration013.version, up: migration013.up },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;

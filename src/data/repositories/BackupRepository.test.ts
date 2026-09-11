@@ -276,6 +276,13 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     ],
   );
 
+  // ---- спроба згадати книгу (POLYTSIA V1.6, Фаза 5) ----
+  await db.runAsync(
+    `INSERT INTO capsule_recall (id, book_capsule_id, current_memory_text, recalled_at, created_at)
+     VALUES (?,?,?,?,?)`,
+    ['recall-1', 'capsule-1', 'Пам\'ятаю дощ на початку.', t1, t1],
+  );
+
   // ---- фізична бібліотека (позики) ----
   await db.runAsync(
     `INSERT INTO owned_book (id, edition_id, condition, location, purchase_date, purchase_price, purchase_currency,
@@ -366,6 +373,7 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
     expect(exported.reading_goal).toHaveLength(1); // цілі
     expect(exported.rating).toHaveLength(1); // рейтинги
     expect(exported.book_capsule).toHaveLength(1); // капсула книги (Фаза 4)
+    expect(exported.capsule_recall).toHaveLength(1); // спроба згадати книгу (Фаза 5)
     expect(exported.loan).toHaveLength(1); // позики
     expect(exported.app_settings).toHaveLength(1); // налаштування
     expect(exported.app_settings?.[0]?.theme).toBe('dark');

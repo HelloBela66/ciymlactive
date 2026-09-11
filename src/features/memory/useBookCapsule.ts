@@ -250,10 +250,11 @@ export function useRemoveBookCapsule() {
   });
 }
 
-/** П.19 ТЗ — позначає капсулу переглянутою ПІСЛЯ настання `reopenAt` ("viewed" стан, не
- * плутати з майбутнім повноцінним "completed recall" — окрема Фаза Recall). Викликається
- * Capsule View screen'ом (`app/capsule/[workId].tsx`) лише коли `isCapsuleDue` вже `true` і
- * `openedAt` ще `null` — звичайний перегляд до настання дати нагадування НЕ рахується. */
+/** POLYTSIA V1.6, Фаза 5 («Книга через час») — позначає капсулу ВПЕРШЕ завершеного recall
+ * (`docs/RECALL.md`, `types/bookCapsule.ts#openedAt`). Викликається Recall screen'ом
+ * (`app/recall/[workId].tsx`) одразу після того, як `useCreateCapsuleRecall` зберіг спробу,
+ * і лише коли `openedAt` ще `null` (перше проходження) — повторні recall НЕ перезаписують цю
+ * дату, лишають перше значення. */
 export function useMarkCapsuleOpened() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, { id: string; userBookId: string }>({

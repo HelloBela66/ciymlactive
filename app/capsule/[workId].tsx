@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { View, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -14,8 +14,7 @@ import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useJournalEntries } from '@/features/journal/useJournal';
-import { useBookCapsule, useMarkCapsuleOpened, useRemoveBookCapsule } from '@/features/memory/useBookCapsule';
-import { isCapsuleDue } from '@/lib/bookCapsule';
+import { useBookCapsule, useRemoveBookCapsule } from '@/features/memory/useBookCapsule';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 
@@ -31,6 +30,11 @@ function formatFullDate(iso: string): string {
  * snapshot, не форма — секції, яких немає, просто не малюються (п.20: "Не показуй empty
  * sections"). `reopenAt` — запрошення повернутися, НЕ блокування (п.21): капсула завжди
  * доступна для перегляду незалежно від того, чи дата нагадування вже настала.
+ *
+ * НЕ позначає капсулу "відкритою" (`openedAt`) — це навмисно простий перегляд ВЛАСНИХ нотаток
+ * (доступний з "Переглянути деталі" на `BookCapsuleSection`), відмінний від повноцінного
+ * recall-досвіду «Згадати книгу» (`app/recall/[workId].tsx`, Фаза 5 ТЗ), який єдиний проставляє
+ * `openedAt` — докладніше `docs/RECALL.md` §Відмінність від перегляду капсули.
  */
 export default function BookCapsuleScreen() {
   const theme = useTheme();
@@ -42,23 +46,12 @@ export default function BookCapsuleScreen() {
   const { data: allEntries } = useJournalEntries(userBookId);
   const { data: categories } = useAllNoteCategories(userBookId);
   const categoriesById = categoriesToMap(categories);
-  const markOpened = useMarkCapsuleOpened();
   const removeCapsule = useRemoveBookCapsule();
 
   const linkedEntry = useMemo(() => {
     if (!capsule?.journalEntryId || !allEntries) return null;
     return allEntries.find((entry) => entry.id === capsule.journalEntryId) ?? null;
   }, [capsule, allEntries]);
-
-  // П.19 ТЗ — позначаємо "переглянуто" лише коли дата нагадування вже настала і це ще не
-  // зроблено; звичайний перегляд щойно створеної капсули (до `reopenAt`) навмисно НЕ рахується.
-  useEffect(() => {
-    if (!capsule || !userBookId) return;
-    if (capsule.openedAt != null) return;
-    if (!isCapsuleDue(capsule, new Date())) return;
-    markOpened.mutate({ id: capsule.id, userBookId });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- лише реагуємо на завантаження капсули, не на кожен рендер markOpened
-  }, [capsule?.id, capsule?.openedAt, userBookId]);
 
   const handleEdit = () => {
     router.push({ pathname: '/capsule/[workId]/edit', params: { workId } } as unknown as Href);
