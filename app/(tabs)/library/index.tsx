@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Pressable, ScrollView, FlatList } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Pressable, ScrollView, FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,12 +11,21 @@ import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { ReadingProgressBar } from '@/components/ui/ReadingProgressBar';
 import { ShelfThemeCard } from '@/components/library/ShelfThemeCard';
+import { LibraryCarousel } from '@/components/library/LibraryCarousel';
+import { LibrarySortSheet } from '@/components/library/LibrarySortSheet';
+import { BookQuickActionsSheet } from '@/components/library/BookQuickActionsSheet';
 import { useTheme } from '@/design/ThemeProvider';
-import { useLibraryByFilter, type LibraryFilter } from '@/features/library/useLibrary';
+import {
+  useLibraryByFilter,
+  useWaitingLongest,
+  useRecentlyFinished,
+  type LibraryFilter,
+} from '@/features/library/useLibrary';
 import { useShelves } from '@/features/library/useShelves';
 import { userBookStatusLabels, type UserBookStatus } from '@/design/i18n-labels';
 import { computeProgressPercent } from '@/lib/progressPercent';
 import { pluralizeUk } from '@/lib/pluralizeUk';
+import { LibraryPreferenceStorage, type LibraryViewMode, type LibrarySortOption } from '@/lib/libraryPreferenceStorage';
 import type { UserBookWithDetails } from '@/types/userBook';
 
 const BOOK_FORMS = ['книга', 'книги', 'книг'] as const;
@@ -81,13 +90,25 @@ const PROGRESS_STATUSES: UserBookStatus[] = ['reading', 'rereading'];
 /** `React.memo` (Milestone 8, продуктивність) — рядок бібліотеки більше не перерендерюється
  * при кожному рендері списку, лише коли змінюється власне `userBook`; авторський рядок
  * тепер рахується один раз тут, а не наново на кожен рендер (аудит: `join(', ')` у тілі
- * компонента без мемоізації). */
-const BookRow = React.memo(function BookRow({ userBook }: { userBook: UserBookWithDetails }) {
+ * компонента без мемоізації).
+ *
+ * `onLongPress` (Фаза 1) — стабільний пропс з батьківського компонента (лише `setState`
+ * всередині), а не інлайн-стрілка з `userBook` у замиканні: `React.memo` і надалі порівнює
+ * пропси неглибоко, тож стабільна функція не змушує рядок перерендерюватись повторно, коли
+ * змінюється лише інша книга у списку. */
+const BookRow = React.memo(function BookRow({
+  userBook,
+  onLongPress,
+}: {
+  userBook: UserBookWithDetails;
+  onLongPress: (userBook: UserBookWithDetails) => void;
+}) {
   const theme = useTheme();
   const authorNames = useMemo(() => userBook.work.authors.map((a) => a.name).join(', '), [userBook.work.authors]);
   const handlePress = useCallback(() => {
     router.push({ pathname: '/work/[workId]', params: { workId: userBook.work.id } });
   }, [userBook.work.id]);
+  const handleLongPress = useCallback(() => onLongPress(userBook), [onLongPress, userBook]);
   // Прогрес має сенс лише для книг, які зараз активно читаються — для "Хочу прочитати"/
   // "Прочитано"/"Відкладено"/"Не дочитано" він або відсутній за визначенням, або вже завжди
   // 100%, тож нічого не додає до рядка.
@@ -98,6 +119,7 @@ const BookRow = React.memo(function BookRow({ userBook }: { userBook: UserBookWi
   return (
     <Pressable
       onPress={handlePress}
+      onLongPress={handleLongPress}
       accessibilityRole="button"
       accessibilityLabel={percent != null ? `${userBook.work.title}, прочитано ${Math.round(percent)}%` : userBook.work.title}
     >
@@ -125,13 +147,90 @@ const BookRow = React.memo(function BookRow({ userBook }: { userBook: UserBookWi
   );
 });
 
+/** Відступ між картками сітки — той самий `theme.spacing.sm`, що й `ItemSeparator` для списку
+ * (Фаза 1 нижче), щоб перемикання вигляду не міняло "щільність" повітря навколо книг. */
+const GRID_COLUMNS = 3;
+const GRID_GAP = 8;
+
+/**
+ * Картка книги в сітковому вигляді (Фаза 1, ТЗ "grid/list-перемикач"). Обкладинка — головний
+ * елемент (той самий принцип, що й у `ShelfThemeCard`/`CoverThumbnail`'s doc-коментар: обкладинки
+ * — єдиний насправді кольоровий елемент інтерфейсу), назва — одним рядком під нею. Індикатори
+ * статусу НЕ лише кольором (accessibility, п.37 ТЗ): улюблене — окрема іконка-сердечко, прогрес
+ * читання — той самий `ReadingProgressBar`, що й у списку.
+ */
+const GridBookItem = React.memo(function GridBookItem({
+  userBook,
+  coverWidth,
+  onLongPress,
+}: {
+  userBook: UserBookWithDetails;
+  coverWidth: number;
+  onLongPress: (userBook: UserBookWithDetails) => void;
+}) {
+  const theme = useTheme();
+  const handlePress = useCallback(() => {
+    router.push({ pathname: '/work/[workId]', params: { workId: userBook.work.id } });
+  }, [userBook.work.id]);
+  const handleLongPress = useCallback(() => onLongPress(userBook), [onLongPress, userBook]);
+  const percent = PROGRESS_STATUSES.includes(userBook.status)
+    ? computeProgressPercent(userBook.currentPage, userBook.edition.pageCount)
+    : null;
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      onLongPress={handleLongPress}
+      accessibilityRole="button"
+      accessibilityLabel={percent != null ? `${userBook.work.title}, прочитано ${Math.round(percent)}%` : userBook.work.title}
+      style={{ width: coverWidth }}
+    >
+      <View>
+        <CoverThumbnail
+          coverUrl={userBook.edition.coverUrl}
+          title={userBook.work.title}
+          fallbackColor={userBook.work.coverFallbackColor}
+          width={coverWidth}
+          height={coverWidth * 1.45}
+        />
+        {userBook.isFavorite ? (
+          <View
+            style={{
+              position: 'absolute',
+              top: theme.spacing.xs,
+              right: theme.spacing.xs,
+              backgroundColor: theme.colors.overlay,
+              borderRadius: theme.radius.pill,
+              padding: 3,
+            }}
+          >
+            <Ionicons name="heart" size={12} color={theme.colors.onAccent} />
+          </View>
+        ) : null}
+      </View>
+      <AppText variant="caption" numberOfLines={2} style={{ marginTop: theme.spacing.xs }}>
+        {userBook.work.title}
+      </AppText>
+      {percent != null ? <ReadingProgressBar percent={percent} height={4} /> : null}
+    </Pressable>
+  );
+});
+
 /**
  * Бібліотека користувача (Milestone 2): статус-таби над реальними UserBook-записами +
- * вхід до полиць. Сортування за автором, сітка-вид, повнотекстовий пошук по бібліотеці
- * (розділ 15-16 ТЗ) — можливе уточнення пізніше, коли книг стане достатньо багато, щоб це
- * було потрібно, а не передчасна складність для кількох книг одного користувача. Фільтр за
- * жанром (Milestone 9, `GenreTagsSection` на Book Details тепер дає цим даним звідки
- * взятись) — з тієї самої причини поки теж не тут: жанри редагуються на Book Details.
+ * вхід до полиць. Повнотекстовий пошук по бібліотеці (розділ 15-16 ТЗ) — можливе уточнення
+ * пізніше, коли книг стане достатньо багато, щоб це було потрібно, а не передчасна складність
+ * для кількох книг одного користувача. Фільтр за жанром (Milestone 9, `GenreTagsSection` на
+ * Book Details тепер дає цим даним звідки взятись) — з тієї самої причини поки теж не тут:
+ * жанри редагуються на Book Details.
+ *
+ * Фаза 1 (POLYTSIA V1.6) додала: перемикач вигляду список/сітка, сортування (кнопка + нижнє
+ * вікно), дві "розумні" стрічки на вкладці "Усі" (`LibraryCarousel`), long-press швидкі дії
+ * (`BookQuickActionsSheet`). "Бейдж лічильника фільтрів" з оригінального ТЗ тут навмисно НЕ
+ * окремий лічильник кількох активних фільтрів (жанр/формат тощо все ще свідомо не тут, з причини
+ * вище — лічити було б нічого), а маленька крапка на кнопці "Сортувати", коли обрано не
+ * дефолтне сортування — той самий сенс (видимий сигнал "тут щось змінено від дефолту"), без
+ * побудови окремої системи фільтрів, якої в застосунку ще нема.
  */
 /**
  * `FlatList` замість `ScrollView`+`.map()` (Milestone 8, продуктивність — реальна знахідка з
@@ -244,14 +343,74 @@ function ReadingStatusChip({
   );
 }
 
+/** Кругла кнопка-іконка в шапці (перемикач вигляду, сортування) — той самий мінімальний touch
+ * target (44pt), що й решта інтерактивних елементів екрана (Фаза 1). */
+function HeaderIconButton({
+  icon,
+  label,
+  onPress,
+  showDot,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  showDot?: boolean;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={{
+        width: theme.minTouchTarget,
+        height: theme.minTouchTarget,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: theme.radius.pill,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+      }}
+    >
+      <Ionicons name={icon} size={20} color={theme.colors.textSecondary} />
+      {showDot ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 6,
+            width: 7,
+            height: 7,
+            borderRadius: 4,
+            backgroundColor: theme.colors.accent,
+          }}
+        />
+      ) : null}
+    </Pressable>
+  );
+}
+
 function LibraryListHeader({
   filter,
   onFilterChange,
   shelves,
+  viewMode,
+  onToggleViewMode,
+  sort,
+  onOpenSort,
+  waitingLongest,
+  recentlyFinished,
 }: {
   filter: LibraryFilter;
   onFilterChange: (filter: LibraryFilter) => void;
   shelves: ReturnType<typeof useShelves>['data'];
+  viewMode: LibraryViewMode;
+  onToggleViewMode: () => void;
+  sort: LibrarySortOption;
+  onOpenSort: () => void;
+  waitingLongest: UserBookWithDetails[];
+  recentlyFinished: UserBookWithDetails[];
 }) {
   const theme = useTheme();
   const scrollRef = useRef<ScrollView>(null);
@@ -274,7 +433,22 @@ function LibraryListHeader({
 
   return (
     <View>
-      <AppText variant="title">Бібліотека</AppText>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <AppText variant="title">Бібліотека</AppText>
+        <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+          <HeaderIconButton
+            icon={viewMode === 'list' ? 'grid-outline' : 'list-outline'}
+            label={viewMode === 'list' ? 'Показати сіткою' : 'Показати списком'}
+            onPress={onToggleViewMode}
+          />
+          <HeaderIconButton
+            icon="swap-vertical-outline"
+            label="Сортувати"
+            onPress={onOpenSort}
+            showDot={sort !== 'default'}
+          />
+        </View>
+      </View>
 
       {/* Milestone 11, доповнення: "Полиці" тепер ПЕРШИМИ, до табів статусу (раніше — після) —
           пряме прохання власника продукту, щоб полиці одразу впадали в очі при відкритті вкладки. */}
@@ -329,6 +503,16 @@ function LibraryListHeader({
           />
         ))}
       </ScrollView>
+
+      {/* Фаза 1: "розумні" стрічки — лише на вкладці "Усі" (докладніше — doc-коментар
+          `LibraryCarousel`). Порожні стрічки самі повертають `null`, тож `gap` контейнера не
+          лишає по собі порожнього місця. */}
+      {filter === 'all' ? (
+        <View style={{ marginTop: theme.spacing.lg, gap: theme.spacing.lg }}>
+          <LibraryCarousel title="Давно чекають" books={waitingLongest} />
+          <LibraryCarousel title="Нещодавно завершені" books={recentlyFinished} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -336,24 +520,96 @@ function LibraryListHeader({
 export default function LibraryScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   // Milestone 11, доповнення3: "Усі" — новий default (раніше — одразу "Читаю") — саме той
   // "загальний список книг", про який просив власник продукту (читані зверху, решта за датою
   // додавання, `sortAllLibraryView` у `useLibrary.ts`).
   const [filter, setFilter] = useState<LibraryFilter>('all');
-  const { data: books, isLoading, isError, refetch } = useLibraryByFilter(filter);
-  const { data: shelves } = useShelves();
 
-  const renderItem = useCallback(({ item }: { item: UserBookWithDetails }) => <BookRow userBook={item} />, []);
+  // Фаза 1: вигляд (список/сітка) і сортування — персистуються через `LibraryPreferenceStorage`
+  // (той самий підхід, що й тема застосунку), завантажуються один раз при монтуванні екрана.
+  // Дефолти (`'list'`/`'default'`) — рівно та поведінка, що вже була ДО Фази 1, тож доки
+  // збережене значення не завантажилось, екран виглядає так само, як завжди.
+  const [viewMode, setViewMode] = useState<LibraryViewMode>('list');
+  const [sort, setSort] = useState<LibrarySortOption>('default');
+  const [isSortSheetOpen, setSortSheetOpen] = useState(false);
+  const [actionsForBook, setActionsForBook] = useState<UserBookWithDetails | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void LibraryPreferenceStorage.loadViewMode().then((saved) => {
+      if (!cancelled && saved) setViewMode(saved);
+    });
+    void LibraryPreferenceStorage.loadSort().then((saved) => {
+      if (!cancelled && saved) setSort(saved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleToggleViewMode = useCallback(() => {
+    setViewMode((current) => {
+      const next: LibraryViewMode = current === 'list' ? 'grid' : 'list';
+      void LibraryPreferenceStorage.saveViewMode(next);
+      return next;
+    });
+  }, []);
+
+  const handleSelectSort = useCallback((next: LibrarySortOption) => {
+    setSort(next);
+    void LibraryPreferenceStorage.saveSort(next);
+  }, []);
+
+  const { data: books, isLoading, isError, refetch } = useLibraryByFilter(filter, sort);
+  const { data: shelves } = useShelves();
+  const { data: waitingLongest } = useWaitingLongest();
+  const { data: recentlyFinished } = useRecentlyFinished();
+
+  const handleLongPress = useCallback((userBook: UserBookWithDetails) => setActionsForBook(userBook), []);
+
+  const gridCoverWidth = useMemo(
+    () => (windowWidth - theme.spacing.lg * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS,
+    [windowWidth, theme.spacing.lg]
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: UserBookWithDetails }) =>
+      viewMode === 'grid' ? (
+        <GridBookItem userBook={item} coverWidth={gridCoverWidth} onLongPress={handleLongPress} />
+      ) : (
+        <BookRow userBook={item} onLongPress={handleLongPress} />
+      ),
+    [viewMode, gridCoverWidth, handleLongPress]
+  );
   const keyExtractor = useCallback((item: UserBookWithDetails) => item.id, []);
 
   return (
     <ScreenContainer scroll={false}>
       <FlatList
+        // `key={viewMode}` — FlatList не підтримує зміну `numColumns` "на льоту" (RN попереджає
+        // про це в консолі), перемонтування при перемиканні вигляду — простіший і надійніший
+        // обхід, ніж керувати внутрішньою розкладкою вручну.
+        key={viewMode}
         data={books ?? []}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        ItemSeparatorComponent={ItemSeparator}
-        ListHeaderComponent={<LibraryListHeader filter={filter} onFilterChange={setFilter} shelves={shelves} />}
+        numColumns={viewMode === 'grid' ? GRID_COLUMNS : 1}
+        columnWrapperStyle={viewMode === 'grid' ? { gap: GRID_GAP, marginBottom: theme.spacing.md } : undefined}
+        ItemSeparatorComponent={viewMode === 'grid' ? undefined : ItemSeparator}
+        ListHeaderComponent={
+          <LibraryListHeader
+            filter={filter}
+            onFilterChange={setFilter}
+            shelves={shelves}
+            viewMode={viewMode}
+            onToggleViewMode={handleToggleViewMode}
+            sort={sort}
+            onOpenSort={() => setSortSheetOpen(true)}
+            waitingLongest={waitingLongest ?? []}
+            recentlyFinished={recentlyFinished ?? []}
+          />
+        }
         ListHeaderComponentStyle={{ marginBottom: theme.spacing.xl }}
         ListEmptyComponent={
           isError ? (
@@ -376,6 +632,13 @@ export default function LibraryScreen() {
           paddingHorizontal: theme.spacing.lg,
         }}
       />
+      <LibrarySortSheet
+        visible={isSortSheetOpen}
+        value={sort}
+        onSelect={handleSelectSort}
+        onClose={() => setSortSheetOpen(false)}
+      />
+      <BookQuickActionsSheet userBook={actionsForBook} onClose={() => setActionsForBook(null)} />
     </ScreenContainer>
   );
 }
