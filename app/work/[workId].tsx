@@ -568,36 +568,37 @@ function StaleReadingSection({
 }
 
 /**
- * «Персонажі» (POLYTSIA V1.6, Фаза 9 ТЗ: "На Book Details/Memory: «Персонажі»") — компактна
- * картка: кількість уже доданих персонажів (0, якщо ще нема жодного) і кнопка на повний список
- * (`app/characters/[workId].tsx`). Той самий "компактна картка + посилання на власний екран"
+ * «Світ книги» (POLYTSIA V1.6, Фаза 9 ТЗ: "На Book Details/Memory: «Персонажі»", перейменовано
+ * у Фазі 10: "Назва section: «Світ книги»") — компактна картка: кількість уже доданих елементів
+ * лору (персонажів/місць/термінів/організацій; 0, якщо ще нема жодного) і кнопка на повний
+ * список (`app/lore/[workId].tsx`). Той самий "компактна картка + посилання на власний екран"
  * підхід, що й `BookCapsuleSection` (`app/memory/[workId].tsx`) — навмисно продубльована
  * локально на обох екранах (той самий house-патерн, що й `RevisitLaterEntryLine`/
  * `StaleReadingSection`).
  *
  * Доступна незалежно від статусу книги (на відміну від `StaleReadingSection`/
- * `PreReadingReflectionSection`) — персонажів можна занотовувати в будь-який момент, той самий
- * рівень, що й жанри/теги твору.
+ * `PreReadingReflectionSection`) — елементи лору можна занотовувати в будь-який момент, той
+ * самий рівень, що й жанри/теги твору.
  */
-function CharactersSection({ workId }: { workId: string }) {
+function LoreSection({ workId }: { workId: string }) {
   const theme = useTheme();
   const { data: entities, isLoading } = useLoreEntities(workId);
   if (isLoading) return null;
 
-  const count = (entities ?? []).filter((entity) => entity.type === 'character').length;
+  const count = (entities ?? []).length;
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
         <Ionicons name="people-outline" size={18} color={theme.colors.accent} />
         <AppText variant="body" color="secondary" style={{ flex: 1 }}>
-          {count > 0 ? `Персонажів додано: ${count}.` : 'Ще не додано жодного персонажа.'}
+          {count > 0 ? `У світі книги: ${count}.` : 'Світ цієї книги ще порожній.'}
         </AppText>
       </View>
       <Button
-        label="Керувати персонажами"
+        label="Відкрити світ книги"
         variant="secondary"
-        onPress={() => router.push({ pathname: '/characters/[workId]', params: { workId } } as unknown as Href)}
+        onPress={() => router.push({ pathname: '/lore/[workId]', params: { workId } } as unknown as Href)}
       />
     </Card>
   );
@@ -1310,7 +1311,7 @@ export default function BookDetailsScreen() {
               <StaleReadingSection status={data.userBook.status} sessions={sessions} workId={data.work.id} />
             ) : null}
 
-            <CharactersSection workId={data.work.id} />
+            <LoreSection workId={data.work.id} />
 
             {data.userBook ? (
               <PreReadingReflectionSection userBookId={data.userBook.id} status={data.userBook.status} />

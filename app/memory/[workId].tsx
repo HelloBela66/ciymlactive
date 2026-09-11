@@ -177,30 +177,30 @@ function BookCapsuleSection({
 }
 
 /**
- * «Персонажі» (POLYTSIA V1.6, Фаза 9 ТЗ, entry point #2 — Book Memory screen). Та сама
- * компактна картка, що й `CharactersSection` на `app/work/[workId].tsx` (Book Details),
- * навмисно продубльована локально — той самий підхід, що й `BookCapsuleSection`/
- * `RevisitLaterEntryLine` вище на цьому екрані.
+ * «Світ книги» (POLYTSIA V1.6, Фаза 9 ТЗ, entry point #2 — Book Memory screen; перейменовано у
+ * Фазі 10). Та сама компактна картка, що й `LoreSection` на `app/work/[workId].tsx`
+ * (Book Details), навмисно продубльована локально — той самий підхід, що й
+ * `BookCapsuleSection`/`RevisitLaterEntryLine` вище на цьому екрані.
  */
-function CharactersSection({ workId }: { workId: string }) {
+function LoreSection({ workId }: { workId: string }) {
   const theme = useTheme();
   const { data: entities, isLoading } = useLoreEntities(workId);
   if (isLoading) return null;
 
-  const count = (entities ?? []).filter((entity) => entity.type === 'character').length;
+  const count = (entities ?? []).length;
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
         <Ionicons name="people-outline" size={18} color={theme.colors.accent} />
         <AppText variant="body" color="secondary" style={{ flex: 1 }}>
-          {count > 0 ? `Персонажів додано: ${count}.` : 'Ще не додано жодного персонажа.'}
+          {count > 0 ? `У світі книги: ${count}.` : 'Світ цієї книги ще порожній.'}
         </AppText>
       </View>
       <Button
-        label="Керувати персонажами"
+        label="Відкрити світ книги"
         variant="secondary"
-        onPress={() => router.push({ pathname: '/characters/[workId]', params: { workId } } as unknown as Href)}
+        onPress={() => router.push({ pathname: '/lore/[workId]', params: { workId } } as unknown as Href)}
       />
     </Card>
   );
@@ -506,7 +506,7 @@ export default function MemoryCardScreen() {
 
             <RevisitLaterSection userBookId={userBookId} />
 
-            <CharactersSection workId={data.work.id} />
+            <LoreSection workId={data.work.id} />
 
             <BookCapsuleSection
               userBookId={data.userBook.id}

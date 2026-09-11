@@ -23,6 +23,7 @@ import {
   useUpdateLoreEntity,
 } from '@/features/lore/useLoreEntities';
 import { LORE_ENTITY_REACTION_META, LORE_ENTITY_REACTION_ORDER, isLoreEntityReactionId } from '@/design/loreEntityReaction';
+import { LORE_ENTITY_TYPE_META } from '@/design/loreEntityType';
 import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
 
@@ -71,7 +72,7 @@ function ReactionRow({ value, onChange }: { value: string | null; onChange: (nex
 
 /** Один рядок пікера "пов'язати запис щоденника" — той самий чекбокс-рядок, що й у
  * `app/capsule/[workId]/edit.tsx` (вибір моменту для капсули), лише тут вибір НЕ ексклюзивний
- * (персонаж може бути пов'язаний з кількома записами). */
+ * (елемент лору може бути пов'язаний з кількома записами). */
 function LinkableEntryRow({
   entry,
   linked,
@@ -124,15 +125,20 @@ function LinkableEntryRow({
 }
 
 /**
- * Character Detail — редагування персонажа, реакція, обране, ручне зв'язування із записами
- * щоденника (POLYTSIA V1.6, Фаза 9 ТЗ). Єдиного окремого id-запиту немає — персонаж
- * знаходиться фільтром по вже завантаженому `useLoreEntities(workId)` (той самий підхід, що й
- * `docs/PERSONAL_LORE.md` §Архітектура пояснює для уникнення зайвого query key на один рядок).
+ * Lore Entity Detail (POLYTSIA V1.6, Фаза 10 ТЗ) — той самий екран, що був Character Detail у
+ * Фазі 9 (`app/characters/[workId]/[entityId].tsx`, перенесений сюди — `docs/PERSONAL_LORE.md`),
+ * тепер для будь-якого з чотирьох типів. Єдиного окремого id-запиту немає — елемент лору
+ * знаходиться фільтром по вже завантаженому `useLoreEntities(workId)`.
+ *
+ * "Optional impression" (реакція) — з ТЗ Фази 9 стосується лише персонажів; для інших типів
+ * (місце/термін/організація) секція просто не рендериться (ТЗ Фази 9: "Не використовуй жорстку
+ * універсальну classification" — реакція не універсальна для всього лору, а специфічна для
+ * дійової особи).
  *
  * Жодного NLP/автовизначення зв'язків — лише ручний пікер нижче (ТЗ: "Не роби NLP entity
  * extraction").
  */
-export default function CharacterDetailScreen() {
+export default function LoreEntityDetailScreen() {
   const theme = useTheme();
   const { workId, entityId } = useLocalSearchParams<{ workId: string; entityId: string }>();
   const { data, isLoading, isError, refetch } = useBookDetails(workId);
@@ -140,6 +146,7 @@ export default function CharacterDetailScreen() {
 
   const { data: entities, isLoading: isEntitiesLoading } = useLoreEntities(workId);
   const entity = useMemo(() => (entities ?? []).find((item) => item.id === entityId) ?? null, [entities, entityId]);
+  const typeLabel = entity ? LORE_ENTITY_TYPE_META[entity.type].label : 'Елемент лору';
 
   const { data: allEntries } = useJournalEntries(userBookId);
   const { data: categories } = useAllNoteCategories(userBookId);
@@ -160,7 +167,7 @@ export default function CharacterDetailScreen() {
   const [description, setDescription] = useState<string | null>(null);
 
   // Той самий "adjust state while rendering, рівно один раз" патерн, що й `initialForm` на
-  // `app/capsule/[workId]/edit.tsx` — заповнюється, щойно персонаж уже відомий.
+  // `app/capsule/[workId]/edit.tsx` — заповнюється, щойно елемент лору вже відомий.
   if (name === null && entity) {
     setName(entity.name);
     setDescription(entity.description ?? '');
@@ -196,7 +203,7 @@ export default function CharacterDetailScreen() {
 
   const handleDelete = () => {
     if (!entity || !workId) return;
-    Alert.alert('Видалити персонажа?', `«${entity.name}» буде видалено. Записи щоденника залишаться без змін.`, [
+    Alert.alert(`Видалити «${entity.name}»?`, 'Запис буде видалено. Записи щоденника залишаться без змін.', [
       { text: 'Скасувати', style: 'cancel' },
       {
         text: 'Видалити',
@@ -221,7 +228,7 @@ export default function CharacterDetailScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          title: entity?.name ?? 'Персонаж',
+          title: entity?.name ?? 'Елемент лору',
           headerStyle: { backgroundColor: theme.colors.bg },
           headerTintColor: theme.colors.textPrimary,
           headerShadowVisible: false,
@@ -253,11 +260,14 @@ export default function CharacterDetailScreen() {
           </AppText>
         ) : !entity ? (
           <AppText variant="body" color="secondary">
-            Персонажа не знайдено.
+            Елемент лору не знайдено.
           </AppText>
         ) : (
           <View style={{ gap: theme.spacing.lg }}>
             <Card style={{ gap: theme.spacing.md }}>
+              <AppText variant="caption" color="tertiary">
+                {typeLabel}
+              </AppText>
               <LabeledInput label="Ім'я" value={name ?? ''} onChangeText={setName} />
               <LabeledInput
                 label="Опис"
@@ -281,10 +291,12 @@ export default function CharacterDetailScreen() {
               />
             </Card>
 
-            <View style={{ gap: theme.spacing.xs }}>
-              <AppText variant="heading">Ставлення до персонажа</AppText>
-              <ReactionRow value={entity.reaction} onChange={handleReactionChange} />
-            </View>
+            {entity.type === 'character' ? (
+              <View style={{ gap: theme.spacing.xs }}>
+                <AppText variant="heading">Ставлення до персонажа</AppText>
+                <ReactionRow value={entity.reaction} onChange={handleReactionChange} />
+              </View>
+            ) : null}
 
             <View style={{ gap: theme.spacing.sm }}>
               <AppText variant="heading">Пов&apos;язані записи щоденника</AppText>
@@ -308,7 +320,7 @@ export default function CharacterDetailScreen() {
             </View>
 
             <Button
-              label={removeEntity.isPending ? 'Видаляю…' : 'Видалити персонажа'}
+              label={removeEntity.isPending ? 'Видаляю…' : 'Видалити'}
               variant="ghost"
               onPress={handleDelete}
               disabled={removeEntity.isPending}

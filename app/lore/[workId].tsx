@@ -8,30 +8,39 @@ import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { LabeledInput } from '@/components/ui/LabeledInput';
+import { ChipSelect } from '@/components/ui/ChipSelect';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useCreateLoreEntity, useLoreEntities } from '@/features/lore/useLoreEntities';
 import { LORE_ENTITY_REACTION_META, isLoreEntityReactionId } from '@/design/loreEntityReaction';
-import type { LoreEntity } from '@/types/loreEntity';
+import { LORE_ENTITY_TYPE_META, LORE_ENTITY_TYPE_ORDER } from '@/design/loreEntityType';
+import type { LoreEntity, LoreEntityType } from '@/types/loreEntity';
 
-/** Один рядок списку персонажів — ім'я, коротка примітка (одним рядком), і, якщо є, іконка
- * поточної реакції. Той самий "маленький презентаційний блок без спільного стану" підхід, що
- * й `RecallEntryLine`/`RecapEntryLine`. */
-function CharacterListRow({ entity, workId }: { entity: LoreEntity; workId: string }) {
+const TYPE_OPTIONS: { value: LoreEntityType; label: string }[] = LORE_ENTITY_TYPE_ORDER.map((type) => ({
+  value: type,
+  label: LORE_ENTITY_TYPE_META[type].label,
+}));
+
+/** Один рядок списку — тип-іконка, ім'я, коротка примітка (одним рядком), і, для персонажів,
+ * іконка поточної реакції. Той самий "маленький презентаційний блок без спільного стану"
+ * підхід, що й `RecallEntryLine`/`RecapEntryLine`. */
+function LoreEntityRow({ entity, workId }: { entity: LoreEntity; workId: string }) {
   const theme = useTheme();
+  const typeMeta = LORE_ENTITY_TYPE_META[entity.type];
   const reactionMeta =
     entity.reaction && isLoreEntityReactionId(entity.reaction) ? LORE_ENTITY_REACTION_META[entity.reaction] : null;
 
   return (
     <Pressable
       onPress={() =>
-        router.push({ pathname: '/characters/[workId]/[entityId]', params: { workId, entityId: entity.id } } as unknown as Href)
+        router.push({ pathname: '/lore/[workId]/[entityId]', params: { workId, entityId: entity.id } } as unknown as Href)
       }
       accessibilityRole="button"
-      accessibilityLabel={entity.name}
+      accessibilityLabel={`${typeMeta.label}: ${entity.name}`}
     >
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name={typeMeta.icon} size={18} color={theme.colors.textSecondary} />
         <View style={{ flex: 1, gap: 2 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs }}>
             <AppText variant="body" style={{ fontWeight: '600' }}>
@@ -53,32 +62,34 @@ function CharacterListRow({ entity, workId }: { entity: LoreEntity; workId: stri
 }
 
 /**
- * «Персонажі» — список + швидке додавання (POLYTSIA V1.6, Фаза 9 ТЗ). Точка входу —
- * `CharactersSection` на Book Details (`app/work/[workId].tsx`) і Memory (`app/memory/[workId].tsx`).
- * Схема (`lore_entity`) підтримує чотири типи від самого початку (`docs/PERSONAL_LORE.md`
- * §Архітектура), але цей екран навмисно показує лише персонажів (`type: 'character'`) —
- * місця/терміни/організації додаються в Фазі 10, без нової міграції.
+ * «Світ книги» (POLYTSIA V1.6, Фаза 10 ТЗ: "Architecture characters повинна бути
+ * розширювана до personal lore") — той самий екран, що був «Персонажі» у Фазі 9
+ * (`app/characters/[workId].tsx`, перенесений сюди за назвою: `docs/PERSONAL_LORE.md`), тепер
+ * з вибором типу при додаванні: Персонаж, Місце, Термін, Організація (рівно порядок ТЗ). Схема
+ * (`lore_entity`) підтримувала всі чотири типи від самого Migration 015 (Фаза 9) — це чисто
+ * UI-розширення, без нової міграції.
  *
- * Жодного NLP/автовизначення дійових осіб (ТЗ: "Не роби NLP entity extraction") — лише те, що
- * користувач сам вписав.
+ * Жодного NLP/автовизначення (ТЗ Фази 9, чинне і тут: "Не роби NLP entity extraction") — лише
+ * те, що користувач сам вписав.
  *
- * `lore_entity.work_id`, не `user_book_id` (`015_lore_entity.ts`) — той самий рівень, що й
- * жанри/теги: екран доступний і для книг, які ще не додані в бібліотеку (`data.userBook` може
- * бути `null`), тому тут немає окремого guard'а на його відсутність.
+ * `lore_entity.work_id`, не `user_book_id` — екран доступний і для книг, які ще не додані в
+ * бібліотеку (`data.userBook` може бути `null`), тому тут немає окремого guard'а на його
+ * відсутність.
  */
-export default function CharactersScreen() {
+export default function LoreScreen() {
   const theme = useTheme();
   const { workId } = useLocalSearchParams<{ workId: string }>();
   const { data, isLoading, isError, refetch } = useBookDetails(workId);
   const { data: entities, isLoading: isEntitiesLoading } = useLoreEntities(workId);
   const createEntity = useCreateLoreEntity();
 
+  const [type, setType] = useState<LoreEntityType>('character');
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [pageText, setPageText] = useState('');
 
   const pageCount = data?.primaryEdition?.pageCount ?? null;
-  const characters = (entities ?? []).filter((entity) => entity.type === 'character');
+  const entries = entities ?? [];
 
   const handleAdd = () => {
     if (!workId || name.trim().length === 0) return;
@@ -86,7 +97,7 @@ export default function CharactersScreen() {
     const firstSeenPage = parsedPage != null && Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : null;
 
     createEntity.mutate(
-      { workId, type: 'character', name, description: note.trim().length > 0 ? note : null, firstSeenPage, pageCount },
+      { workId, type, name, description: note.trim().length > 0 ? note : null, firstSeenPage, pageCount },
       {
         onSuccess: () => {
           setName('');
@@ -102,7 +113,7 @@ export default function CharactersScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          title: 'Персонажі',
+          title: 'Світ книги',
           headerStyle: { backgroundColor: theme.colors.bg },
           headerTintColor: theme.colors.textPrimary,
           headerShadowVisible: false,
@@ -120,7 +131,8 @@ export default function CharactersScreen() {
             <AppText variant="title">{data.work.title}</AppText>
 
             <Card style={{ gap: theme.spacing.sm }}>
-              <AppText variant="heading">Додати персонажа</AppText>
+              <AppText variant="heading">Додати</AppText>
+              <ChipSelect label="Тип" options={TYPE_OPTIONS} value={type} onChange={setType} disabled={createEntity.isPending} />
               <LabeledInput label="Ім'я" placeholder="Наприклад, Пол Атрідес" value={name} onChangeText={setName} />
               <LabeledInput
                 label="Коротка примітка"
@@ -147,12 +159,12 @@ export default function CharactersScreen() {
                 <AppText variant="body" color="secondary">
                   Завантаження…
                 </AppText>
-              ) : characters.length === 0 ? (
+              ) : entries.length === 0 ? (
                 <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
-                  Персонажів цієї книги ще не додано.
+                  Світ цієї книги ще порожній.
                 </AppText>
               ) : (
-                characters.map((entity) => <CharacterListRow key={entity.id} entity={entity} workId={data.work.id} />)
+                entries.map((entity) => <LoreEntityRow key={entity.id} entity={entity} workId={data.work.id} />)
               )}
             </View>
           </View>
