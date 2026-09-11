@@ -11,6 +11,7 @@ import { LabeledInput } from '@/components/ui/LabeledInput';
 import { StarRating } from '@/components/ui/StarRating';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import { NoteCategoryPicker, type NoteCategoryValue } from '@/components/session/NoteCategoryPicker';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
@@ -45,6 +46,7 @@ import type { EditionWithRelations } from '@/types/edition';
 import type { UserBook, UserBookStatus } from '@/types/userBook';
 import type { OwnedBook } from '@/types/ownedBook';
 import type { JournalEntry, JournalEntryKind } from '@/types/journalEntry';
+import type { ReadingSession } from '@/types/readingSession';
 
 const JOURNAL_KIND_OPTIONS: { value: JournalEntryKind; label: string }[] = [
   { value: 'note', label: 'Нотатка' },
@@ -877,20 +879,25 @@ function JournalSection({ userBookId, editionId }: { userBookId: string; edition
  * "читаю"/"перечитую", і лише коли даних досить: відомий обсяг видання (`pageCount`) і хоч
  * трохи темпу з недавніх сесій (`predictFinish` навмисно повертає `null` замість вигаданої
  * дати, коли книгу щойно почали чи давно не читали — див. `src/lib/finishPrediction.ts`).
+ *
+ * POLYTSIA V1.6, Фаза 2: `sessions` тепер проп, а не власний виклик `useReadingHistory` —
+ * піднято до `BookDetailsScreen`, який тепер викликає хук РІВНО один раз і ділить результат із
+ * `ReadingHistorySection` нижче (той самий ключ кешу, той самий запит до БД, що й раніше через
+ * React Query дедуплікацію — тут просто прибрано зайвий другий виклик хука заради єдиного
+ * джерела `sessions` для обох секцій).
  */
 function FinishPredictionSection({
-  userBookId,
   currentPage,
   totalPages,
   status,
+  sessions,
 }: {
-  userBookId: string;
   currentPage: number;
   totalPages: number | null;
   status: UserBookStatus;
+  sessions: ReadingSession[] | undefined;
 }) {
   const theme = useTheme();
-  const { data: sessions } = useReadingHistory(userBookId);
 
   if (status !== 'reading' && status !== 'rereading') return null;
   if (!sessions) return null;
@@ -915,15 +922,17 @@ function FinishPredictionSection({
   );
 }
 
-function ReadingHistorySection({ userBookId }: { userBookId: string }) {
+/**
+ * POLYTSIA V1.6, Фаза 2: `sessions` тепер проп (піднято з батька — див. коментар над
+ * `FinishPredictionSection`), а заголовок "Історія читання" прибрано звідси — його тепер дає
+ * обгортка `CollapsibleSection` у `BookDetailsScreen`, яка й вирішує, чи показувати розділ
+ * узагалі (той самий `sessions.length > 0` гард, лише піднятий на рівень вище).
+ */
+function ReadingHistorySection({ sessions }: { sessions: ReadingSession[] }) {
   const theme = useTheme();
-  const { data: sessions } = useReadingHistory(userBookId);
-
-  if (!sessions || sessions.length === 0) return null;
 
   return (
     <View style={{ gap: theme.spacing.md }}>
-      <AppText variant="heading">Історія читання</AppText>
       {sessions.map((session) => (
         <Card key={session.id} style={{ gap: theme.spacing.xs }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -953,6 +962,12 @@ export default function BookDetailsScreen() {
   const theme = useTheme();
   const { workId } = useLocalSearchParams<{ workId: string }>();
   const { data, isLoading, isError, refetch } = useBookDetails(workId);
+  // POLYTSIA V1.6, Фаза 2: піднято сюди з `FinishPredictionSection`/`ReadingHistorySection` —
+  // один виклик хука замість двох окремих (React Query й так дедуплікував би однаковий ключ,
+  // але навіщо взагалі викликати двічі). Безпечно викликати без умови (Rules of Hooks) —
+  // `useReadingHistory` сам вимикається через `enabled: !!userBookId`, коли `data` ще не
+  // завантажено або `userBook` відсутній.
+  const { data: sessions } = useReadingHistory(data?.userBook?.id);
 
   return (
     <>
@@ -1043,7 +1058,9 @@ export default function BookDetailsScreen() {
               </AppText>
             ) : null}
 
-            <GenreTagsSection workId={data.work.id} />
+            <CollapsibleSection title="Жанри та теги">
+              <GenreTagsSection workId={data.work.id} />
+            </CollapsibleSection>
 
             {data.primaryEdition ? (
               <LibrarySection
@@ -1056,10 +1073,10 @@ export default function BookDetailsScreen() {
 
             {data.userBook && data.primaryEdition ? (
               <FinishPredictionSection
-                userBookId={data.userBook.id}
                 currentPage={data.userBook.currentPage}
                 totalPages={data.primaryEdition.pageCount}
                 status={data.userBook.status}
+                sessions={sessions}
               />
             ) : null}
 
@@ -1069,15 +1086,20 @@ export default function BookDetailsScreen() {
               <JournalSection userBookId={data.userBook.id} editionId={data.primaryEdition.id} />
             ) : null}
 
-            {data.userBook ? <ReadingHistorySection userBookId={data.userBook.id} /> : null}
+            {data.userBook && sessions && sessions.length > 0 ? (
+              <CollapsibleSection title="Історія читання">
+                <ReadingHistorySection sessions={sessions} />
+              </CollapsibleSection>
+            ) : null}
 
             {data.editions.length > 0 ? (
-              <View style={{ gap: theme.spacing.md }}>
-                <AppText variant="heading">Видання</AppText>
-                {data.editions.map((edition) => (
-                  <EditionCard key={edition.id} edition={edition} />
-                ))}
-              </View>
+              <CollapsibleSection title={`Видання (${data.editions.length})`}>
+                <View style={{ gap: theme.spacing.md }}>
+                  {data.editions.map((edition) => (
+                    <EditionCard key={edition.id} edition={edition} />
+                  ))}
+                </View>
+              </CollapsibleSection>
             ) : null}
           </View>
         )}
