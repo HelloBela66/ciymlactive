@@ -26,6 +26,7 @@ import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { useBookCapsule } from '@/features/memory/useBookCapsule';
 import { useLoreEntities } from '@/features/lore/useLoreEntities';
+import { isSpoilerSafeActive, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { usePreReadingReflection } from '@/features/memory/usePreReadingReflection';
 import { canCreateCapsule } from '@/lib/bookCapsule';
 import { pickBeforeCardText } from '@/lib/beforeAfter';
@@ -36,7 +37,7 @@ import type { Href } from 'expo-router';
 import type { MemoryCardTemplateId } from '@/types/bookMemory';
 import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
-import type { UserBookStatus } from '@/types/userBook';
+import type { UserBook, UserBookStatus } from '@/types/userBook';
 import type { PreReadingReflection } from '@/types/preReadingReflection';
 
 const log = createLogger('app/memory');
@@ -181,13 +182,31 @@ function BookCapsuleSection({
  * Фазі 10). Та сама компактна картка, що й `LoreSection` на `app/work/[workId].tsx`
  * (Book Details), навмисно продубльована локально — той самий підхід, що й
  * `BookCapsuleSection`/`RevisitLaterEntryLine` вище на цьому екрані.
+ *
+ * SPOILER-SAFE MODE (Фаза 11) — той самий фільтр, що й на Book Details (`app/work/[workId].tsx`
+ * #LoreSection): актуально й тут, бо цей екран доступний не лише для "прочитано", а й під час
+ * "перечитую" (`LibrarySection`'s "Переглянути підсумок читання"), коли спойлери щодо ще не
+ * дочитаного повторного прочитання так само небажані.
  */
-function LoreSection({ workId }: { workId: string }) {
+function LoreSection({
+  workId,
+  userBook,
+  pageCount,
+}: {
+  workId: string;
+  userBook: UserBook;
+  pageCount: number | null;
+}) {
   const theme = useTheme();
   const { data: entities, isLoading } = useLoreEntities(workId);
   if (isLoading) return null;
 
-  const count = (entities ?? []).length;
+  const active = isSpoilerSafeActive(userBook.status, userBook.spoilerSafeEnabled);
+  const visibleEntities = filterSpoilerSafeLoreEntities(entities ?? [], active, {
+    currentPage: userBook.currentPage,
+    pageCount,
+  });
+  const count = visibleEntities.length;
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
@@ -506,7 +525,11 @@ export default function MemoryCardScreen() {
 
             <RevisitLaterSection userBookId={userBookId} />
 
-            <LoreSection workId={data.work.id} />
+            <LoreSection
+              workId={data.work.id}
+              userBook={data.userBook}
+              pageCount={data.primaryEdition?.pageCount ?? null}
+            />
 
             <BookCapsuleSection
               userBookId={data.userBook.id}

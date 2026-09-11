@@ -16,7 +16,12 @@ import { NoteCategoryPicker, type NoteCategoryValue } from '@/components/session
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useAddToLibrary } from '@/features/library/useAddToLibrary';
-import { useToggleFavorite, useUpdateUserBookStatus, useRemoveFromLibrary } from '@/features/library/useUpdateUserBook';
+import {
+  useToggleFavorite,
+  useToggleSpoilerSafe,
+  useUpdateUserBookStatus,
+  useRemoveFromLibrary,
+} from '@/features/library/useUpdateUserBook';
 import { useShelfIdsForUserBook, useShelves, useToggleShelfBook } from '@/features/library/useShelves';
 import { useMarkOwned, useUnmarkOwned } from '@/features/owned-library/useOwnedBook';
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
@@ -30,6 +35,7 @@ import {
 } from '@/features/memory/usePreReadingReflection';
 import { canEditPreReadingReflection } from '@/lib/beforeAfter';
 import { computeStaleReadingInfo, describeStaleReading } from '@/lib/staleReading';
+import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { useLoreEntities } from '@/features/lore/useLoreEntities';
 import { useAllGenres, useGenresForWork, useToggleWorkGenre, useAddCustomGenre } from '@/features/book-details/useGenres';
 import { useTagsForWork, useAddTagToWork, useRemoveTagFromWork } from '@/features/book-details/useTags';
@@ -310,6 +316,7 @@ function LibrarySection({
   const addToLibrary = useAddToLibrary();
   const updateStatus = useUpdateUserBookStatus();
   const toggleFavorite = useToggleFavorite();
+  const toggleSpoilerSafe = useToggleSpoilerSafe();
   const markOwned = useMarkOwned();
   const unmarkOwned = useUnmarkOwned();
   const removeFromLibrary = useRemoveFromLibrary();
@@ -457,6 +464,32 @@ function LibrarySection({
         </Card>
       </Pressable>
 
+      {userBook && (userBook.status === 'reading' || userBook.status === 'rereading') ? (
+        <Pressable
+          onPress={() =>
+            toggleSpoilerSafe.mutate({ id: userBook.id, spoilerSafeEnabled: !userBook.spoilerSafeEnabled })
+          }
+          accessibilityRole="button"
+          accessibilityState={{ selected: userBook.spoilerSafeEnabled }}
+          accessibilityLabel={
+            userBook.spoilerSafeEnabled
+              ? 'Вимкнути приховування майбутніх записів'
+              : 'Увімкнути приховування майбутніх записів'
+          }
+        >
+          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <Ionicons
+              name={userBook.spoilerSafeEnabled ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+              color={userBook.spoilerSafeEnabled ? theme.colors.accent : theme.colors.textTertiary}
+            />
+            <AppText variant="body" color={userBook.spoilerSafeEnabled ? 'primary' : 'secondary'} style={{ flex: 1 }}>
+              Приховувати майбутні записи
+            </AppText>
+          </Card>
+        </Pressable>
+      ) : null}
+
       {userBook ? (
         <View style={{ gap: theme.spacing.sm }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -579,13 +612,31 @@ function StaleReadingSection({
  * Доступна незалежно від статусу книги (на відміну від `StaleReadingSection`/
  * `PreReadingReflectionSection`) — елементи лору можна занотовувати в будь-який момент, той
  * самий рівень, що й жанри/теги твору.
+ *
+ * SPOILER-SAFE MODE (Фаза 11) — коли книга активно читається й прапорець увімкнено, кількість
+ * рахується вже ПІСЛЯ фільтрації (`filterSpoilerSafeLoreEntities`): лічильник має відповідати
+ * тому, що користувач реально побачить на `app/lore/[workId].tsx` (де застосовано той самий
+ * фільтр), а не всім елементам лору, що вже існують у книзі, включно з майбутніми.
  */
-function LoreSection({ workId }: { workId: string }) {
+function LoreSection({
+  workId,
+  userBook,
+  pageCount,
+}: {
+  workId: string;
+  userBook: UserBook | null;
+  pageCount: number | null;
+}) {
   const theme = useTheme();
   const { data: entities, isLoading } = useLoreEntities(workId);
   if (isLoading) return null;
 
-  const count = (entities ?? []).length;
+  const active = userBook ? isSpoilerSafeActive(userBook.status, userBook.spoilerSafeEnabled) : false;
+  const visibleEntities = filterSpoilerSafeLoreEntities(entities ?? [], active, {
+    currentPage: userBook?.currentPage ?? null,
+    pageCount,
+  });
+  const count = visibleEntities.length;
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
@@ -892,10 +943,39 @@ function RatingSection({ userBookId }: { userBookId: string }) {
  * читання) — той самий патерн "+ Додати", що й у Жанрах/Тегах вище на цьому ж екрані: це вже
  * довгий екран, і композер тут не головна дія, а одна з багатьох.
  */
-function JournalSection({ userBookId, editionId }: { userBookId: string; editionId: string }) {
+/**
+ * SPOILER-SAFE MODE (Фаза 11) — коли книга активно читається (`isSpoilerSafeActive`) і
+ * прапорець `user_book.spoiler_safe_enabled` увімкнено, записи, створені ПОПЕРЕДУ поточного
+ * прогресу читання, приховуються з відображення (`filterSpoilerSafeJournalEntries`) — не
+ * видаляються, лише фільтруються на клієнті (`docs/SPOILER_SAFE.md`). Лічильник (`count`,
+ * бейдж поруч із заголовком) навмисно лишається НЕвідфільтрованим — це загальна кількість
+ * записів у щоденнику книги (`useJournalCount`, окремий легкий запит), а не кількість видимих
+ * зараз рядків: приховані спойлером записи все ще існують і будуть видні пізніше, тож рахувати
+ * їх у бейджі — не "хибна" інформація, на відміну від самого тексту запису.
+ */
+function JournalSection({
+  userBookId,
+  editionId,
+  status,
+  spoilerSafeEnabled,
+  currentPage,
+  pageCount,
+}: {
+  userBookId: string;
+  editionId: string;
+  status: UserBookStatus;
+  spoilerSafeEnabled: boolean;
+  currentPage: number;
+  pageCount: number | null;
+}) {
   const theme = useTheme();
-  const { data: entries } = useJournalEntries(userBookId);
+  const { data: rawEntries } = useJournalEntries(userBookId);
   const { data: count } = useJournalCount(userBookId);
+  const spoilerSafeActive = isSpoilerSafeActive(status, spoilerSafeEnabled);
+  const entries = filterSpoilerSafeJournalEntries(rawEntries ?? [], spoilerSafeActive, {
+    currentPage,
+    pageCount,
+  });
   const createNote = useCreateNote();
   const createQuote = useCreateQuote();
   const removeNote = useRemoveNote();
@@ -1021,7 +1101,7 @@ function JournalSection({ userBookId, editionId }: { userBookId: string; edition
         </Card>
       ) : null}
 
-      {(entries ?? []).map((entry) => (
+      {entries.map((entry) => (
         <Card key={entry.id} style={{ gap: theme.spacing.xs }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <AppText variant="caption" color="accent">
@@ -1100,10 +1180,16 @@ function JournalSection({ userBookId, editionId }: { userBookId: string; edition
         </Card>
       ))}
 
-      {(!entries || entries.length === 0) && !showForm ? (
+      {entries.length === 0 && !showForm ? (
         <AppText variant="caption" color="tertiary">
-          Ще немає жодного запису — думки, питання чи улюблені цитати про цю книгу з&apos;являться
-          тут.
+          {(rawEntries?.length ?? 0) > 0
+            ? 'Усі записи попереду за сюжетом — режим «без спойлерів» їх приховує.'
+            : "Ще немає жодного запису — думки, питання чи улюблені цитати про цю книгу з'являться тут."}
+        </AppText>
+      ) : null}
+      {spoilerSafeActive && (rawEntries?.length ?? 0) - entries.length > 0 && entries.length > 0 ? (
+        <AppText variant="caption" color="tertiary">
+          Ще {(rawEntries?.length ?? 0) - entries.length} приховано режимом «без спойлерів».
         </AppText>
       ) : null}
     </View>
@@ -1311,7 +1397,11 @@ export default function BookDetailsScreen() {
               <StaleReadingSection status={data.userBook.status} sessions={sessions} workId={data.work.id} />
             ) : null}
 
-            <LoreSection workId={data.work.id} />
+            <LoreSection
+              workId={data.work.id}
+              userBook={data.userBook}
+              pageCount={data.primaryEdition?.pageCount ?? null}
+            />
 
             {data.userBook ? (
               <PreReadingReflectionSection userBookId={data.userBook.id} status={data.userBook.status} />
@@ -1329,7 +1419,14 @@ export default function BookDetailsScreen() {
             {data.userBook ? <RatingSection userBookId={data.userBook.id} /> : null}
 
             {data.userBook && data.primaryEdition ? (
-              <JournalSection userBookId={data.userBook.id} editionId={data.primaryEdition.id} />
+              <JournalSection
+                userBookId={data.userBook.id}
+                editionId={data.primaryEdition.id}
+                status={data.userBook.status}
+                spoilerSafeEnabled={data.userBook.spoilerSafeEnabled}
+                currentPage={data.userBook.currentPage}
+                pageCount={data.primaryEdition.pageCount}
+              />
             ) : null}
 
             {data.userBook && sessions && sessions.length > 0 ? (

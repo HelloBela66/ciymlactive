@@ -18,6 +18,7 @@ interface UserBookRow {
   finished_at: string | null;
   current_page: number;
   is_favorite: number;
+  spoiler_safe_enabled: number;
   added_at: string;
   updated_at: string;
 }
@@ -31,6 +32,7 @@ function mapRow(row: UserBookRow): UserBook {
     finishedAt: row.finished_at,
     currentPage: row.current_page,
     isFavorite: row.is_favorite === 1,
+    spoilerSafeEnabled: row.spoiler_safe_enabled === 1,
     addedAt: row.added_at,
     updatedAt: row.updated_at,
   };
@@ -114,8 +116,8 @@ export const UserBookRepository = {
     const finishedAt = status === 'finished' ? now : null;
 
     await db.runAsync(
-      `INSERT INTO user_book (id, edition_id, status, started_at, finished_at, current_page, is_favorite, added_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+      `INSERT INTO user_book (id, edition_id, status, started_at, finished_at, current_page, is_favorite, spoiler_safe_enabled, added_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, 0, 1, ?, ?)`,
       [id, editionId, status, startedAt, finishedAt, now, now],
     );
 
@@ -127,6 +129,7 @@ export const UserBookRepository = {
       finishedAt,
       currentPage: 0,
       isFavorite: false,
+      spoilerSafeEnabled: true,
       addedAt: now,
       updatedAt: now,
     };
@@ -205,6 +208,15 @@ export const UserBookRepository = {
   async setFavorite(db: SQLiteDatabase, id: string, isFavorite: boolean): Promise<void> {
     await db.runAsync(`UPDATE user_book SET is_favorite = ?, updated_at = ? WHERE id = ?`, [
       isFavorite ? 1 : 0,
+      nowIso(),
+      id,
+    ]);
+  },
+
+  /** SPOILER-SAFE MODE (Фаза 11) — той самий патерн, що й `setFavorite` вище. */
+  async setSpoilerSafeEnabled(db: SQLiteDatabase, id: string, spoilerSafeEnabled: boolean): Promise<void> {
+    await db.runAsync(`UPDATE user_book SET spoiler_safe_enabled = ?, updated_at = ? WHERE id = ?`, [
+      spoilerSafeEnabled ? 1 : 0,
       nowIso(),
       id,
     ]);

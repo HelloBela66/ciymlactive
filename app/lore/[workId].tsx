@@ -13,6 +13,7 @@ import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useCreateLoreEntity, useLoreEntities } from '@/features/lore/useLoreEntities';
+import { isSpoilerSafeActive, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { LORE_ENTITY_REACTION_META, isLoreEntityReactionId } from '@/design/loreEntityReaction';
 import { LORE_ENTITY_TYPE_META, LORE_ENTITY_TYPE_ORDER } from '@/design/loreEntityType';
 import type { LoreEntity, LoreEntityType } from '@/types/loreEntity';
@@ -75,6 +76,12 @@ function LoreEntityRow({ entity, workId }: { entity: LoreEntity; workId: string 
  * `lore_entity.work_id`, не `user_book_id` — екран доступний і для книг, які ще не додані в
  * бібліотеку (`data.userBook` може бути `null`), тому тут немає окремого guard'а на його
  * відсутність.
+ *
+ * SPOILER-SAFE MODE (Фаза 11) — коли `data.userBook` активно читається (чи перечитується) і
+ * прапорець увімкнено, елементи лору, побачені попереду поточного прогресу, приховуються зі
+ * списку (`filterSpoilerSafeLoreEntities`) — самі записи нікуди не зникають (`docs/
+ * SPOILER_SAFE.md`), тому нижче явно показуємо, що частину приховано, а не тихо видаємо
+ * порожній список за "світ книги ще порожній".
  */
 export default function LoreScreen() {
   const theme = useTheme();
@@ -90,6 +97,15 @@ export default function LoreScreen() {
 
   const pageCount = data?.primaryEdition?.pageCount ?? null;
   const entries = entities ?? [];
+
+  const spoilerSafeActive = data?.userBook
+    ? isSpoilerSafeActive(data.userBook.status, data.userBook.spoilerSafeEnabled)
+    : false;
+  const visibleEntries = filterSpoilerSafeLoreEntities(entries, spoilerSafeActive, {
+    currentPage: data?.userBook?.currentPage ?? null,
+    pageCount,
+  });
+  const hiddenCount = entries.length - visibleEntries.length;
 
   const handleAdd = () => {
     if (!workId || name.trim().length === 0) return;
@@ -159,13 +175,20 @@ export default function LoreScreen() {
                 <AppText variant="body" color="secondary">
                   Завантаження…
                 </AppText>
-              ) : entries.length === 0 ? (
+              ) : visibleEntries.length === 0 ? (
                 <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
-                  Світ цієї книги ще порожній.
+                  {entries.length === 0
+                    ? 'Світ цієї книги ще порожній.'
+                    : 'Усі записи попереду за сюжетом — режим «без спойлерів» їх приховує.'}
                 </AppText>
               ) : (
-                entries.map((entity) => <LoreEntityRow key={entity.id} entity={entity} workId={data.work.id} />)
+                visibleEntries.map((entity) => <LoreEntityRow key={entity.id} entity={entity} workId={data.work.id} />)
               )}
+              {hiddenCount > 0 && visibleEntries.length > 0 ? (
+                <AppText variant="caption" color="tertiary" style={{ textAlign: 'center' }}>
+                  Ще {hiddenCount} приховано режимом «без спойлерів».
+                </AppText>
+              ) : null}
             </View>
           </View>
         )}

@@ -160,6 +160,12 @@ sync/catalog backend, але жодна читацька дія (старт се
     зв'язування). Одна таблиця замість окремої `character`-таблиці — ТЗ Фази 10 прямо застерігає
     "не створюй duplicate schema лише тому, що prompt спочатку називає Character", докладне
     обґрунтування — `docs/PERSONAL_LORE.md` §Архітектура.
+16. **016_spoiler_safe** — SPOILER-SAFE MODE (POLYTSIA V1.6, Фаза 11) — `docs/SPOILER_SAFE.md`.
+    Одна нова колонка `user_book.spoiler_safe_enabled INTEGER NOT NULL DEFAULT 1` — той самий
+    "прапорцевий" патерн, що й `revisit_later` (`011_revisit_later.ts`); `DEFAULT 1`, бо ТЗ прямо
+    каже "Default: ON для active books". Рівень — `user_book`, не `work`: те саме поняття
+    "поточного прогресу" (`current_page`), з яким порівнюється позиція записів, уже живе на
+    цьому рівні.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12

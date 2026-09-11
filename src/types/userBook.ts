@@ -20,6 +20,11 @@ export const UserBookSchema = z.object({
   finishedAt: z.string().nullable(),
   currentPage: z.number().int(),
   isFavorite: z.boolean(),
+  // POLYTSIA V1.6, Фаза 11 (SPOILER-SAFE MODE) — book-level ON/OFF, той самий "прапорцевий"
+  // патерн, що й isFavorite вище (016_spoiler_safe.ts); default ON для щойно доданих книг
+  // (ТЗ: "Default: ON для active books"), саме приховування — лише поки книга реально читається
+  // (src/lib/spoilerSafe.ts#isSpoilerSafeActive).
+  spoilerSafeEnabled: z.boolean(),
   addedAt: z.string(),
   updatedAt: z.string(),
 });

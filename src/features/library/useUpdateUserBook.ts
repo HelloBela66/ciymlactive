@@ -69,6 +69,20 @@ export function useToggleFavorite() {
   });
 }
 
+/** SPOILER-SAFE MODE (Фаза 11) — той самий патерн, що й `useToggleFavorite` вище. */
+export function useToggleSpoilerSafe() {
+  const invalidate = useInvalidateUserBooks();
+  const onError = useMutationErrorHandler(log, 'Не вдалося оновити режим "без спойлерів".');
+  return useMutation<void, Error, { id: string; spoilerSafeEnabled: boolean }>({
+    mutationFn: async ({ id, spoilerSafeEnabled }) => {
+      const db = await getDatabase();
+      await UserBookRepository.setSpoilerSafeEnabled(db, id, spoilerSafeEnabled);
+    },
+    onSuccess: invalidate,
+    onError,
+  });
+}
+
 /** Milestone 11 (Фаза 3) — тепер реально викликається: композер швидкого запису на екрані
  * активної сесії (`app/session/[sessionId].tsx`) оновлює поточну сторінку заодно зі
  * збереженням запису щоденника (якщо введена сторінка більша за вже відому). */

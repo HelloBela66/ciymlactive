@@ -11,6 +11,7 @@ import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
 import { useJournalEntries } from '@/features/journal/useJournal';
+import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries } from '@/lib/spoilerSafe';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { computeProgressPercent } from '@/lib/progressPercent';
@@ -61,6 +62,11 @@ function RecapEntryLine({
  * "characters/lore later if available" — Фази 9-10 (LORE/CHARACTERS) цього циклу ще не
  * реалізовані, тож відповідної секції тут поки немає; додасться природно, коли з'явиться
  * джерело даних, без додаткової міграції цього екрана.
+ *
+ * SPOILER-SAFE MODE (Фаза 11) — цей екран прямо названо в ТЗ як таке, що "гарантує spoiler-safe
+ * experience", тож "Останні записи"/"Улюблений момент" рахуються з уже ВІДФІЛЬТРОВАНОГО списку
+ * (`filterSpoilerSafeJournalEntries`) — інакше recap міг би сам стати джерелом спойлера (запис
+ * попереду за сюжетом, що трапився улюбленим чи просто свіжоствореним).
  */
 export default function RecapScreen() {
   const theme = useTheme();
@@ -73,16 +79,24 @@ export default function RecapScreen() {
   const { data: categories } = useAllNoteCategories(userBookId);
   const categoriesById = categoriesToMap(categories);
 
-  // `sessions`/`allEntries` уже відсортовані найновішими зверху (`ReadingSessionRepository.
-  // listByUserBookId`/`JournalRepository.listByUserBookId`) — тут лише обрізання до
-  // MAX_ITEMS_PER_SECTION, без додаткового сортування.
-  const recentSessions = (sessions ?? []).slice(0, MAX_ITEMS_PER_SECTION);
-  const recentEntries = (allEntries ?? []).slice(0, MAX_ITEMS_PER_SECTION);
-  const latestFavorite = (allEntries ?? []).find((entry) => entry.isFavorite) ?? null;
-
   const pageCount = data?.primaryEdition?.pageCount ?? null;
   const currentPage = data?.userBook?.currentPage ?? null;
   const progressPercent = computeProgressPercent(currentPage, pageCount);
+
+  const spoilerSafeActive = data?.userBook
+    ? isSpoilerSafeActive(data.userBook.status, data.userBook.spoilerSafeEnabled)
+    : false;
+  const visibleEntries = filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, {
+    currentPage,
+    pageCount,
+  });
+
+  // `sessions`/`visibleEntries` уже відсортовані найновішими зверху (`ReadingSessionRepository.
+  // listByUserBookId`/`JournalRepository.listByUserBookId`) — тут лише обрізання до
+  // MAX_ITEMS_PER_SECTION, без додаткового сортування.
+  const recentSessions = (sessions ?? []).slice(0, MAX_ITEMS_PER_SECTION);
+  const recentEntries = visibleEntries.slice(0, MAX_ITEMS_PER_SECTION);
+  const latestFavorite = visibleEntries.find((entry) => entry.isFavorite) ?? null;
 
   const authorNames = data?.work.authors.map((a) => a.name).join(', ') ?? '';
   const hasAnyData = recentSessions.length > 0 || recentEntries.length > 0 || latestFavorite != null;
