@@ -12,6 +12,7 @@ import { ChipSelect } from '@/components/ui/ChipSelect';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { MemoryCardPreview } from '@/components/memory/MemoryCardPreview';
 import { JournalTimeline } from '@/components/memory/JournalTimeline';
+import { ReadingExperienceTimeline } from '@/components/memory/ReadingExperienceTimeline';
 import { useTheme } from '@/design/ThemeProvider';
 import { memoryCardTemplateLabels, memoryCardTemplateDescriptions } from '@/design/i18n-labels';
 import { REACTION_META, isReactionId } from '@/design/reactions';
@@ -442,6 +443,14 @@ export default function MemoryCardScreen() {
                 {memoryCardTemplateDescriptions[displayedTemplate]}
               </AppText>
             </Card>
+
+            {/* POLYTSIA V1.6, Фаза 7 («ЯК ЧИТАЛАСЯ КНИГА») — шкала за станами "Як читалося?"
+             * (`reading_experience`, наявне поле сесії) кожної завершеної сесії, окремо від
+             * шкали записів щоденника нижче: тут кожна позначка — це ОДНА сесія читання, там —
+             * ОДИН (чи кілька) запис щоденника; обидві шкали використовують ту саму позицію
+             * 0-100% книги, тож навмисно стоять поруч. Рендерить `null` сама, коли сесій замало
+             * (`ReadingExperienceTimeline.tsx`), тому умовного враппера тут не потрібно. */}
+            <ReadingExperienceTimeline sessions={sessions} pageCount={data.primaryEdition?.pageCount ?? null} />
 
             {/* Фаза 10 (JOURNAL MEMORY TIMELINE) — шкала записів щоденника 0-100% книги,
              * окремо від вибору шаблону картки й вище кнопок поділитись/зберегти: це

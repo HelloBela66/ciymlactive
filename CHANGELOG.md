@@ -1,5 +1,31 @@
 # Changelog
 
+## POLYTSIA V1.6, Фаза 7 — «Як читалася ця книга» (READING EXPERIENCE TIMELINE)
+
+**Дата:** 2026-09-11
+
+Сьома фіча-фаза V1.6 — на відміну від попередніх, без жодної нової таблиці/колонки/мутації.
+ТЗ прямо вимагав: "Поточний `reading_experience` вже існує. Не створюй нову duplicate field.
+Агрегуй reading experience по sessions." Поле `reading_session.reading_experience` (V1.5 Фаза 9)
+досі жило лише в списку сесій Book Details — тепер зібране по всій книзі в нову горизонтальну
+шкалу на Book Memory (`app/memory/[workId].tsx`), одразу над шкалою записів щоденника.
+
+Позиція кожного маркера — `endPage` сесії відносно `pageCount` видання (той самий
+`computeProgressPercent`, що й шкала щоденника). Якщо `pageCount` видання невідомий — ВСІ
+маркери книги рівномірно розподіляються за хронологією замість справжнього прогресу (ТЗ: "Якщо
+session не має progress — використовуй chronological position"), щоб відстані між точками не
+вводили в оману. Нижче 3 завершених сесій шкала не рендериться зовсім (ТЗ: "Якщо даних мало
+(<2–3 sessions) — не показуй misleading chart").
+
+Стан кожної сесії розрізняється ФОРМОЮ іконки, не кольором (ТЗ прямо забороняє emoji як єдиний
+visual encoding) — палітра застосунку лишається нейтральною. Тап по маркеру показує текстовий
+підпис (дата + стан) під шкалою.
+
+Уся позиційна логіка — чиста функція `computeReadingExperienceTimeline`
+(`src/lib/readingExperienceTimeline.ts`), покрита `readingExperienceTimeline.test.ts`; рендер —
+`src/components/memory/ReadingExperienceTimeline.tsx`. Повна специфікація поведінки —
+`docs/READING_EXPERIENCE_TIMELINE.md`.
+
 ## POLYTSIA V1.6, Фаза 6 — «До/Після» (BEFORE-AFTER)
 
 **Дата:** 2026-09-11
