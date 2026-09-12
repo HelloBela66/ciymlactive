@@ -174,6 +174,11 @@ export const queryKeys = {
     // `src/lib/season.ts`) замість голого числа року.
     bySeasonKey: (seasonKey: string) => ['seasons', 'bySeasonKey', seasonKey] as const,
   },
+  readingProfile: {
+    // ТЗ Фази 14 (READING PROFILE) — той самий "без параметрів" сенс, що й
+    // `statistics.overall`: усі insight'и рахуються за весь час, без року/сезону.
+    overall: ['readingProfile', 'overall'] as const,
+  },
   autoBackup: {
     settings: ['autoBackup', 'settings'] as const,
   },

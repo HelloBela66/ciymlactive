@@ -38,6 +38,15 @@ const MENU_ITEMS: MenuItem[] = [
     onPress: () => router.push('/history' as unknown as Href),
   },
   { icon: 'flag-outline', label: 'Цілі читання', onPress: () => router.push('/goals') },
+  {
+    icon: 'analytics-outline',
+    label: 'Мій читацький профіль',
+    // ТЗ Фази 14 (READING PROFILE) — `as unknown as Href`, той самий випадок, що й "Читацькі
+    // сезони"/"Моя історія"/"Перевірка даних" вище: щойно доданий маршрут
+    // (`app/reading-profile.tsx`), про який локально згенерований кеш типізованих маршрутів
+    // ще не знає до першого запуску dev-сервера на новій машині.
+    onPress: () => router.push('/reading-profile' as unknown as Href),
+  },
   { icon: 'notifications-outline', label: 'Нагадування', onPress: () => router.push('/reminders') },
   { icon: 'layers-outline', label: 'TBR reality check', onPress: () => router.push('/tbr') },
   {
