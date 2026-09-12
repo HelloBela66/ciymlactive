@@ -168,6 +168,12 @@ export const queryKeys = {
   wrapped: {
     year: (year: number) => ['wrapped', 'year', year] as const,
   },
+  seasons: {
+    // ТЗ Фази 13 (READING SEASONS) — той самий "один рядок ключа на екран" сенс, що й
+    // `wrapped.year` вище, лише параметризований стабільним рядком сезону (`formatSeasonKey`,
+    // `src/lib/season.ts`) замість голого числа року.
+    bySeasonKey: (seasonKey: string) => ['seasons', 'bySeasonKey', seasonKey] as const,
+  },
   autoBackup: {
     settings: ['autoBackup', 'settings'] as const,
   },

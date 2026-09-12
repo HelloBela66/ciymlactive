@@ -10,6 +10,7 @@ import { useTheme, ThemePreference } from '@/design/ThemeProvider';
 import { themePreferenceLabels } from '@/design/i18n-labels';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
 import { pluralizeUk } from '@/lib/pluralizeUk';
+import { currentSeasonKey, formatSeasonKey } from '@/lib/season';
 
 const THEME_OPTIONS: ThemePreference[] = ['system', 'light', 'dark'];
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
@@ -44,6 +45,21 @@ const MENU_ITEMS: MenuItem[] = [
     label: 'Wrapped',
     onPress: () =>
       router.push({ pathname: '/wrapped/[year]', params: { year: String(new Date().getFullYear()) } }),
+  },
+  {
+    icon: 'leaf-outline',
+    label: 'Читацькі сезони',
+    // ТЗ Фази 13 (READING SEASONS) — та сама "поточний рік" точка входу, що й Wrapped вище,
+    // лише замінена на "поточний сезон" (`currentSeasonKey`, `src/lib/season.ts`).
+    // `as unknown as Href` — той самий випадок, що й "Моя історія"/"Перевірка даних"/"Імпорт
+    // з Goodreads" нижче: щойно доданий маршрут (`app/seasons/[seasonKey].tsx`), про який
+    // локально згенерований кеш типізованих маршрутів (`.expo/types/router.d.ts`) ще не знає
+    // до першого запуску dev-сервера на новій машині.
+    onPress: () =>
+      router.push({
+        pathname: '/seasons/[seasonKey]',
+        params: { seasonKey: formatSeasonKey(currentSeasonKey(new Date())) },
+      } as unknown as Href),
   },
   { icon: 'cloud-upload-outline', label: 'Резервна копія', onPress: () => router.push('/backup') },
   {
