@@ -14,8 +14,7 @@ import { useActiveSession } from '@/features/reading-session/useActiveSession';
 import { useReadingContinuity } from '@/features/reading-session/useReadingContinuity';
 import { useLibraryByStatus } from '@/features/library/useLibrary';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
-import { useJournalGlobalCount } from '@/features/journal/useJournal';
-import { OnThisDayCard } from '@/components/home/OnThisDayCard';
+import { HomeContextCard } from '@/components/home/HomeContextCard';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 import { computeProgressPercent } from '@/lib/progressPercent';
 import { formatLastReadLabel } from '@/lib/lastReadLabel';
@@ -24,7 +23,6 @@ import type { JournalEntry } from '@/types/journalEntry';
 import type { UserBookWithDetails } from '@/types/userBook';
 
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
-const ENTRY_FORMS = ['запис', 'записи', 'записів'] as const;
 
 /** Показуємо щонайбільше стільки книг — це компактний дашборд-віджет, не повний список
  * (Milestone 8, продуктивність: аудит показав, що тут монтувалась уся бібліотека зі статусом
@@ -199,7 +197,7 @@ function TodayStatsRow() {
   if (!data || data.totalSessions === 0) return null;
 
   return (
-    <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.xl }}>
+    <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.xl, marginBottom: theme.spacing.xl }}>
       <Card style={{ flex: 1, alignItems: 'center', paddingVertical: theme.spacing.md }}>
         <AppText variant="heading">{data.today.minutes}</AppText>
         <AppText variant="micro" color="tertiary">
@@ -222,58 +220,74 @@ function TodayStatsRow() {
   );
 }
 
-/**
- * Вхід до глобального "Мій щоденник" (Milestone 11, Фаза 4) — навмисно картка тут, не
- * окремий таб знизу (5 табів лишаються фіксованими, `app/(tabs)/_layout.tsx`). Завжди
- * видима, незалежно від `showEmptyState`/активного читання — щоденник корисний навіть тоді,
- * коли зараз нічого не читаєш (переглянути записи з уже прочитаних книг).
- */
-function JournalEntryPointCard() {
-  const theme = useTheme();
-  const { data: counts } = useJournalGlobalCount();
+type ShortcutIconName = React.ComponentProps<typeof Ionicons>['name'];
 
+interface ShortcutItem {
+  icon: ShortcutIconName;
+  label: string;
+  onPress: () => void;
+}
+
+/** ТЗ Фази 18 (HOME REDESIGN §HOME SHORTCUTS): "Compact shortcuts: Мій щоденник, Моя історія,
+ * Моя пам'ять, Статистика. Не роби великі cards для кожного." — рівно ці чотири пункти, у
+ * тому самому порядку, що й ТЗ. Іконки — уже перевірені в застосунку: `book-outline` (сам
+ * "Мій щоденник" тут раніше, до цієї фази), `time-outline`/`bar-chart-outline` (той самий
+ * вибір, що й у меню Профілю, `app/(tabs)/profile/index.tsx`), `cube-outline` (той самий
+ * концепт "капсули"/пам'яті, що й `app/memory/[workId].tsx`/`app/completion/[workId].tsx`).
+ * `/journal`/`/history`/`/memory`/`/statistics` — `as unknown as Href` там, де локальний кеш
+ * typed routes (`.expo/types/router.d.ts`, не в git) не завжди встигає побачити маршрут до
+ * `tsc` (той самий клас питання, що й усюди в цьому файлі). */
+const HOME_SHORTCUTS: ShortcutItem[] = [
+  { icon: 'book-outline', label: 'Мій щоденник', onPress: () => router.push('/journal' as unknown as Href) },
+  { icon: 'time-outline', label: 'Моя історія', onPress: () => router.push('/history' as unknown as Href) },
+  { icon: 'cube-outline', label: 'Моя пам\'ять', onPress: () => router.push('/memory' as unknown as Href) },
+  { icon: 'bar-chart-outline', label: 'Статистика', onPress: () => router.push('/statistics' as unknown as Href) },
+];
+
+function HomeShortcuts() {
+  const theme = useTheme();
   return (
-    // `as unknown as Href` — маршрут `app/journal/index.tsx` реальний і валідний (Фаза 4), але
-    // локальний кеш typed routes (`.expo/types/router.d.ts`, не в git) не завжди встигає його
-    // побачити до `tsc` (той самий клас питання, що й Milestone 9 fix2).
-    <Pressable onPress={() => router.push('/journal' as unknown as Href)} accessibilityRole="button" accessibilityLabel="Мій щоденник">
-      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: theme.radius.pill,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+    <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
+      {HOME_SHORTCUTS.map((item) => (
+        <Pressable
+          key={item.label}
+          onPress={item.onPress}
+          accessibilityRole="button"
+          accessibilityLabel={item.label}
+          style={{ flex: 1, alignItems: 'center', gap: theme.spacing.xs, paddingVertical: theme.spacing.xs }}
         >
-          <Ionicons name="book-outline" size={20} color={theme.colors.accent} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <AppText variant="heading">Мій щоденник</AppText>
-          <AppText variant="caption" color="secondary">
-            {counts && counts.total > 0
-              ? `${counts.total} ${pluralizeUk(counts.total, ENTRY_FORMS)}`
-              : 'Записуй думки й цитати під час читання'}
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: theme.radius.pill,
+              backgroundColor: theme.colors.accentSoft,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name={item.icon} size={20} color={theme.colors.accent} />
+          </View>
+          <AppText variant="micro" color="secondary" style={{ textAlign: 'center' }}>
+            {item.label}
           </AppText>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-      </Card>
-    </Pressable>
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
 /**
- * Вхід до «Що почитати завтра?» (Milestone 11, доповнення, пряме прохання власника
- * продукту) — так само завжди видима картка, як і `JournalEntryPointCard`: корисна
- * незалежно від того, чи зараз щось читаєш (підбір НАСТУПНОЇ книги).
+ * Вхід до «Що почитати завтра?» (Milestone 11, доповнення, пряме прохання власника продукту)
+ * — завжди видима картка, корисна незалежно від того, чи зараз щось читаєш (підбір НАСТУПНОЇ
+ * книги). З Фази 18 (HOME REDESIGN) — під ТЗ-обов'язковими розділами Home, не серед чотирьох
+ * компактних shortcuts (`HomeShortcuts` вище): це рекомендаційна фіча, не навігаційний ярлик.
  */
 function TomorrowEntryPointCard() {
   const theme = useTheme();
   return (
-    // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом (`JournalEntryPointCard`
-    // вище): маршрут `app/tomorrow.tsx` реальний, лише локальний кеш typed routes відстає.
+    // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом: маршрут
+    // `app/tomorrow.tsx` реальний, лише локальний кеш typed routes відстає.
     <Pressable onPress={() => router.push('/tomorrow' as unknown as Href)} accessibilityRole="button" accessibilityLabel="Що почитати завтра?">
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
         <View
@@ -343,8 +357,8 @@ function OnePickerEntryPointCard() {
 
 /**
  * Вхід до «Трендів» (Milestone 11, доповнення) — той самий візуальний патерн, що й
- * `TomorrowEntryPointCard`/`JournalEntryPointCard` вище: завжди видима картка, незалежно від
- * стану бібліотеки користувача.
+ * `TomorrowEntryPointCard` вище: завжди видима картка, незалежно від стану бібліотеки
+ * користувача.
  */
 function TrendsEntryPointCard() {
   const theme = useTheme();
@@ -378,15 +392,20 @@ function TrendsEntryPointCard() {
 }
 
 /**
- * Головна. Next-in-series (п.10 ТЗ) — пізніші milestone, коли з'явиться достатньо даних, щоб
- * мало сенс. Зараз — today-stats/streak (Milestone 5), компактний список "зараз читаєш", вхід
- * до щоденника, до «Що почитати завтра?» і до «Трендів» (усі три — Milestone 11).
+ * Головна (ТЗ Фази 18, HOME REDESIGN, `docs/HOME_REDESIGN.md`) — порядок розділів тепер
+ * буквально повторює пріоритет ТЗ: 1. Current Reading; 2. Continue CTA; 3. Today summary;
+ * 4. одна контекстна картка; 5. secondary shortcuts. До цієї фази `TodayStatsRow` стояв ПЕРЕД
+ * `CurrentlyReadingList` — саме це й виправлено (докладніше — `docs/HOME_REDESIGN.md` §Порядок
+ * розділів). "Continue CTA" (п.2) окремим елементом тут не показаний — кожен рядок
+ * `CurrentlyReadingList` сам є цим CTA (тап веде на запуск сесії саме цієї книги), той самий
+ * принцип, що й "Continue reading" на більшості читацьких застосунків: дія прив'язана до
+ * конкретної книги, а не абстрактна кнопка окремо від неї.
  *
  * Відновлення перерваної сесії (п.12 ТЗ: якщо застосунок був force-quit посеред читання) з
- * Milestone 11 (доповнення, панель активного читання) більше не окремий банер лише тут — та
- * сама дія "повернутись до читання" тепер видима з будь-якої вкладки одразу над нижньою
- * навігацією (`ReadingSessionMiniBar`, `app/(tabs)/_layout.tsx`), тож дублювати її ще раз саме
- * на Головній означало б показувати ту саму інформацію двічі різними візуальними мовами.
+ * Milestone 11 (доповнення, панель активного читання) не окремий банер тут — та сама дія
+ * "повернутись до читання" видима з будь-якої вкладки одразу над нижньою навігацією
+ * (`ReadingSessionMiniBar`, `app/(tabs)/_layout.tsx`), тож дублювати її ще раз саме на Головній
+ * означало б показувати ту саму інформацію двічі різними візуальними мовами.
  */
 export default function HomeScreen() {
   const theme = useTheme();
@@ -400,24 +419,32 @@ export default function HomeScreen() {
       <AppText variant="display">{getTimeOfDayGreeting()}</AppText>
       <View style={{ height: theme.spacing.xxl }} />
 
-      <TodayStatsRow />
-
+      {/* #1 Current Reading + #2 Continue CTA (кожен рядок — своя дія "продовжити") */}
       <CurrentlyReadingList />
 
-      {/* POLYTSIA V1.6, Фаза 3 («Цей день у твоєму читанні») — контекстна картка, сама вирішує
-          свою видимість (`return null`, коли на сьогодні немає жодного спогаду з минулих
-          років, п.1/19 ТЗ). Розміщена ПІСЛЯ активного читання (найдієвіший розділ Home лишається
-          першим) і ПЕРЕД завжди-видимими "вхід до…"-картками нижче — своя, менш повсякденна
-          категорія контенту. Формального "показуй щонайбільше одну контекстну картку" механізму
-          (п.18 ТЗ) тут поки нема — жодна з конкуруючих фіч цього списку (stale reading/capsule/
-          goal/TBR) ще не реалізована в цьому мілстоуні, тож поки немає з чим конкурувати за
-          єдиний слот. */}
+      {/* #3 Today summary */}
+      <TodayStatsRow />
+
+      {/* #4 Одна контекстна картка (ТЗ: "У конкретний момент показуй максимум ОДНУ context
+          card... Не показуй 5 одночасно") — уся логіка вибору "яку саме" в
+          `useHomeContextCard`/`selectHomeContextCard` (`src/lib/homeContext.ts`), тут лише
+          рендер обраного результату чи нічого (`HomeContextCard` сама повертає `null`). */}
       <View style={{ marginTop: theme.spacing.lg }}>
-        <OnThisDayCard />
+        <HomeContextCard />
       </View>
 
+      {/* #5 Secondary shortcuts (ТЗ: "Compact shortcuts: Мій щоденник, Моя історія, Моя
+          пам'ять, Статистика. Не роби великі cards для кожного.") */}
+      <View style={{ marginTop: theme.spacing.xl }}>
+        <HomeShortcuts />
+      </View>
+
+      {/* Рекомендаційні входи поза чотирма ТЗ-шорткатами вище (Milestone 11/Фаза 16 —
+          «Що почитати завтра?»/«Обери мені книгу»/«Тренди») — навмисно ЗБЕРЕЖЕНІ (не входять у
+          заборону "Не роби великі cards" — вона стосується лише чотирьох названих у ТЗ пунктів),
+          лише переміщені під ТЗ-обов'язкові розділи, щоб Home не показував десять карток
+          одразу однаковою вагою (`docs/HOME_REDESIGN.md` §Чому рекомендаційні картки лишились). */}
       <View style={{ marginTop: theme.spacing.xl, gap: theme.spacing.sm }}>
-        <JournalEntryPointCard />
         <TomorrowEntryPointCard />
         <OnePickerEntryPointCard />
         <TrendsEntryPointCard />

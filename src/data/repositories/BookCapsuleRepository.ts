@@ -193,9 +193,19 @@ export const BookCapsuleRepository = {
     await db.runAsync(`DELETE FROM book_capsule WHERE id = ?`, [id]);
   },
 
+  /** ТЗ Фази 18 (HOME REDESIGN §HOME SHORTCUTS, «Моя пам'ять», `useMemoryIndex.ts`) — усі
+   * капсули застосунку, найновіша перша. Капсул завжди мало (п.45 ТЗ Фази 4), тож повна вибірка
+   * без пагінації лишається дешевою — той самий підхід, що й `ReadingSessionRepository.
+   * listAllCompleted` для значно більшої таблиці сесій. */
+  async listAll(db: SQLiteDatabase): Promise<BookCapsule[]> {
+    const rows = await db.getAllAsync<BookCapsuleRow>(`SELECT * FROM book_capsule ORDER BY created_at DESC`);
+    return rows.map(mapRow);
+  },
+
   /** П.23/46 ТЗ — капсули, чий `reopenAt` уже настав (`<= referenceDateIso`) — підготовча
-   * точка інтеграції для майбутньої Фази Recall (`getDueCapsules`-еквівалент), не
-   * використовується UI цієї фази. */
+   * точка інтеграції для майбутньої Фази Recall (`getDueCapsules`-еквівалент); з Фази 18
+   * (HOME REDESIGN) також основа "Book Capsule ready" контекстної картки Home
+   * (`src/lib/homeContext.ts#findCapsuleDueCandidate`, `openedAt`-фільтр — там же). */
   async getDue(db: SQLiteDatabase, referenceDateIso: string): Promise<BookCapsule[]> {
     const rows = await db.getAllAsync<BookCapsuleRow>(
       `SELECT * FROM book_capsule WHERE reopen_at IS NOT NULL AND reopen_at <= ? ORDER BY reopen_at ASC`,

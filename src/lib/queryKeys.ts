@@ -165,6 +165,17 @@ export const queryKeys = {
   tbr: {
     reality: ['tbr', 'reality'] as const,
   },
+  home: {
+    // ТЗ Фази 18 (HOME REDESIGN) — "сирі" дані для вибору ЄДИНОЇ контекстної картки Home
+    // (`useHomeContextCard.ts`, `src/lib/homeContext.ts`), без параметрів — той самий "один
+    // запит на весь застосунок" сенс, що й `statistics.overall`/`tbr.reality`.
+    contextCard: ['home', 'contextCard'] as const,
+  },
+  memoryIndex: {
+    // ТЗ Фази 18 (HOME REDESIGN §HOME SHORTCUTS, «Моя пам'ять») — той самий "без параметрів"
+    // сенс, що й `home.contextCard` вище: один список капсул на весь застосунок.
+    all: ['memoryIndex', 'all'] as const,
+  },
   wrapped: {
     year: (year: number) => ['wrapped', 'year', year] as const,
   },
