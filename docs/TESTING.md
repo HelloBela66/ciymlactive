@@ -98,8 +98,11 @@ SQL-діалект і PRAGMA-інтерфейс, тож жоден рядок п
 3. **`npm run lint`** (`eslint . --max-warnings=0`) — `eslint.config.js` виключає
    `supabase/functions/**` (`ignores`) з тієї ж причини, що й `tsconfig.json` вище (Deno
    runtime, не Node/React Native застосунок).
-4. **`npm test -- --ci`** (Jest, `jest-expo` preset) — увесь домен/lib (список вище) плюс,
-   щойно з'являться (Фаза 3 того самого milestone), repository-інтеграційні тести.
+4. **`npm test -- --ci`** (Jest, `jest-expo` preset) — увесь домен/lib (список вище) плюс
+   repository-інтеграційні тести (`src/data/repositories/*.test.ts`,
+   `src/data/db/migrationRunner.test.ts` — `better-sqlite3` як тестовий SQLite-рушій замість
+   `expo-sqlite`, який не конструюється headless; `openTestDatabase()` /
+   `__applyMigrationsForTests(db, version)` — див. розділ вище).
 5. **`npx expo-doctor`** — "Expo health check", `continue-on-error: true` (advisory, не валить
    пайплайн): `expo-doctor` частково звертається в мережу, і нестабільність мережі
    GitHub-раннера — не те саме, що реальна помилка в коді репозиторію. Результат усе одно

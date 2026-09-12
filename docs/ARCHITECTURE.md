@@ -62,12 +62,12 @@ SQLite (пристрій)
 
 ## 4. Route / screen map (Expo Router, `app/`)
 
-**Оновлено POLYTSIA V1.5, Фаза 14 (CLEANUP)** — попередня версія цього розділу була записаною
-на Milestone 0 ЗАДУМАНОЮ структурою ("book/[userBookId].tsx", "session/setup.tsx",
-"note/editor.tsx" тощо), яка ніколи не відповідала реальному `app/` і розійшлась із ним іще
-на Milestone 1-2. Нижче — фактичний перелік, звірений напряму зі структурою на пристрої
-власника продукту (`device_list_dir`, а не з пам'яті чи зі старішого документа), 32 файли
-маршрутів:
+**Оновлено POLYTSIA V1.5, Фаза 14 (CLEANUP), доповнено після POLYTSIA V1.6 (усі 22 фази)** —
+попередня версія цього розділу була записаною на Milestone 0 ЗАДУМАНОЮ структурою
+("book/[userBookId].tsx", "session/setup.tsx", "note/editor.tsx" тощо), яка ніколи не
+відповідала реальному `app/` і розійшлась із ним іще на Milestone 1-2. Нижче — фактичний
+перелік, звірений напряму зі структурою на пристрої власника продукту (`device_list_dir`, а
+не з пам'яті чи зі старішого документа), 44 файли маршрутів:
 
 ```
 app/
@@ -94,6 +94,7 @@ app/
 ├── data-doctor.tsx                  # «Перевірка даних»: data integrity doctor
 ├── day/
 │   └── [date].tsx                   # Деталі дня календаря: сесії цього дня
+├── fingerprint.tsx                  # «Читацький відбиток»: бейджи-картки + SHARE TEMPLATE (Фаза 15)
 ├── goals/
 │   └── index.tsx                    # Цілі читання
 ├── history.tsx                      # «Моя історія»: похідна стрічка всієї читацької активності (Фаза 12)
@@ -103,12 +104,24 @@ app/
 ├── isbn-scan.tsx                    # Сканер штрихкоду ISBN
 ├── journal/
 │   └── index.tsx                    # «Мій щоденник»: глобальна стрічка нотаток/цитат, реакції
+├── lore/
+│   ├── [workId].tsx                 # Персонажі/світ книги: список елементів лору (Фаза 9-10)
+│   └── [workId]/
+│       └── [entityId].tsx           # Один елемент лору: редагування, чипи реакції, зв'язані записи
 ├── memory/
-│   └── [workId].tsx                 # «Спогад про книгу»: постійна сторінка-підсумок, шаблони, експорт
+│   ├── [workId].tsx                 # «Спогад про книгу»: постійна сторінка-підсумок, шаблони, експорт
+│   └── index.tsx                    # «Моя пам'ять»: список усіх спогадів (Фаза 3)
+├── on-this-day.tsx                  # «Цей день»: спогади цього календарного дня, згруповано по роках
+├── one-book-picker.tsx              # «Обери мені книгу»: фільтри + одна картка-результат (Фаза 16)
+├── reading-profile.tsx              # «Читацький профіль»: картки-речення insight'ів (Фаза 14)
 ├── recall/
 │   └── [workId].tsx                 # «Книга через час»: recall-флоу над капсулою (POLYTSIA V1.6, Фаза 5)
+├── recap/
+│   └── [workId].tsx                 # «Згадати, де я зупинився»: recap застоялого читання (Фаза 8)
 ├── reminders/
 │   └── index.tsx                    # Локальні нагадування
+├── seasons/
+│   └── [seasonKey].tsx              # Завершені книги конкретного сезону (Зима/Весна/Літо/Осінь)
 ├── series/
 │   └── [seriesId].tsx               # Усі твори серії за порядком
 ├── session/
@@ -187,9 +200,13 @@ ActiveSessionScreen
  └ QuickAddQuoteButton
 ```
 
-Спільні низькорівневі компоненти (`src/components/ui`): `Button`, `Card`, `Sheet` (bottom
-sheet), `ProgressBar`, `Chip`, `EmptyState`, `ErrorState`, `SegmentedControl`, `Avatar`,
-`BookCover` (обгортка над `expo-image` з fallback-кольором з `Work.coverFallback`).
+Спільні низькорівневі компоненти (`src/components/ui`): `AppText`, `Button`, `Card`,
+`ChipSelect`, `CollapsibleSection`, `CoverThumbnail` (обкладинка з fallback-кольором),
+`EmptyState`, `LabeledInput`, `QueryErrorState`, `ReadingProgressBar`, `ScreenContainer`,
+`StarRating` — і, з Фази 19 V1.6 (`docs/DESIGN_SYSTEM_EXTENSION.md`), `BookHero`,
+`JournalPreview`, `MemorySection`, `QuickAction`, `SectionHeader`, `Timeline`. Тактильний
+відгук для інтерактивних елементів — `src/lib/haptics.ts` (тонка обгортка над `expo-haptics`,
+та сама фаза).
 
 ## 6. Design tokens (`src/design/tokens.ts`)
 

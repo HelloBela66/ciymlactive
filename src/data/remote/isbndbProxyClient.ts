@@ -80,7 +80,14 @@ async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal)
     // Скасування зовнішнім `signal` (React Query — новий символ під час набору тексту,
     // `BookMetadataProvider.searchBooks`) має пробитись до виклику, той самий контракт, що й
     // в інших провайдерів. Внутрішній таймаут-abort — звичайна graceful-деградація до `null`.
-    if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) throw error;
+    // Перевіряємо ЛИШЕ `signal?.aborted` (зовнішній сигнал), без `error.name === 'AbortError'`:
+    // на iOS/Expo Go нативний fetch кидає власний `FetchRequestCanceledException` без цього
+    // імені (реальна знахідка з логів пристрою) — стара AND-перевірка з іменем ніколи не
+    // спрацьовувала там. НЕ використовуємо спільний `isFetchAborted` тут навмисно: обидва
+    // abort'и (зовнішній і внутрішній таймаут) йдуть через той самий `controller`, тож OR з
+    // `error.name === 'AbortError'` на платформах, де це ім'я надійне, хибно трактував би
+    // внутрішній таймаут як зовнішнє скасування — лише `signal?.aborted` коректно розрізняє.
+    if (signal?.aborted) throw error;
     log.warn('ISBNdb proxy: помилка запиту', { error: error instanceof Error ? error.message : String(error) });
     return null;
   } finally {

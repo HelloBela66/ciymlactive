@@ -1,4 +1,5 @@
 import { createLogger } from '@/lib/logger';
+import { isFetchAborted } from '@/lib/isFetchAborted';
 
 const log = createLogger('remote/curatedCatalog');
 
@@ -35,6 +36,11 @@ export interface CuratedBookRow {
   purposes: string[];
 }
 
+/** Скасування через `signal` (React Query перервало застарілий запит "Що почитати завтра?"
+ * під час зміни фільтрів) прокидається далі, не логується як помилка — детектор
+ * `isFetchAborted` (`src/lib/isFetchAborted.ts`), не голий `error.name === 'AbortError'`,
+ * див. коментар там: на iOS/Expo Go нативний fetch кидає власний
+ * `FetchRequestCanceledException` без цього імені. */
 async function callRpc<T>(fn: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T | null> {
   if (!isCuratedCatalogConfigured()) return null;
   try {
@@ -56,7 +62,7 @@ async function callRpc<T>(fn: string, params: Record<string, unknown>, signal?: 
     if (response.status === 204) return null;
     return (await response.json()) as T;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw error;
+    if (isFetchAborted(error, signal)) throw error;
     log.warn('Кураторський каталог: помилка запиту', { fn, error: error instanceof Error ? error.message : String(error) });
     return null;
   }

@@ -1,4 +1,5 @@
 import { createLogger } from '@/lib/logger';
+import { isFetchAborted } from '@/lib/isFetchAborted';
 
 const log = createLogger('remote/sharedCatalog');
 
@@ -68,7 +69,13 @@ export interface CatalogUpsertInput {
 
 /** Той самий degradation-safe підхід, що й `ISBNdbProvider.safeFetchJson`: без конфігурації
  * чи за будь-якої мережевої/HTTP помилки — `null`, ніколи не кидає в UI (спільний каталог —
- * оптимізація, а не критичний шлях, docs/LOCAL_FIRST.md — core loop лишається офлайн-first). */
+ * оптимізація, а не критичний шлях, docs/LOCAL_FIRST.md — core loop лишається офлайн-first).
+ * Скасування через `signal` (React Query перервало застарілий пошуковий запит під час
+ * набору тексту) прокидається далі, не логується як помилка — детектор `isFetchAborted`
+ * (`src/lib/isFetchAborted.ts`), не голий `error.name === 'AbortError'`: реальний лог з
+ * пристрою (iOS/Expo Go) показав, що нативний fetch там кидає власний
+ * `FetchRequestCanceledException` без цього імені, і скасування логувалось як "помилка
+ * запиту". */
 async function callRpc<T>(fn: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T | null> {
   if (!isSharedCatalogConfigured()) return null;
   try {
@@ -90,7 +97,7 @@ async function callRpc<T>(fn: string, params: Record<string, unknown>, signal?: 
     if (response.status === 204) return null;
     return (await response.json()) as T;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw error;
+    if (isFetchAborted(error, signal)) throw error;
     log.warn('Спільний каталог: помилка запиту', { fn, error: error instanceof Error ? error.message : String(error) });
     return null;
   }

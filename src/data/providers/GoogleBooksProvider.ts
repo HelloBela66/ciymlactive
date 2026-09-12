@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createLogger } from '@/lib/logger';
+import { isFetchAborted } from '@/lib/isFetchAborted';
 import type { NormalizedBookDraft } from '@/types/bookDraft';
 import type { BookMetadataProvider, RawProviderBook } from './BookMetadataProvider';
 
@@ -67,7 +68,10 @@ function toRawBook(volume: z.infer<typeof VolumeSchema>): RawProviderBook {
  * ризики": rate limit чи зміна контракту не повинні ламати пошук — лишається manual entry).
  * Виняток — скасування через `signal` (React Query перервало застарілий запит під час
  * набору тексту): це навмисне скасування, а не помилка, тож прокидаємо його далі, щоб
- * React Query позначив запит "cancelled", а не "error" (і не залогувало його як помилку). */
+ * React Query позначив запит "cancelled", а не "error" (і не залогувало його як помилку).
+ * Детектор скасування — `isFetchAborted` (`src/lib/isFetchAborted.ts`), НЕ голий
+ * `error.name === 'AbortError'`: на iOS/Expo Go нативний fetch кидає власний
+ * `FetchRequestCanceledException` без цього імені — реальна знахідка з логів пристрою. */
 async function fetchVolumes(
   query: string,
   signal?: AbortSignal,
@@ -91,7 +95,7 @@ async function fetchVolumes(
     }
     return parsed.data.items ?? [];
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw error;
+    if (isFetchAborted(error, signal)) throw error;
     log.warn('Google Books: помилка запиту', { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
