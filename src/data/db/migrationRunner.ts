@@ -17,6 +17,7 @@ import * as migration014 from './migrations/014_pre_reading_reflection';
 import * as migration015 from './migrations/015_lore_entity';
 import * as migration016 from './migrations/016_spoiler_safe';
 import * as migration017 from './migrations/017_dnf_reflection';
+import * as migration018 from './migrations/018_shelf_book_index';
 
 const log = createLogger('db/migrations');
 
@@ -54,6 +55,7 @@ const migrations: Migration[] = [
   { version: migration015.version, up: migration015.up },
   { version: migration016.version, up: migration016.up },
   { version: migration017.version, up: migration017.up },
+  { version: migration018.version, up: migration018.up },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;

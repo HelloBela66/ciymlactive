@@ -175,6 +175,17 @@ sync/catalog backend, але жодна читацька дія (старт се
     поле форми — сторінка тут завжди відома. `reason` — вільний `TEXT` без CHECK, фіксований
     лише `DnfReasonId` (`src/design/dnfReason.ts`, сім причин ТЗ); `note` — окреме вільне поле
     (ТЗ: "Optional free text").
+18. **018_shelf_book_index** — DATABASE / MIGRATIONS (POLYTSIA V1.6, Фаза 20). Один рядок:
+    `CREATE INDEX idx_shelf_book_user_book ON shelf_book(user_book_id)`. Ця фаза ТЗ — суцільний
+    аудит existing schema/індексів, не нова функціональність: повна перевірка всіх 17 попередніх
+    міграцій показала, що майже всі кандидати з ТЗ ("workId; userBookId; createdAt; progress;
+    lore work; capsule work; journal links") уже покриті існуючими індексами або не мають
+    реального query use case (наприклад, `book_capsule` ніколи не фільтрується за
+    `work`/`edition` — індекс без use case навмисно не додано, той самий принцип, що й "не
+    редизайнь" у Фазі 19). Єдиний реальний пропуск: `user_book_id` — ДРУГИЙ стовпець
+    композитного `PRIMARY KEY (shelf_id, user_book_id)` у `shelf_book`, тож
+    `ShelfRepository.listShelfIdsForUserBook`/`listNamesByUserBookIds` (обидва фільтрують саме
+    за ним) не можуть використати цей PK як індекс (SQLite leftmost-prefix rule).
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -423,6 +434,11 @@ CREATE TABLE shelf_book (
   added_at TEXT NOT NULL,
   PRIMARY KEY (shelf_id, user_book_id)
 );
+
+-- Migration 018 — `user_book_id` є ДРУГИМ стовпцем композитного PK вище, тож запити, що
+-- фільтрують лише за ним (`ShelfRepository.listShelfIdsForUserBook`/`listNamesByUserBookIds`),
+-- не можуть використати цей PK як індекс (leftmost-prefix rule) без окремого індексу.
+CREATE INDEX idx_shelf_book_user_book ON shelf_book(user_book_id);
 
 -- ============ ЧИТАННЯ ============
 
@@ -725,6 +741,10 @@ CREATE TABLE app_settings (
   боці SQLite, без сканування в JS.
 - `note(revisit_later)`, `quote(revisit_later)` (POLYTSIA V1.5, Фаза 11) — той самий привід, що
   й `is_favorite` вище: `revisitLaterOnly` фільтр у тих самих `listPage`/`listFeedPage`.
+- `shelf_book(user_book_id)` (POLYTSIA V1.6, Фаза 20) — `user_book_id` є другим стовпцем
+  композитного `PRIMARY KEY(shelf_id, user_book_id)`, тож `ShelfRepository.listShelfIdsForUserBook`/
+  `listNamesByUserBookIds` (обидва фільтрують саме за ним) без окремого індексу сканували б усю
+  таблицю.
 - Пагінація скрізь через `LIMIT/OFFSET` з `ORDER BY <indexed column>`, для нескінченного
   скролу — keyset pagination на `updated_at, id` там, де OFFSET стає повільним (>2000 рядків).
   `JournalRepository.listPage`/`listFeedPage` уже реалізують keyset на `(created_at, id)` —

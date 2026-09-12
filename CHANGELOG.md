@@ -1,5 +1,32 @@
 # Changelog
 
+## POLYTSIA V1.6, Фаза 20 — Database / Migrations
+
+**Дата:** 2026-09-12
+
+Двадцята фаза V1.6 — суцільний аудит схеми БД, не нова функціональність. Перевірено всі 17
+попередніх міграцій (`src/data/db/migrations/001`–`017`): усі — адитивні (`CREATE TABLE`/
+`ALTER TABLE ADD COLUMN`/`CREATE INDEX`), три винятки (002/003/007, rebuild таблиці заради зміни
+CHECK-обмеження) — задокументований, безвтратний SQLite-патерн (copy → drop → rename під
+`PRAGMA foreign_key_check`), не нова знахідка цієї фази.
+
+Перевірено кожен кандидат з ТЗ ("workId; userBookId; createdAt; progress; lore work; capsule
+work; journal links") проти РЕАЛЬНИХ запитів у репозиторіях — той самий принцип, що й "не
+створюй компонент без реального дублювання" у Фазі 19. Знайдено один реальний пропуск: у
+`shelf_book` (`PRIMARY KEY (shelf_id, user_book_id)`) `ShelfRepository.listShelfIdsForUserBook`/
+`listNamesByUserBookIds` фільтрують за `user_book_id` — другим стовпцем композитного ключа,
+який SQLite не може використати як індекс (leftmost-prefix rule). Нова міграція
+`018_shelf_book_index.ts` — один рядок, `CREATE INDEX idx_shelf_book_user_book ON
+shelf_book(user_book_id)`.
+
+Усе інше з переліку ТЗ — уже покрито існуючими індексами (`idx_progress_user_book`,
+`idx_note_user_book`, `idx_lore_entity_work`, `idx_journal_lore_link_entity` тощо) або не має
+реального query use case (наприклад, `book_capsule` ніколи не фільтрується за `work`/`edition`)
+— індекс без use case свідомо не додано. `journal_lore_link` (Фаза 9-10) і `dnf_reflection.reason`
+(Фаза 12) з переліку "Potential models" ТЗ уже реалізовані попередніми фазами, нової сутності не
+знадобилось. Жодної derived-analytics таблиці не знайдено — прогрес цілей/статистика й далі
+рахуються "на льоту" з `reading_session`/`user_book`.
+
 ## POLYTSIA V1.6, Фаза 19 — Design System Extension
 
 **Дата:** 2026-09-12

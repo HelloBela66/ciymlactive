@@ -188,4 +188,60 @@ describe('migrateDbIfNeeded', () => {
     expect(quote?.text).toBe('Цитата до міграції 011');
     expect(quote?.revisit_later).toBe(0);
   });
+
+  it('нова міграція (018: shelf_book.user_book_id індекс) застосовується на seed-БД версії 17 без втрати даних', async () => {
+    // POLYTSIA V1.6, Фаза 20 (DATABASE / MIGRATIONS) — той самий сценарій "populated DB", що й
+    // тести 009/010/011 вище, лише для чистого `CREATE INDEX` (без нової колонки): існуючий
+    // рядок shelf_book, створений "попередньою версією застосунку", має лишитись недоторканим,
+    // а новий індекс — реально з'явитися в sqlite_master.
+    const db = await openTestDatabase();
+
+    await __applyMigrationsForTests(db, 17);
+    const beforeVersion = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+    expect(beforeVersion?.user_version).toBe(17);
+
+    const now = new Date().toISOString();
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-1',
+      'Книга 1',
+      now,
+      now,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга 1', 'uk', 'paperback', now, now],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,?,?,?,?)`,
+      ['user_book-1', 'edition-1', 'reading', 0, now, now],
+    );
+    await db.runAsync(`INSERT INTO shelf (id, name, is_system, sort_order, created_at, updated_at) VALUES (?,?,0,0,?,?)`, [
+      'shelf-1',
+      'Улюблене',
+      now,
+      now,
+    ]);
+    // Рядок shelf_book, створений "попередньою версією застосунку" — до появи індексу.
+    await db.runAsync(`INSERT INTO shelf_book (shelf_id, user_book_id, added_at) VALUES (?,?,?)`, [
+      'shelf-1',
+      'user_book-1',
+      now,
+    ]);
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    // Старий рядок не постраждав.
+    const link = await db.getFirstAsync<{ shelf_id: string; user_book_id: string }>(
+      `SELECT shelf_id, user_book_id FROM shelf_book WHERE shelf_id = ? AND user_book_id = ?`,
+      ['shelf-1', 'user_book-1'],
+    );
+    expect(link).not.toBeNull();
+
+    // Індекс справді створено (не лише PRAGMA-лічильник збігся).
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_shelf_book_user_book'`,
+    );
+    expect(index?.name).toBe('idx_shelf_book_user_book');
+  });
 });
