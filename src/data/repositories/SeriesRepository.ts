@@ -141,6 +141,24 @@ export const SeriesRepository = {
     return { series: mapSeriesRow(row), position: row.position };
   },
 
+  /**
+   * Пакетна перевірка "чи цей твір у якійсь серії" для БАГАТЬОХ творів одразу (ТЗ Фази 15,
+   * READING FINGERPRINT — бейдж «Читає серіями», `src/lib/readingFingerprint.ts`) — той самий
+   * `WHERE ... IN (${placeholders})` підхід, що й `GenreRepository.listByWorkIds`, замість
+   * `getContextForWork` у циклі (N запитів на N завершених книг). Повертає лише `Set` id
+   * творів, що мають запис у `series_entry` — самі деталі серії (`SeriesContext`) тут не
+   * потрібні, бейдж лише рахує книги.
+   */
+  async listWorkIdsInSeries(db: SQLiteDatabase, workIds: string[]): Promise<Set<string>> {
+    if (workIds.length === 0) return new Set();
+    const placeholders = workIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ work_id: string }>(
+      `SELECT DISTINCT work_id FROM series_entry WHERE work_id IN (${placeholders})`,
+      workIds,
+    );
+    return new Set(rows.map((row) => row.work_id));
+  },
+
   async getById(db: SQLiteDatabase, id: string): Promise<Series | null> {
     const row = await db.getFirstAsync<SeriesRow>(`SELECT * FROM series WHERE id = ?`, [id]);
     return row ? mapSeriesRow(row) : null;

@@ -130,4 +130,12 @@ export const QuoteRepository = {
       id,
     ]);
   },
+
+  /** Лише кількість (ТЗ Фази 15, READING FINGERPRINT — бейдж «Колекціонер цитат»,
+   * `src/lib/readingFingerprint.ts`) — той самий "COUNT(*), не повний SELECT" підхід, що й
+   * `NoteRepository.countAll`. */
+  async countAll(db: SQLiteDatabase): Promise<number> {
+    const row = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) AS count FROM quote WHERE deleted_at IS NULL`);
+    return row?.count ?? 0;
+  },
 };

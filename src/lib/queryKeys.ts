@@ -179,6 +179,11 @@ export const queryKeys = {
     // `statistics.overall`: усі insight'и рахуються за весь час, без року/сезону.
     overall: ['readingProfile', 'overall'] as const,
   },
+  fingerprint: {
+    // ТЗ Фази 15 (READING FINGERPRINT) — той самий "без параметрів, за весь час" сенс, що й
+    // `readingProfile.overall` вище.
+    overall: ['fingerprint', 'overall'] as const,
+  },
   autoBackup: {
     settings: ['autoBackup', 'settings'] as const,
   },

@@ -70,6 +70,15 @@ const MENU_ITEMS: MenuItem[] = [
         params: { seasonKey: formatSeasonKey(currentSeasonKey(new Date())) },
       } as unknown as Href),
   },
+  {
+    icon: 'finger-print-outline',
+    label: 'Мій читацький відбиток',
+    // ТЗ Фази 15 (READING FINGERPRINT) — `as unknown as Href`, той самий випадок, що й "Мій
+    // читацький профіль"/"Читацькі сезони" вище: щойно доданий маршрут (`app/fingerprint.tsx`),
+    // про який локально згенерований кеш типізованих маршрутів ще не знає до першого запуску
+    // dev-сервера на новій машині.
+    onPress: () => router.push('/fingerprint' as unknown as Href),
+  },
   { icon: 'cloud-upload-outline', label: 'Резервна копія', onPress: () => router.push('/backup') },
   {
     icon: 'shield-checkmark-outline',

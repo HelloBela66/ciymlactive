@@ -136,4 +136,15 @@ export const NoteRepository = {
       id,
     ]);
   },
+
+  /** Лише кількість (ТЗ Фази 15, READING FINGERPRINT — бейдж «Любить робити нотатки»,
+   * `src/lib/readingFingerprint.ts`) — `COUNT(*)`, не повний `SELECT *`/`.length`, бо бейджу
+   * не потрібен жоден рядок цілком. На відміну від `BackupRepository.approximateCounts`
+   * (рахує УСІ рядки, включно з м'яко видаленими — навмисно, для "Стан копіювання"), тут
+   * `deleted_at IS NULL`: бейдж описує РЕАЛЬНУ активну поведінку користувача, а не розмір
+   * файлу бекапу. */
+  async countAll(db: SQLiteDatabase): Promise<number> {
+    const row = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) AS count FROM note WHERE deleted_at IS NULL`);
+    return row?.count ?? 0;
+  },
 };
