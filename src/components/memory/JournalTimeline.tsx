@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Pressable, Modal, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '@/components/ui/AppText';
-import { Card } from '@/components/ui/Card';
+import { Timeline, TIMELINE_MARKER_SIZE } from '@/components/ui/Timeline';
 import { useTheme } from '@/design/ThemeProvider';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
@@ -14,7 +14,9 @@ import type { JournalEntry } from '@/types/journalEntry';
  * (`app/memory/[workId].tsx`) з маркерами записів щоденника. Уся позиційна/групувальна логіка
  * — у `src/lib/journalTimeline.ts` (чистa функція, покрита `journalTimeline.test.ts`); цей
  * компонент лише рендерить її результат і відповідає за tap→preview (ТЗ: "Tap marker →
- * entry detail/preview").
+ * entry detail/preview"). "Хребет" шкали (картка/заголовок/рейка/підписи країв) — спільний з
+ * `ReadingExperienceTimeline` компонент `Timeline` (ТЗ Фази 19, DESIGN SYSTEM EXTENSION); тут
+ * лишається лише форма маркера й поведінка тапу (модалка з усіма записами позиції).
  *
  * Іконка різна за категорією, але КОЛІР одна й та сама (`theme.colors.accent`) для всіх —
  * навмисно, не "по кольору на категорію": UI-палітра застосунку свідомо нейтральна
@@ -27,9 +29,6 @@ const CATEGORY_ICON: Record<TimelineMarkerCategory, keyof typeof Ionicons.glyphM
   moment: 'flash-outline',
   thought: 'bulb-outline',
 };
-
-const MARKER_SIZE = 28;
-const TRACK_HEIGHT = 2;
 
 interface JournalTimelineProps {
   entries: JournalEntry[];
@@ -51,32 +50,12 @@ export function JournalTimeline({ entries, pageCount, userBookId }: JournalTimel
   if (markers.length === 0) return null;
 
   return (
-    <Card style={{ gap: theme.spacing.md }}>
-      <AppText variant="heading">Шкала щоденника</AppText>
-
-      <View style={{ paddingHorizontal: MARKER_SIZE / 2, paddingVertical: theme.spacing.lg }}>
-        <View
-          style={{
-            height: TRACK_HEIGHT,
-            borderRadius: TRACK_HEIGHT / 2,
-            backgroundColor: theme.colors.border,
-          }}
-        />
-        <View style={{ position: 'relative', height: 0 }}>
-          {markers.map((marker) => (
-            <MarkerDot key={marker.percent} marker={marker} onPress={() => setOpenMarker(marker)} />
-          ))}
-        </View>
-      </View>
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <AppText variant="micro" color="tertiary">
-          0%
-        </AppText>
-        <AppText variant="micro" color="tertiary">
-          100%
-        </AppText>
-      </View>
+    <>
+      <Timeline heading="Шкала щоденника" startLabel="0%" endLabel="100%">
+        {markers.map((marker) => (
+          <MarkerDot key={marker.percent} marker={marker} onPress={() => setOpenMarker(marker)} />
+        ))}
+      </Timeline>
 
       <Modal
         visible={openMarker != null}
@@ -133,7 +112,7 @@ export function JournalTimeline({ entries, pageCount, userBookId }: JournalTimel
           </View>
         </Pressable>
       </Modal>
-    </Card>
+    </>
   );
 }
 
@@ -159,11 +138,11 @@ function MarkerDot({ marker, onPress }: MarkerDotProps) {
       style={{
         position: 'absolute',
         left: `${marker.percent}%`,
-        top: -MARKER_SIZE / 2,
-        marginLeft: -MARKER_SIZE / 2,
-        width: MARKER_SIZE,
-        height: MARKER_SIZE,
-        borderRadius: MARKER_SIZE / 2,
+        top: -TIMELINE_MARKER_SIZE / 2,
+        marginLeft: -TIMELINE_MARKER_SIZE / 2,
+        width: TIMELINE_MARKER_SIZE,
+        height: TIMELINE_MARKER_SIZE,
+        borderRadius: TIMELINE_MARKER_SIZE / 2,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: theme.colors.surface,

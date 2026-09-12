@@ -5,6 +5,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { createLogger } from '@/lib/logger';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
 import { invalidateJournal } from '@/lib/journalInvalidation';
+import { triggerLightHapticFeedback } from '@/lib/haptics';
 import type { CreateNoteInput, Note } from '@/types/note';
 
 const log = createLogger('features/notes');
@@ -36,6 +37,8 @@ export function useCreateNote() {
       // (і, коли є `sessionId`, список "записи цієї сесії" на екрані читання) лишались би
       // застарілими до спливання власного staleTime.
       invalidateJournal(queryClient, note.userBookId, note.sessionId);
+      // ТЗ Фази 19 (DESIGN SYSTEM EXTENSION, §HAPTICS) — "save journal".
+      triggerLightHapticFeedback();
     },
     onError,
   });

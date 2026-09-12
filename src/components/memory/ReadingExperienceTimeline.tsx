@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { View, Pressable } from 'react-native';
+import { Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '@/components/ui/AppText';
-import { Card } from '@/components/ui/Card';
+import { Timeline, TIMELINE_MARKER_SIZE } from '@/components/ui/Timeline';
 import { useTheme } from '@/design/ThemeProvider';
 import { READING_EXPERIENCE_LABELS, type ReadingExperienceId } from '@/design/readingExperience';
 import { computeReadingExperienceTimeline, type ReadingExperienceMarker } from '@/lib/readingExperienceTimeline';
@@ -14,7 +14,8 @@ import type { ReadingSession } from '@/types/readingSession';
  * читалося?" (`reading_experience`, вже існуюче поле Milestone V1.5 Фази 9 — тут лише нова
  * агрегована візуалізація, без нової колонки чи таблиці). Уся позиційна логіка — в
  * `src/lib/readingExperienceTimeline.ts` (чиста функція, покрита
- * `readingExperienceTimeline.test.ts`); цей компонент лише рендерить результат.
+ * `readingExperienceTimeline.test.ts`); цей компонент лише рендерить результат. "Хребет" шкали
+ * — спільний з `JournalTimeline` компонент `Timeline` (ТЗ Фази 19, DESIGN SYSTEM EXTENSION).
  *
  * ТЗ прямо забороняє emoji як ЄДИНИЙ visual encoding — тому, як і `JournalTimeline`, кожен стан
  * розрізняється ФОРМОЮ іконки (не кольором: палітра застосунку свідомо нейтральна,
@@ -33,16 +34,12 @@ const READING_EXPERIENCE_ICON: Record<ReadingExperienceId, keyof typeof Ionicons
  * реально відбулась і має свою позицію на шкалі, просто без позначки стану. */
 const NO_ANSWER_ICON: keyof typeof Ionicons.glyphMap = 'ellipse-outline';
 
-const MARKER_SIZE = 28;
-const TRACK_HEIGHT = 2;
-
 interface ReadingExperienceTimelineProps {
   sessions: ReadingSession[] | undefined;
   pageCount: number | null;
 }
 
 export function ReadingExperienceTimeline({ sessions, pageCount }: ReadingExperienceTimelineProps) {
-  const theme = useTheme();
   const [activeMarker, setActiveMarker] = useState<ReadingExperienceMarker | null>(null);
 
   const markers = computeReadingExperienceTimeline(sessions ?? [], pageCount);
@@ -54,42 +51,25 @@ export function ReadingExperienceTimeline({ sessions, pageCount }: ReadingExperi
   if (markers.length === 0) return null;
 
   return (
-    <Card style={{ gap: theme.spacing.md }}>
-      <AppText variant="heading">Як читалася ця книга</AppText>
-
-      <View style={{ paddingHorizontal: MARKER_SIZE / 2, paddingVertical: theme.spacing.lg }}>
-        <View
-          style={{
-            height: TRACK_HEIGHT,
-            borderRadius: TRACK_HEIGHT / 2,
-            backgroundColor: theme.colors.border,
-          }}
+    <Timeline
+      heading="Як читалася ця книга"
+      startLabel="Початок книги"
+      endLabel="Кінець книги"
+      footer={
+        <AppText variant="caption" color="secondary" style={{ textAlign: 'center', minHeight: 18 }}>
+          {activeMarker ? describeMarker(activeMarker) : 'Торкнись позначки, щоб побачити дату.'}
+        </AppText>
+      }
+    >
+      {markers.map((marker) => (
+        <MarkerDot
+          key={marker.sessionId}
+          marker={marker}
+          isActive={activeMarker?.sessionId === marker.sessionId}
+          onPress={() => setActiveMarker((current) => (current?.sessionId === marker.sessionId ? null : marker))}
         />
-        <View style={{ position: 'relative', height: 0 }}>
-          {markers.map((marker) => (
-            <MarkerDot
-              key={marker.sessionId}
-              marker={marker}
-              isActive={activeMarker?.sessionId === marker.sessionId}
-              onPress={() => setActiveMarker((current) => (current?.sessionId === marker.sessionId ? null : marker))}
-            />
-          ))}
-        </View>
-      </View>
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <AppText variant="micro" color="tertiary">
-          Початок книги
-        </AppText>
-        <AppText variant="micro" color="tertiary">
-          Кінець книги
-        </AppText>
-      </View>
-
-      <AppText variant="caption" color="secondary" style={{ textAlign: 'center', minHeight: 18 }}>
-        {activeMarker ? describeMarker(activeMarker) : 'Торкнись позначки, щоб побачити дату.'}
-      </AppText>
-    </Card>
+      ))}
+    </Timeline>
   );
 }
 
@@ -118,11 +98,11 @@ function MarkerDot({ marker, isActive, onPress }: MarkerDotProps) {
       style={{
         position: 'absolute',
         left: `${marker.percent}%`,
-        top: -MARKER_SIZE / 2,
-        marginLeft: -MARKER_SIZE / 2,
-        width: MARKER_SIZE,
-        height: MARKER_SIZE,
-        borderRadius: MARKER_SIZE / 2,
+        top: -TIMELINE_MARKER_SIZE / 2,
+        marginLeft: -TIMELINE_MARKER_SIZE / 2,
+        width: TIMELINE_MARKER_SIZE,
+        height: TIMELINE_MARKER_SIZE,
+        borderRadius: TIMELINE_MARKER_SIZE / 2,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: isActive ? theme.colors.accent : theme.colors.surface,

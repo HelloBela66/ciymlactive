@@ -4,7 +4,7 @@ import { router, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
-import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { JournalPreview } from '@/components/ui/JournalPreview';
 import { useTheme } from '@/design/ThemeProvider';
 import { useOnThisDay } from '@/features/on-this-day/useOnThisDay';
 import { selectHomePrimaryMemory } from '@/lib/onThisDay';
@@ -69,35 +69,24 @@ export function OnThisDayCard() {
           </AppText>
         </View>
 
-        <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
-          <CoverThumbnail
-            coverUrl={primary.coverUrl}
-            title={primary.bookTitle}
-            fallbackColor={primary.coverFallbackColor}
-            width={48}
-            height={70}
-            borderRadius={theme.radius.sm}
-          />
-          <View style={{ flex: 1, gap: theme.spacing.xs, justifyContent: 'center' }}>
-            <AppText variant="body">{primary.bookTitle}</AppText>
-            {metaLine ? (
-              <AppText variant="caption" color="secondary">
-                {metaLine}
+        <JournalPreview title={primary.bookTitle} coverUrl={primary.coverUrl} coverFallbackColor={primary.coverFallbackColor}>
+          {metaLine ? (
+            <AppText variant="caption" color="secondary">
+              {metaLine}
+            </AppText>
+          ) : null}
+          {journalEntry ? (
+            journalEntry.hidden ? (
+              <AppText variant="caption" color="tertiary" style={{ fontStyle: 'italic' }}>
+                Спогад приховано, щоб не забігати наперед.
               </AppText>
-            ) : null}
-            {journalEntry ? (
-              journalEntry.hidden ? (
-                <AppText variant="caption" color="tertiary" style={{ fontStyle: 'italic' }}>
-                  Спогад приховано, щоб не забігати наперед.
-                </AppText>
-              ) : (
-                <AppText variant="caption" color="tertiary" numberOfLines={2} style={{ fontStyle: 'italic' }}>
-                  Тоді ти зберіг: «{journalEntry.text}»
-                </AppText>
-              )
-            ) : null}
-          </View>
-        </View>
+            ) : (
+              <AppText variant="caption" color="tertiary" numberOfLines={2} style={{ fontStyle: 'italic' }}>
+                Тоді ти зберіг: «{journalEntry.text}»
+              </AppText>
+            )
+          ) : null}
+        </JournalPreview>
 
         {booksReadCount > 1 ? (
           <AppText variant="micro" color="tertiary">

@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { JournalPreview } from '@/components/ui/JournalPreview';
 import { useTheme } from '@/design/ThemeProvider';
 import { readingGoalTypeLabels } from '@/design/i18n-labels';
 import { useHomeContextCard } from '@/features/home/useHomeContextCard';
@@ -37,22 +37,11 @@ function StaleReadingContextCard({ candidate }: { candidate: StaleReadingCandida
   return (
     <Card style={{ gap: theme.spacing.sm }}>
       <ContextCardHeader icon="bookmark-outline" label="Давно не читав" />
-      <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
-        <CoverThumbnail
-          coverUrl={candidate.coverUrl}
-          title={candidate.title}
-          fallbackColor={candidate.coverFallbackColor}
-          width={48}
-          height={70}
-          borderRadius={theme.radius.sm}
-        />
-        <View style={{ flex: 1, gap: theme.spacing.xs, justifyContent: 'center' }}>
-          <AppText variant="body">{candidate.title}</AppText>
-          <AppText variant="caption" color="secondary">
-            {describeStaleReading(candidate.info)}
-          </AppText>
-        </View>
-      </View>
+      <JournalPreview title={candidate.title} coverUrl={candidate.coverUrl} coverFallbackColor={candidate.coverFallbackColor}>
+        <AppText variant="caption" color="secondary">
+          {describeStaleReading(candidate.info)}
+        </AppText>
+      </JournalPreview>
       <Button
         label="Згадати, де я зупинився"
         variant="secondary"
@@ -67,22 +56,11 @@ function CapsuleDueContextCard({ candidate }: { candidate: CapsuleDueCandidate }
   return (
     <Card style={{ gap: theme.spacing.sm }}>
       <ContextCardHeader icon="cube-outline" label="Час згадати книгу" />
-      <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
-        <CoverThumbnail
-          coverUrl={candidate.coverUrl}
-          title={candidate.title}
-          fallbackColor={candidate.coverFallbackColor}
-          width={48}
-          height={70}
-          borderRadius={theme.radius.sm}
-        />
-        <View style={{ flex: 1, gap: theme.spacing.xs, justifyContent: 'center' }}>
-          <AppText variant="body">{candidate.title}</AppText>
-          <AppText variant="caption" color="secondary">
-            Твоя капсула цієї книги вже чекає.
-          </AppText>
-        </View>
-      </View>
+      <JournalPreview title={candidate.title} coverUrl={candidate.coverUrl} coverFallbackColor={candidate.coverFallbackColor}>
+        <AppText variant="caption" color="secondary">
+          Твоя капсула цієї книги вже чекає.
+        </AppText>
+      </JournalPreview>
       <Button
         label="Згадати книгу"
         variant="secondary"

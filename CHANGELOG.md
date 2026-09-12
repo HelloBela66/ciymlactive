@@ -1,5 +1,27 @@
 # Changelog
 
+## POLYTSIA V1.6, Фаза 19 — Design System Extension
+
+**Дата:** 2026-09-12
+
+Дев'ятнадцята фіча-фаза V1.6 — не редизайн, а консолідація: аудит усього застосунку на реально
+дубльовану розмітку (не гіпотетичну), 6 нових спільних компонентів (`MemorySection`, `BookHero`,
+`JournalPreview`, `Timeline`, `SectionHeader`, `QuickAction`, усі `src/components/ui/`), кожен
+одразу застосований на місцях, звідки виведений (`app/memory/[workId].tsx`,
+`app/recall/[workId].tsx`, `app/capsule/[workId].tsx`, `app/memory/index.tsx`,
+`app/on-this-day.tsx`, `src/components/home/*`, `app/(tabs)/index.tsx`,
+`src/components/memory/JournalTimeline.tsx`/`ReadingExperienceTimeline.tsx`). Ще 4 кандидати з
+ТЗ (`EmptyMemoryState`, `BookCoverStack`, `InsightCard`, `StatPill`) свідомо НЕ створені —
+обґрунтування кожного рішення в `docs/DESIGN_SYSTEM_EXTENSION.md`.
+
+Додано `expo-haptics` — легкий haptic feedback (`triggerLightHapticFeedback`,
+`src/lib/haptics.ts`) на 3 з 4 прикладів ТЗ: збереження запису щоденника, завершення книги,
+позначення "улюблене" (лише при встановленні). Четвертий приклад ТЗ ("successful scan") не має
+реального місця виклику — у застосунку немає фічі сканування штрихкоду камерою.
+
+Жодної нової таблиці/міграції/зміни візуального стилю — лише винесення існуючої розмітки й точкові
+`onSuccess`-виклики нового helper'а.
+
 ## POLYTSIA V1.6, Фаза 18 — Home Redesign
 
 **Дата:** 2026-09-12

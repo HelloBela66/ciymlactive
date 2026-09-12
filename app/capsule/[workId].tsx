@@ -9,7 +9,7 @@ import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { BookHero } from '@/components/ui/BookHero';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
@@ -99,27 +99,16 @@ export default function BookCapsuleScreen() {
           </AppText>
         ) : (
           <View style={{ gap: theme.spacing.lg }}>
-            <View style={{ alignItems: 'center', gap: theme.spacing.sm }}>
-              <CoverThumbnail
-                coverUrl={data.primaryEdition?.coverUrl}
-                title={data.work.title}
-                fallbackColor={data.work.coverFallbackColor}
-                width={96}
-                height={140}
-                borderRadius={theme.radius.md}
-              />
-              <AppText variant="title" style={{ textAlign: 'center' }}>
-                {data.work.title}
-              </AppText>
-              {authorNames ? (
-                <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
-                  {authorNames}
-                </AppText>
-              ) : null}
+            <BookHero
+              title={data.work.title}
+              authors={authorNames}
+              coverUrl={data.primaryEdition?.coverUrl}
+              coverFallbackColor={data.work.coverFallbackColor}
+            >
               <AppText variant="caption" color="tertiary">
                 Створено {formatFullDate(capsule.createdAt)}
               </AppText>
-            </View>
+            </BookHero>
 
             {capsule.lastingThought ? (
               <Card style={{ gap: theme.spacing.xs }}>

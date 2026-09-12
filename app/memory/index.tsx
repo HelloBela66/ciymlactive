@@ -4,16 +4,16 @@ import { Stack, router, type Href } from 'expo-router';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
-import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { JournalPreview } from '@/components/ui/JournalPreview';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useTheme } from '@/design/ThemeProvider';
 import { useMemoryIndex, type MemoryIndexItem } from '@/features/memory/useMemoryIndex';
 
 /** Той самий вигляд рядка, що й `MemoryCard` на `app/on-this-day.tsx` (обкладинка + назва +
- * короткий курсивний preview) — навмисно продубльований локально, той самий house-патерн
- * маленького презентаційного блоку без спільного стану. */
+ * короткий курсивний preview) — з Фази 19 (DESIGN SYSTEM EXTENSION) спільний рядок винесено в
+ * `JournalPreview` (`src/components/ui/JournalPreview.tsx`), тут лишається лише обгортка
+ * `Pressable`/`Card` і власний вміст (автори, snippet). */
 function MemoryIndexRow({ item }: { item: MemoryIndexItem }) {
-  const theme = useTheme();
   const snippet = item.oneSentenceMemory ?? item.lastingThought;
 
   return (
@@ -22,17 +22,8 @@ function MemoryIndexRow({ item }: { item: MemoryIndexItem }) {
       accessibilityRole="button"
       accessibilityLabel={item.title}
     >
-      <Card style={{ flexDirection: 'row', gap: theme.spacing.md }}>
-        <CoverThumbnail
-          coverUrl={item.coverUrl}
-          title={item.title}
-          fallbackColor={item.coverFallbackColor}
-          width={48}
-          height={70}
-          borderRadius={theme.radius.sm}
-        />
-        <View style={{ flex: 1, gap: theme.spacing.xs, justifyContent: 'center' }}>
-          <AppText variant="body">{item.title}</AppText>
+      <Card>
+        <JournalPreview title={item.title} coverUrl={item.coverUrl} coverFallbackColor={item.coverFallbackColor}>
           {item.authors ? (
             <AppText variant="caption" color="secondary">
               {item.authors}
@@ -43,7 +34,7 @@ function MemoryIndexRow({ item }: { item: MemoryIndexItem }) {
               «{snippet}»
             </AppText>
           ) : null}
-        </View>
+        </JournalPreview>
       </Card>
     </Pressable>
   );

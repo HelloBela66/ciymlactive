@@ -7,6 +7,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { createLogger } from '@/lib/logger';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
 import { markRemovedInSharedCatalog } from '@/data/remote/catalogSync';
+import { triggerLightHapticFeedback } from '@/lib/haptics';
 import type { UserBookStatus } from '@/types/userBook';
 
 const log = createLogger('features/library/userBook');
@@ -66,6 +67,11 @@ export function useUpdateUserBookStatus() {
       // `started_at`/`finished_at` (`UserBookRepository.updateStatus`), а стрічка "Моя історія"
       // читає саме ці колонки як `book_started`/`book_finished` події (`ActivityHistoryRepository`).
       queryClient.invalidateQueries({ queryKey: queryKeys.activityHistory.recent });
+      // ТЗ Фази 19 (DESIGN SYSTEM EXTENSION, §HAPTICS) — "finish reading", лише для переходу в
+      // "прочитано" (не для кожної зміни статусу — ТЗ прямо застерігає проти haptic на кожен тап).
+      if (variables.status === 'finished') {
+        triggerLightHapticFeedback();
+      }
     },
     onError,
   });
@@ -79,7 +85,14 @@ export function useToggleFavorite() {
       const db = await getDatabase();
       await UserBookRepository.setFavorite(db, id, isFavorite);
     },
-    onSuccess: invalidate,
+    onSuccess: (_data, variables) => {
+      invalidate();
+      // ТЗ Фази 19 (DESIGN SYSTEM EXTENSION, §HAPTICS) — "favorite", лише коли позначка
+      // ВСТАНОВЛЮЄТЬСЯ (не при знятті — той самий дух "не на кожен тап").
+      if (variables.isFavorite) {
+        triggerLightHapticFeedback();
+      }
+    },
     onError,
   });
 }

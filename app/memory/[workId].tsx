@@ -9,6 +9,7 @@ import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ChipSelect } from '@/components/ui/ChipSelect';
+import { MemorySection } from '@/components/ui/MemorySection';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { MemoryCardPreview } from '@/components/memory/MemoryCardPreview';
 import { JournalTimeline } from '@/components/memory/JournalTimeline';
@@ -105,17 +106,13 @@ function RevisitLaterSection({ userBookId }: { userBookId: string | undefined })
   if (!entries || entries.length === 0) return null;
 
   return (
-    <Card style={{ gap: theme.spacing.sm }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-        <Ionicons name="bookmark" size={18} color={theme.colors.accent} />
-        <AppText variant="heading">Повернутися до цих думок</AppText>
-      </View>
+    <MemorySection icon="bookmark" title="Повернутися до цих думок">
       <View style={{ gap: theme.spacing.sm }}>
         {entries.map((entry) => (
           <RevisitLaterEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
         ))}
       </View>
-    </Card>
+    </MemorySection>
   );
 }
 
@@ -247,12 +244,7 @@ function BeforeAfterSection({
   const theme = useTheme();
 
   return (
-    <Card style={{ gap: theme.spacing.md }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-        <Ionicons name="swap-horizontal-outline" size={18} color={theme.colors.accent} />
-        <AppText variant="heading">До / Після</AppText>
-      </View>
-
+    <MemorySection icon="swap-horizontal-outline" title="До / Після" gap={theme.spacing.md}>
       <View style={{ gap: theme.spacing.xs }}>
         <AppText variant="caption" color="secondary" style={{ fontWeight: '600' }}>
           До читання
@@ -293,7 +285,7 @@ function BeforeAfterSection({
           </AppText>
         ) : null}
       </View>
-    </Card>
+    </MemorySection>
   );
 }
 

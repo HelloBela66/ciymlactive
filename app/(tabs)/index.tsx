@@ -8,6 +8,8 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { ReadingProgressBar } from '@/components/ui/ReadingProgressBar';
+import { SectionHeader } from '@/components/ui/SectionHeader';
+import { QuickAction } from '@/components/ui/QuickAction';
 import { useTheme } from '@/design/ThemeProvider';
 import { getTimeOfDayGreeting } from '@/lib/greeting';
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
@@ -158,20 +160,22 @@ function CurrentlyReadingList() {
 
   return (
     <View style={{ gap: theme.spacing.sm }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <AppText variant="heading">Зараз читаєш</AppText>
-        {hiddenCount > 0 ? (
-          <Pressable
-            onPress={() => router.push('/library')}
-            accessibilityRole="button"
-            accessibilityLabel={`Показати всі ${reading.length} книг у статусі "Зараз читаю"`}
-          >
-            <AppText variant="caption" color="accent">
-              Усі ({reading.length})
-            </AppText>
-          </Pressable>
-        ) : null}
-      </View>
+      <SectionHeader
+        title="Зараз читаєш"
+        trailing={
+          hiddenCount > 0 ? (
+            <Pressable
+              onPress={() => router.push('/library')}
+              accessibilityRole="button"
+              accessibilityLabel={`Показати всі ${reading.length} книг у статусі "Зараз читаю"`}
+            >
+              <AppText variant="caption" color="accent">
+                Усі ({reading.length})
+              </AppText>
+            </Pressable>
+          ) : null
+        }
+      />
       {visible.map((userBook) => {
         const info = continuity.data?.get(userBook.id);
         return (
@@ -249,29 +253,7 @@ function HomeShortcuts() {
   return (
     <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
       {HOME_SHORTCUTS.map((item) => (
-        <Pressable
-          key={item.label}
-          onPress={item.onPress}
-          accessibilityRole="button"
-          accessibilityLabel={item.label}
-          style={{ flex: 1, alignItems: 'center', gap: theme.spacing.xs, paddingVertical: theme.spacing.xs }}
-        >
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: theme.radius.pill,
-              backgroundColor: theme.colors.accentSoft,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name={item.icon} size={20} color={theme.colors.accent} />
-          </View>
-          <AppText variant="micro" color="secondary" style={{ textAlign: 'center' }}>
-            {item.label}
-          </AppText>
-        </Pressable>
+        <QuickAction key={item.label} variant="tile" icon={item.icon} label={item.label} onPress={item.onPress} />
       ))}
     </View>
   );
@@ -284,33 +266,15 @@ function HomeShortcuts() {
  * компактних shortcuts (`HomeShortcuts` вище): це рекомендаційна фіча, не навігаційний ярлик.
  */
 function TomorrowEntryPointCard() {
-  const theme = useTheme();
   return (
     // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом: маршрут
     // `app/tomorrow.tsx` реальний, лише локальний кеш typed routes відстає.
-    <Pressable onPress={() => router.push('/tomorrow' as unknown as Href)} accessibilityRole="button" accessibilityLabel="Що почитати завтра?">
-      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: theme.radius.pill,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="sparkles" size={20} color={theme.colors.accent} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <AppText variant="heading">Що почитати завтра?</AppText>
-          <AppText variant="caption" color="secondary">
-            Жанр, час і настрій — підберемо конкретну книгу
-          </AppText>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-      </Card>
-    </Pressable>
+    <QuickAction
+      icon="sparkles"
+      label="Що почитати завтра?"
+      description="Жанр, час і настрій — підберемо конкретну книгу"
+      onPress={() => router.push('/tomorrow' as unknown as Href)}
+    />
   );
 }
 
@@ -321,37 +285,15 @@ function TomorrowEntryPointCard() {
  * — там підбирається НОВА книга ззовні, тут — ОДНА книга з уже наявної бібліотеки користувача.
  */
 function OnePickerEntryPointCard() {
-  const theme = useTheme();
   return (
     // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом (`TomorrowEntryPointCard`
     // вище): маршрут `app/one-book-picker.tsx` реальний, лише локальний кеш typed routes відстає.
-    <Pressable
+    <QuickAction
+      icon="shuffle-outline"
+      label="Обери мені книгу"
+      description="Час, настрій, довжина — одна книга з твоєї полиці"
       onPress={() => router.push('/one-book-picker' as unknown as Href)}
-      accessibilityRole="button"
-      accessibilityLabel="Обери мені книгу"
-    >
-      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: theme.radius.pill,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="shuffle-outline" size={20} color={theme.colors.accent} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <AppText variant="heading">Обери мені книгу</AppText>
-          <AppText variant="caption" color="secondary">
-            Час, настрій, довжина — одна книга з твоєї полиці
-          </AppText>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-      </Card>
-    </Pressable>
+    />
   );
 }
 
@@ -361,33 +303,15 @@ function OnePickerEntryPointCard() {
  * користувача.
  */
 function TrendsEntryPointCard() {
-  const theme = useTheme();
   return (
     // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом: маршрут
     // `app/trends.tsx` реальний, лише локальний кеш typed routes відстає.
-    <Pressable onPress={() => router.push('/trends' as unknown as Href)} accessibilityRole="button" accessibilityLabel="Тренди">
-      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: theme.radius.pill,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="trending-up" size={20} color={theme.colors.accent} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <AppText variant="heading">Тренди</AppText>
-          <AppText variant="caption" color="secondary">
-            Топ-10 книг, які зараз найчастіше додають
-          </AppText>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-      </Card>
-    </Pressable>
+    <QuickAction
+      icon="trending-up"
+      label="Тренди"
+      description="Топ-10 книг, які зараз найчастіше додають"
+      onPress={() => router.push('/trends' as unknown as Href)}
+    />
   );
 }
 

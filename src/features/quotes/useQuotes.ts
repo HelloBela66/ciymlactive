@@ -5,6 +5,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { createLogger } from '@/lib/logger';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
 import { invalidateJournal } from '@/lib/journalInvalidation';
+import { triggerLightHapticFeedback } from '@/lib/haptics';
 import type { CreateQuoteInput, Quote } from '@/types/quote';
 
 const log = createLogger('features/quotes');
@@ -32,6 +33,8 @@ export function useCreateQuote() {
     onSuccess: (quote) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.quotes.byUserBook(quote.userBookId) });
       invalidateJournal(queryClient, quote.userBookId, quote.sessionId);
+      // ТЗ Фази 19 (DESIGN SYSTEM EXTENSION, §HAPTICS) — "save journal".
+      triggerLightHapticFeedback();
     },
     onError,
   });

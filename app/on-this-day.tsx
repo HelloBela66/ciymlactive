@@ -6,8 +6,9 @@ import { uk } from 'date-fns/locale';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
-import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { JournalPreview } from '@/components/ui/JournalPreview';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SectionHeader } from '@/components/ui/SectionHeader';
 import { useTheme } from '@/design/ThemeProvider';
 import { useOnThisDay } from '@/features/on-this-day/useOnThisDay';
 import { pluralizeUk } from '@/lib/pluralizeUk';
@@ -34,22 +35,8 @@ function MemoryCard({ memory }: { memory: OnThisDayMemory }) {
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
-      <Pressable
-        onPress={() => openBook(memory.workId)}
-        accessibilityRole="button"
-        accessibilityLabel={memory.bookTitle}
-        style={{ flexDirection: 'row', gap: theme.spacing.md }}
-      >
-        <CoverThumbnail
-          coverUrl={memory.coverUrl}
-          title={memory.bookTitle}
-          fallbackColor={memory.coverFallbackColor}
-          width={48}
-          height={70}
-          borderRadius={theme.radius.sm}
-        />
-        <View style={{ flex: 1, gap: theme.spacing.xs, justifyContent: 'center' }}>
-          <AppText variant="body">{memory.bookTitle}</AppText>
+      <Pressable onPress={() => openBook(memory.workId)} accessibilityRole="button" accessibilityLabel={memory.bookTitle}>
+        <JournalPreview title={memory.bookTitle} coverUrl={memory.coverUrl} coverFallbackColor={memory.coverFallbackColor}>
           {facts.length > 0 ? (
             <AppText variant="caption" color="secondary">
               {facts.join(' • ')}
@@ -65,7 +52,7 @@ function MemoryCard({ memory }: { memory: OnThisDayMemory }) {
               Ти завершив цю книгу{memory.ratingValue != null ? ` · ${memory.ratingValue}★` : ''}
             </AppText>
           ) : null}
-        </View>
+        </JournalPreview>
       </Pressable>
 
       {memory.journalEntries.length > 0 ? (
@@ -97,12 +84,15 @@ function YearSection({ group }: { group: OnThisDayYearGroup }) {
   const theme = useTheme();
   return (
     <View style={{ gap: theme.spacing.sm }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: theme.spacing.sm }}>
-        <AppText variant="heading">{group.year}</AppText>
-        <AppText variant="caption" color="tertiary">
-          {group.yearsAgo === 1 ? 'рік тому' : `${group.yearsAgo} ${pluralizeUk(group.yearsAgo, ['рік', 'роки', 'років'] as const)} тому`}
-        </AppText>
-      </View>
+      <SectionHeader
+        layout="inline"
+        title={String(group.year)}
+        trailing={
+          <AppText variant="caption" color="tertiary">
+            {group.yearsAgo === 1 ? 'рік тому' : `${group.yearsAgo} ${pluralizeUk(group.yearsAgo, ['рік', 'роки', 'років'] as const)} тому`}
+          </AppText>
+        }
+      />
       {group.memories.length > 1 ? (
         <AppText variant="caption" color="secondary">
           Цього дня ти читав {group.memories.length} {pluralizeUk(group.memories.length, BOOK_FORMS)}

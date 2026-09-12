@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { View, TextInput } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { BookHero } from '@/components/ui/BookHero';
+import { MemorySection } from '@/components/ui/MemorySection';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
@@ -152,23 +152,12 @@ export default function RecallScreen() {
           </AppText>
         ) : (
           <View style={{ gap: theme.spacing.lg }}>
-            <View style={{ alignItems: 'center', gap: theme.spacing.sm }}>
-              <CoverThumbnail
-                coverUrl={data.primaryEdition?.coverUrl}
-                title={data.work.title}
-                fallbackColor={data.work.coverFallbackColor}
-                width={96}
-                height={140}
-                borderRadius={theme.radius.md}
-              />
-              <AppText variant="title" style={{ textAlign: 'center' }}>
-                {data.work.title}
-              </AppText>
-              {authorNames ? (
-                <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
-                  {authorNames}
-                </AppText>
-              ) : null}
+            <BookHero
+              title={data.work.title}
+              authors={authorNames}
+              coverUrl={data.primaryEdition?.coverUrl}
+              coverFallbackColor={data.work.coverFallbackColor}
+            >
               {finishedAtIso ? (
                 <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
                   Ти прочитав цю книгу {formatTimeSinceFinished(finishedAtIso, new Date())}.
@@ -179,7 +168,7 @@ export default function RecallScreen() {
                   Тоді ти оцінив її на {rating.value}.
                 </AppText>
               ) : null}
-            </View>
+            </BookHero>
 
             {!revealed ? (
               <Card style={{ gap: theme.spacing.sm }}>
@@ -270,39 +259,27 @@ export default function RecallScreen() {
                 ) : null}
 
                 {favoriteMoments.length > 0 ? (
-                  <Card style={{ gap: theme.spacing.sm }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-                      <Ionicons name="heart" size={16} color={theme.colors.accent} />
-                      <AppText variant="heading">Улюблені моменти</AppText>
-                    </View>
+                  <MemorySection icon="heart" iconSize={16} title="Улюблені моменти">
                     {favoriteMoments.map((entry) => (
                       <RecallEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
                     ))}
-                  </Card>
+                  </MemorySection>
                 ) : null}
 
                 {quotes.length > 0 ? (
-                  <Card style={{ gap: theme.spacing.sm }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-                      <Ionicons name="chatbox-outline" size={16} color={theme.colors.accent} />
-                      <AppText variant="heading">Цитати</AppText>
-                    </View>
+                  <MemorySection icon="chatbox-outline" iconSize={16} title="Цитати">
                     {quotes.map((entry) => (
                       <RecallEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
                     ))}
-                  </Card>
+                  </MemorySection>
                 ) : null}
 
                 {thoughts.length > 0 ? (
-                  <Card style={{ gap: theme.spacing.sm }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-                      <Ionicons name="create-outline" size={16} color={theme.colors.accent} />
-                      <AppText variant="heading">Твої думки</AppText>
-                    </View>
+                  <MemorySection icon="create-outline" iconSize={16} title="Твої думки">
                     {thoughts.map((entry) => (
                       <RecallEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
                     ))}
-                  </Card>
+                  </MemorySection>
                 ) : null}
 
                 <Button
