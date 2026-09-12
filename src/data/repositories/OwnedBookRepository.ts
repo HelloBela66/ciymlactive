@@ -80,4 +80,22 @@ export const OwnedBookRepository = {
   async remove(db: SQLiteDatabase, id: string): Promise<void> {
     await db.runAsync(`UPDATE owned_book SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
   },
+
+  /**
+   * Пакетна перевірка "чи ця книга позначена фізично моєю" для БАГАТЬОХ видань одразу (ТЗ
+   * Фази 16, ONE BOOK PICKER — фільтр "тільки owned books", `src/lib/onePicker.ts`) — той
+   * самий `WHERE ... IN (${placeholders})` підхід, що й `SeriesRepository.listWorkIdsInSeries`/
+   * `GenreRepository.listByWorkIds`, замість `getByEditionId` у циклі на кожну книгу пікера.
+   * Повертає лише `Set` id видань — самі деталі володіння (стан/місце/ціна) пікеру не потрібні,
+   * фільтр лише перевіряє факт володіння.
+   */
+  async listOwnedEditionIds(db: SQLiteDatabase, editionIds: string[]): Promise<Set<string>> {
+    if (editionIds.length === 0) return new Set();
+    const placeholders = editionIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ edition_id: string }>(
+      `SELECT DISTINCT edition_id FROM owned_book WHERE edition_id IN (${placeholders}) AND deleted_at IS NULL`,
+      editionIds,
+    );
+    return new Set(rows.map((row) => row.edition_id));
+  },
 };

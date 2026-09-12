@@ -301,6 +301,47 @@ function TomorrowEntryPointCard() {
 }
 
 /**
+ * Вхід до «Обери мені книгу» (ТЗ Фази 16, ONE BOOK PICKER, `docs/ONE_BOOK_PICKER.md`) — той
+ * самий візуальний патерн, що й `TomorrowEntryPointCard` вище: завжди видима картка. Навмисно
+ * ОКРЕМА від «Що почитати завтра?» (ТЗ: "Не видаляй existing recommendation logic без причини")
+ * — там підбирається НОВА книга ззовні, тут — ОДНА книга з уже наявної бібліотеки користувача.
+ */
+function OnePickerEntryPointCard() {
+  const theme = useTheme();
+  return (
+    // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом (`TomorrowEntryPointCard`
+    // вище): маршрут `app/one-book-picker.tsx` реальний, лише локальний кеш typed routes відстає.
+    <Pressable
+      onPress={() => router.push('/one-book-picker' as unknown as Href)}
+      accessibilityRole="button"
+      accessibilityLabel="Обери мені книгу"
+    >
+      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: theme.radius.pill,
+            backgroundColor: theme.colors.accentSoft,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="shuffle-outline" size={20} color={theme.colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppText variant="heading">Обери мені книгу</AppText>
+          <AppText variant="caption" color="secondary">
+            Час, настрій, довжина — одна книга з твоєї полиці
+          </AppText>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+      </Card>
+    </Pressable>
+  );
+}
+
+/**
  * Вхід до «Трендів» (Milestone 11, доповнення) — той самий візуальний патерн, що й
  * `TomorrowEntryPointCard`/`JournalEntryPointCard` вище: завжди видима картка, незалежно від
  * стану бібліотеки користувача.
@@ -378,6 +419,7 @@ export default function HomeScreen() {
       <View style={{ marginTop: theme.spacing.xl, gap: theme.spacing.sm }}>
         <JournalEntryPointCard />
         <TomorrowEntryPointCard />
+        <OnePickerEntryPointCard />
         <TrendsEntryPointCard />
       </View>
 
