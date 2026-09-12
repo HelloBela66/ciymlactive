@@ -1,5 +1,34 @@
 # Changelog
 
+## POLYTSIA V1.6, Фаза 21 — Tests
+
+**Дата:** 2026-09-12
+
+Двадцять перша фаза V1.6 — аудит покриття тестами, не нова функціональність. Перевірено всі 13
+доменних областей ТЗ (On This Day matching; capsule due calculation; recall state; before/after
+aggregation; reading experience timeline; stale reading detection; spoiler-safe filtering; DNF
+state; season boundaries; reading profile thresholds; reading fingerprint; Home contextual-card
+priority; one-book picker) і 4 критичні репозиторії (`UserBookRepository`,
+`ReadingProgressRepository`, `EditionRepository`, `RatingRepository`) — читанням повного вихідного
+файлу проти повного тестового, функція за функцією, гілка за гілкою. Більшість уже мали зразкове
+покриття (season/reading-profile/reading-fingerprint тестують кожен числовий поріг рівно на межі
+n-1/n).
+
+Знайдено 4 реальні пропуски, кожен — окрема невправлена гілка чи функція, не "теоретично можна
+глибше":
+
+- `onThisDay.ts#buildOnThisDaySummary` — гілка-фолбек `priority = 5` (спогад лише з нефаворитної
+  нотатки/цитати, без finished/session/started) ніколи не спрацьовувала в тестах.
+- `dnfReason.ts#isDnfReasonId` — guard-функція без жодного тесту в усьому кодовому дереві; новий
+  `src/design/dnfReason.test.ts`.
+- `homeContext.ts#findGoalNearCompletionCandidate` — захисна гілка `target <= 0` (запобігає
+  `Infinity`/`NaN`-перемозі в конкурсі за слот) без тесту.
+- `UserBookRepository.setSpoilerSafeEnabled` — на відміну від структурно ідентичного
+  `setFavorite`, не мав прямого тесту.
+
+Усе інше зі списку ТЗ (9 доменних файлів + 3 репозиторії) — покриття вже адекватне, без штучних
+доповнень заради "більше тестів".
+
 ## POLYTSIA V1.6, Фаза 20 — Database / Migrations
 
 **Дата:** 2026-09-12

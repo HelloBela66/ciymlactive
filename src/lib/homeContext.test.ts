@@ -132,6 +132,14 @@ describe('findGoalNearCompletionCandidate', () => {
     ];
     expect(findGoalNearCompletionCandidate(goals)?.goal.id).toBe('higher');
   });
+
+  it('захисно ігнорує target <= 0 (не дає йому "виграти" слот через Infinity)', () => {
+    const goals = [
+      goal({ id: 'zero-target' }, { current: 5, target: 0, isComplete: false }),
+      goal({ id: 'negative-target' }, { current: 5, target: -1, isComplete: false }),
+    ];
+    expect(findGoalNearCompletionCandidate(goals)).toBeNull();
+  });
 });
 
 const STALE_CANDIDATE: StaleReadingCandidate = {

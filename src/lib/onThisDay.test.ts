@@ -152,6 +152,26 @@ describe('buildOnThisDaySummary', () => {
     expect(fourth?.workId).toBe('work-a'); // started
   });
 
+  it('пріоритет 5 (найнижчий): лише нефаворитна нотатка/цитата, без finished/session/started', () => {
+    const summary = buildOnThisDaySummary(
+      [
+        makeEvent({
+          source: 'note',
+          occurredAt: '2025-09-11T10:00:00.000Z',
+          workId: 'work-only-note',
+          entryId: 'n-1',
+          entryKind: 'note',
+          entryType: 'general',
+          entryText: 'Просто нотатка без жодного іншого сигналу',
+          isFavorite: false,
+        }),
+      ],
+      new Map(),
+      REFERENCE,
+    );
+    expect(summary.groups[0]?.memories[0]?.priority).toBe(5);
+  });
+
   it('оцінка приєднується лише до завершеної книги (finished === true)', () => {
     const ratings = new Map([['ub-1', 4.5]]);
     const summary = buildOnThisDaySummary(

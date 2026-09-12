@@ -217,6 +217,20 @@ describe('UserBookRepository.updateCurrentPage / setFavorite', () => {
     await UserBookRepository.setFavorite(db, created.id, false);
     expect((await UserBookRepository.getById(db, created.id))?.isFavorite).toBe(false);
   });
+
+  it('setSpoilerSafeEnabled: за замовчуванням true (DEFAULT 1), перемикається в обидва боки', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db);
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+
+    expect((await UserBookRepository.getById(db, created.id))?.spoilerSafeEnabled).toBe(true);
+
+    await UserBookRepository.setSpoilerSafeEnabled(db, created.id, false);
+    expect((await UserBookRepository.getById(db, created.id))?.spoilerSafeEnabled).toBe(false);
+
+    await UserBookRepository.setSpoilerSafeEnabled(db, created.id, true);
+    expect((await UserBookRepository.getById(db, created.id))?.spoilerSafeEnabled).toBe(true);
+  });
 });
 
 describe("UserBookRepository.remove — м'яке видалення", () => {
