@@ -1,5 +1,43 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 5 — прямі тести на транзакційну серцевину ReadingSession
+
+**Дата:** 2026-09-13
+
+`docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 31) назвав `ReadingSessionRepository` "найважливішою
+прогалиною покриття у всьому списку": `start`/`pause`/`resume`/`finish`/`discard` — методи,
+що самі себе називають "критичним core loop" (`ReadingSessionRepository.ts:54-59`) — до цієї
+фази не мали ЖОДНОГО прямого repository-тесту, лише опосередковане покриття через
+`listLastCompletedByUserBookIds` (Фаза 8) і `setReadingExperience` (Фаза 9).
+
+Лише тести — код репозиторію в цій фазі НЕ змінювався (жодної зміни продуктової поведінки).
+
+**Додано** (`src/data/repositories/ReadingSessionRepository.test.ts`, 23 нові тести —
+599 → 622):
+- `start` — створена сесія одразу видна через `getById`/`getActiveSession`, `goalMinutes` без
+  значення зберігається як `null`.
+- `getActiveSession` — коректність визначення "активної" сесії: немає жодної/всі завершені →
+  `null`; кілька незавершених одночасно → лишається найновіша, без корупції стану; `discard()`
+  найновішої коректно "повертає" активність попередній, а не ламає запит.
+- `pause`/`resume` — крайові випадки: повторний `pause` без `resume` не дублює інтервал,
+  `resume` без активної паузи — no-op, обидва — no-op на вже завершеній сесії чи неіснуючому id.
+- `finish` — атомарність транзакції (сесія + `user_book.current_page` + `reading_progress`
+  одним записом), ідемпотентність повторного виклику, `null` на неіснуючому id, і **відкат при
+  помилці всередині транзакції** (симуляція збою через `jest.spyOn` на
+  `ReadingProgressRepository.recordForSession` — підтверджено: жоден з трьох записів не
+  лишається застосованим).
+- Тривалість і паузи, включно з "background timestamps" (застосунок згорнуто й не розгорнуто до
+  `finish()`) — обчислення `durationSeconds` коректно враховує як закриту, так і ще відкриту на
+  момент завершення паузу.
+- Невалідна сторінка (`endPage: -5`) — задокументовано реальну (не змінену) поведінку: сама
+  сесія й `reading_progress` зберігають сире значення, лише `user_book.current_page` затиснуто
+  до 0 (`UserBookRepository.updateCurrentPage`).
+- `discard` — м'яке видалення прибирає сесію з `getById`/`getActiveSession`; безпечний no-op на
+  неіснуючому id.
+- Перечитування (`user_book.status = 'rereading'`) і м'яко видалена книга (`user_book.deleted_at`,
+  фізичний рядок не чіпається — на відміну від `ON DELETE CASCADE` при жорсткому видаленні) —
+  `ReadingSessionRepository` до жодного з цих станів не чутливий, `finish()` в обох проходить.
+
 ## POLYTSIA V1.6.1, Фаза 4 — ключ Google Books прибрано з клієнта (security-проксі)
 
 **Дата:** 2026-09-13

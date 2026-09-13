@@ -2,6 +2,8 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { migrateDbIfNeeded } from '@/data/db/migrationRunner';
 import { openTestDatabase } from '@/data/db/testDb';
 import { ReadingSessionRepository } from './ReadingSessionRepository';
+import { ReadingProgressRepository } from './ReadingProgressRepository';
+import { UserBookRepository } from './UserBookRepository';
 
 /**
  * Repository-інтеграційний тест для `ReadingSessionRepository.setReadingExperience` (ТЗ
@@ -9,6 +11,17 @@ import { ReadingSessionRepository } from './ReadingSessionRepository';
  * решта його методів досі покривались опосередковано (`ReadingContinuity.test.ts` — Фаза 8,
  * `finish()`/`pause()`/`resume()` — через фічеві хуки); той самий підхід (`openTestDatabase()`
  * + `migrateDbIfNeeded`, реальна SQLite), що й в усіх інших repository-тестах.
+ *
+ * POLYTSIA V1.6.1, Фаза 5 (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 31 — "найважливіша
+ * прогалина покриття у всьому списку"): нижче додано ПРЯМІ repository-тести на транзакційну
+ * серцевину `start`/`pause`/`resume`/`finish`/`discard`, яких до цієї фази не існувало
+ * взагалі (лише опосередковано, через `listLastCompletedByUserBookIds` і
+ * `setReadingExperience`). Мінімум сценаріїв — за ТЗ Фази 5: старт створює сесію, "активна"
+ * сесія лишається коректною навіть після кількох стартів/discard, крайові випадки
+ * pause/resume, атомарність `finish()` (сесія + `user_book.current_page` + `reading_progress`
+ * однією транзакцією), обчислення тривалості з урахуванням паузи (в т.ч. паузи, що застала
+ * застосунок згорнутим — "background timestamps"), відкат при помилці всередині транзакції,
+ * `discard()`, невалідна сторінка, перечитування, м'яко видалена книга.
  */
 
 async function openMigratedTestDb(): Promise<SQLiteDatabase> {
@@ -16,6 +29,387 @@ async function openMigratedTestDb(): Promise<SQLiteDatabase> {
   await migrateDbIfNeeded(db);
   return db;
 }
+
+/** Мінімальний work+edition+user_book для тестів сесій нижче — той самий патерн, що й
+ * `seedCompletedSession`/`seedThreeBooks` в сусідніх тестових файлах цього репозиторію. */
+async function seedUserBook(
+  db: SQLiteDatabase,
+  params: { id: string; status?: string; currentPage?: number },
+): Promise<void> {
+  const now = new Date().toISOString();
+  const workId = `work-${params.id}`;
+  const editionId = `edition-${params.id}`;
+  await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+    workId,
+    `Книга ${params.id}`,
+    now,
+    now,
+  ]);
+  await db.runAsync(
+    `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    [editionId, workId, `Книга ${params.id}`, 'uk', 'paperback', now, now],
+  );
+  await db.runAsync(
+    `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,?,?,?,?)`,
+    [params.id, editionId, params.status ?? 'reading', params.currentPage ?? 0, now, now],
+  );
+}
+
+/** Пряме читання сирого рядка `user_book`, БЕЗ фільтра `deleted_at IS NULL`, який має
+ * `UserBookRepository.getById` — потрібно для сценарію "м'яко видалена книга" нижче, де саме
+ * поведінка ПІСЛЯ `deleted_at` і є предметом перевірки. */
+async function getRawUserBookRow(
+  db: SQLiteDatabase,
+  id: string,
+): Promise<{ current_page: number; deleted_at: string | null } | null> {
+  return db.getFirstAsync<{ current_page: number; deleted_at: string | null }>(
+    `SELECT current_page, deleted_at FROM user_book WHERE id = ?`,
+    [id],
+  );
+}
+
+describe('ReadingSessionRepository.start (Фаза 5)', () => {
+  it('створює сесію з очікуваними полями, видиму одразу через getById/getActiveSession', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-start1' });
+
+    const created = await ReadingSessionRepository.start(db, { userBookId: 'ub-start1', startPage: 12 });
+
+    expect(created.userBookId).toBe('ub-start1');
+    expect(created.startPage).toBe(12);
+    expect(created.endedAt).toBeNull();
+    expect(created.endPage).toBeNull();
+    expect(created.durationSeconds).toBeNull();
+    expect(created.pausedIntervals).toEqual([]);
+    expect(created.goalMinutes).toBeNull();
+
+    const fetched = await ReadingSessionRepository.getById(db, created.id);
+    expect(fetched).toMatchObject({ userBookId: 'ub-start1', startPage: 12, endedAt: null });
+
+    const active = await ReadingSessionRepository.getActiveSession(db);
+    expect(active?.id).toBe(created.id);
+  });
+
+  it('goalMinutes не передано — зберігається null, а не 0/undefined', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-start2' });
+
+    const created = await ReadingSessionRepository.start(db, { userBookId: 'ub-start2', startPage: 0 });
+    expect(created.goalMinutes).toBeNull();
+
+    const fetched = await ReadingSessionRepository.getById(db, created.id);
+    expect(fetched?.goalMinutes).toBeNull();
+  });
+});
+
+describe('ReadingSessionRepository.getActiveSession — коректність "активної" сесії (Фаза 5)', () => {
+  it('немає жодної сесії — null, без помилки', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-active0' });
+    expect(await ReadingSessionRepository.getActiveSession(db)).toBeNull();
+  });
+
+  it('всі сесії завершені — null (активної немає)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-active1' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-active1', startPage: 0 });
+    await ReadingSessionRepository.finish(db, s.id, { endPage: 10 });
+
+    expect(await ReadingSessionRepository.getActiveSession(db)).toBeNull();
+  });
+
+  it('стартувало кілька незавершених сесій — активною лишається найновіша, без корупції стану', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-active2a' });
+    await seedUserBook(db, { id: 'ub-active2b' });
+
+    const first = await ReadingSessionRepository.start(db, { userBookId: 'ub-active2a', startPage: 0 });
+    const second = await ReadingSessionRepository.start(db, { userBookId: 'ub-active2b', startPage: 0 });
+
+    const active = await ReadingSessionRepository.getActiveSession(db);
+    expect(active?.id).toBe(second.id);
+    expect(active?.id).not.toBe(first.id);
+  });
+
+  it('discard найновішої незавершеної сесії — активною коректно стає попередня, а не null/помилка', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-active3a' });
+    await seedUserBook(db, { id: 'ub-active3b' });
+
+    const first = await ReadingSessionRepository.start(db, { userBookId: 'ub-active3a', startPage: 0 });
+    const second = await ReadingSessionRepository.start(db, { userBookId: 'ub-active3b', startPage: 0 });
+
+    await ReadingSessionRepository.discard(db, second.id);
+
+    const active = await ReadingSessionRepository.getActiveSession(db);
+    expect(active?.id).toBe(first.id);
+  });
+});
+
+describe('ReadingSessionRepository.pause / resume — крайові випадки (Фаза 5)', () => {
+  it('pause додає один відкритий інтервал (resumedAt: null)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-pr1' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-pr1', startPage: 0 });
+
+    await ReadingSessionRepository.pause(db, s.id);
+
+    const fetched = await ReadingSessionRepository.getById(db, s.id);
+    expect(fetched?.pausedIntervals).toHaveLength(1);
+    expect(fetched?.pausedIntervals[0]?.resumedAt).toBeNull();
+  });
+
+  it('повторний pause без проміжного resume — no-op, інтервал не дублюється', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-pr2' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-pr2', startPage: 0 });
+
+    await ReadingSessionRepository.pause(db, s.id);
+    await ReadingSessionRepository.pause(db, s.id);
+    await ReadingSessionRepository.pause(db, s.id);
+
+    const fetched = await ReadingSessionRepository.getById(db, s.id);
+    expect(fetched?.pausedIntervals).toHaveLength(1);
+  });
+
+  it('resume закриває останній відкритий інтервал (resumedAt проставляється)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-pr3' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-pr3', startPage: 0 });
+
+    await ReadingSessionRepository.pause(db, s.id);
+    await ReadingSessionRepository.resume(db, s.id);
+
+    const fetched = await ReadingSessionRepository.getById(db, s.id);
+    expect(fetched?.pausedIntervals).toHaveLength(1);
+    expect(fetched?.pausedIntervals[0]?.resumedAt).not.toBeNull();
+  });
+
+  it('resume без активної паузи — no-op, інтервали не змінюються', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-pr4' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-pr4', startPage: 0 });
+
+    await ReadingSessionRepository.resume(db, s.id); // ще жодної паузи не було
+
+    const fetched = await ReadingSessionRepository.getById(db, s.id);
+    expect(fetched?.pausedIntervals).toEqual([]);
+  });
+
+  it('pause і resume на вже завершеній сесії — no-op, стан сесії не змінюється', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-pr5' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-pr5', startPage: 0 });
+    await ReadingSessionRepository.finish(db, s.id, { endPage: 20 });
+
+    await ReadingSessionRepository.pause(db, s.id);
+    await ReadingSessionRepository.resume(db, s.id);
+
+    const fetched = await ReadingSessionRepository.getById(db, s.id);
+    expect(fetched?.pausedIntervals).toEqual([]);
+    expect(fetched?.endedAt).not.toBeNull();
+  });
+
+  it('pause і resume на неіснуючому id — безпечно повертаються, без помилки', async () => {
+    const db = await openMigratedTestDb();
+    await expect(ReadingSessionRepository.pause(db, 'no-such-session')).resolves.toBeUndefined();
+    await expect(ReadingSessionRepository.resume(db, 'no-such-session')).resolves.toBeUndefined();
+  });
+});
+
+describe('ReadingSessionRepository.finish — атомарний запис (Фаза 5)', () => {
+  it('однією транзакцією оновлює сесію, user_book.current_page і додає reading_progress', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-fin1', currentPage: 5 });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-fin1', startPage: 5 });
+
+    const result = await ReadingSessionRepository.finish(db, s.id, { endPage: 42, moodNote: 'чудовий розділ' });
+
+    expect(result?.endedAt).not.toBeNull();
+    expect(result?.endPage).toBe(42);
+    expect(result?.moodNote).toBe('чудовий розділ');
+
+    const userBook = await UserBookRepository.getById(db, 'ub-fin1');
+    expect(userBook?.currentPage).toBe(42);
+
+    const progress = await ReadingProgressRepository.listByUserBookId(db, 'ub-fin1');
+    expect(progress).toHaveLength(1);
+    expect(progress[0]).toMatchObject({ sessionId: s.id, page: 42, source: 'session' });
+  });
+
+  it('finish на вже завершеній сесії — ідемпотентно, без повторного запису прогресу', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-fin2' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-fin2', startPage: 0 });
+
+    await ReadingSessionRepository.finish(db, s.id, { endPage: 30 });
+    const second = await ReadingSessionRepository.finish(db, s.id, { endPage: 99 });
+
+    // Друга спроба нічого не змінює — повертає ту саму, вже завершену сесію (endPage 30, не 99).
+    expect(second?.endPage).toBe(30);
+
+    const userBook = await UserBookRepository.getById(db, 'ub-fin2');
+    expect(userBook?.currentPage).toBe(30);
+
+    const progress = await ReadingProgressRepository.listByUserBookId(db, 'ub-fin2');
+    expect(progress).toHaveLength(1);
+  });
+
+  it('finish на неіснуючому id — повертає null, нічого не падає', async () => {
+    const db = await openMigratedTestDb();
+    const result = await ReadingSessionRepository.finish(db, 'no-such-session', { endPage: 1 });
+    expect(result).toBeNull();
+  });
+
+  it('відкат при помилці всередині транзакції: жоден з трьох записів не застосовується', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-fin3', currentPage: 7 });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-fin3', startPage: 7 });
+
+    const spy = jest
+      .spyOn(ReadingProgressRepository, 'recordForSession')
+      .mockRejectedValueOnce(new Error('симуляція збою диска'));
+
+    await expect(ReadingSessionRepository.finish(db, s.id, { endPage: 55 })).rejects.toThrow(
+      'симуляція збою диска',
+    );
+    spy.mockRestore();
+
+    // Усі три мутації транзакції відкотились разом — сесія лишилась НЕзавершеною.
+    const fetched = await ReadingSessionRepository.getById(db, s.id);
+    expect(fetched?.endedAt).toBeNull();
+    expect(fetched?.endPage).toBeNull();
+
+    const userBook = await UserBookRepository.getById(db, 'ub-fin3');
+    expect(userBook?.currentPage).toBe(7); // не 55 — відкотилось разом із сесією.
+
+    const progress = await ReadingProgressRepository.listByUserBookId(db, 'ub-fin3');
+    expect(progress).toHaveLength(0);
+  });
+});
+
+describe('ReadingSessionRepository.finish — тривалість і паузи, включно з "background timestamps" (Фаза 5)', () => {
+  it('віднімає з тривалості паузу, що вже закрита на момент finish', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-dur1' });
+
+    const now = Date.now();
+    const startedAt = new Date(now - 10 * 60 * 1000).toISOString(); // сесія почалась 10 хв тому
+    const pausedAt = new Date(now - 5 * 60 * 1000).toISOString();
+    const resumedAt = new Date(now - 3 * 60 * 1000).toISOString(); // пауза тривала 2 хв
+
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page,
+         duration_seconds, is_edited, created_at, updated_at
+       ) VALUES (?,?,?,NULL,?,?,NULL,NULL,0,?,?)`,
+      ['session-dur1', 'ub-dur1', startedAt, JSON.stringify([{ pausedAt, resumedAt }]), 0, startedAt, startedAt],
+    );
+
+    const result = await ReadingSessionRepository.finish(db, 'session-dur1', { endPage: 40 });
+
+    // 10 хв загалом мінус 2 хв паузи = 8 хв = 480с; невеликий допуск на реальний час виконання тесту.
+    expect(result?.durationSeconds).toBeGreaterThanOrEqual(475);
+    expect(result?.durationSeconds).toBeLessThanOrEqual(485);
+  });
+
+  it('застосунок згорнуто й не розгорнуто до finish — відкриту паузу тихо закриває моментом ended_at', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-dur2' });
+
+    const now = Date.now();
+    const startedAt = new Date(now - 10 * 60 * 1000).toISOString();
+    const pausedAt = new Date(now - 3 * 60 * 1000).toISOString(); // пауза ще триває (resumedAt: null)
+
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page,
+         duration_seconds, is_edited, created_at, updated_at
+       ) VALUES (?,?,?,NULL,?,?,NULL,NULL,0,?,?)`,
+      ['session-dur2', 'ub-dur2', startedAt, JSON.stringify([{ pausedAt, resumedAt: null }]), 0, startedAt, startedAt],
+    );
+
+    const result = await ReadingSessionRepository.finish(db, 'session-dur2', { endPage: 40 });
+
+    // 10 хв загалом мінус ~3 хв відкритої паузи (закритої щойно самим finish) ≈ 7 хв = 420с.
+    expect(result?.durationSeconds).toBeGreaterThanOrEqual(415);
+    expect(result?.durationSeconds).toBeLessThanOrEqual(425);
+
+    const fetched = await ReadingSessionRepository.getById(db, 'session-dur2');
+    expect(fetched?.pausedIntervals[0]?.resumedAt).not.toBeNull(); // паузу закрито, не лишилась "висіти".
+  });
+});
+
+describe('ReadingSessionRepository.finish — невалідна сторінка (Фаза 5)', () => {
+  it('документує реальну поведінку: end_page сесії лишається сирим, а user_book.current_page затискається до 0', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-inv1', currentPage: 10 });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-inv1', startPage: 10 });
+
+    const result = await ReadingSessionRepository.finish(db, s.id, { endPage: -5 });
+
+    // Сама сесія й reading_progress зберігають те, що передали (жодного клампа тут немає).
+    expect(result?.endPage).toBe(-5);
+    const progress = await ReadingProgressRepository.listByUserBookId(db, 'ub-inv1');
+    expect(progress[0]?.page).toBe(-5);
+
+    // UserBookRepository.updateCurrentPage окремо захищає лише user_book.current_page (Math.max(0, ...)).
+    const userBook = await UserBookRepository.getById(db, 'ub-inv1');
+    expect(userBook?.currentPage).toBe(0);
+  });
+});
+
+describe('ReadingSessionRepository.discard (Фаза 5)', () => {
+  it('м\'яко видаляє сесію — зникає з getById і з getActiveSession', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc1' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc1', startPage: 0 });
+
+    await ReadingSessionRepository.discard(db, s.id);
+
+    expect(await ReadingSessionRepository.getById(db, s.id)).toBeNull();
+    expect(await ReadingSessionRepository.getActiveSession(db)).toBeNull();
+  });
+
+  it('discard на неіснуючому id — безпечно, без помилки', async () => {
+    const db = await openMigratedTestDb();
+    await expect(ReadingSessionRepository.discard(db, 'no-such-session')).resolves.toBeUndefined();
+  });
+});
+
+describe('ReadingSessionRepository — перечитування та м\'яко видалена книга (Фаза 5)', () => {
+  it('перечитування (user_book.status = "rereading") — репозиторій сесій до статусу байдужий', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-reread1', status: 'rereading', currentPage: 0 });
+
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-reread1', startPage: 0 });
+    const result = await ReadingSessionRepository.finish(db, s.id, { endPage: 25 });
+
+    expect(result?.endedAt).not.toBeNull();
+    const userBook = await UserBookRepository.getById(db, 'ub-reread1');
+    expect(userBook?.currentPage).toBe(25);
+    expect(userBook?.status).toBe('rereading');
+  });
+
+  it('книгу м\'яко видалено (user_book.deleted_at) посеред сесії — finish() усе одно проходить', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-del1', currentPage: 3 });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-del1', startPage: 3 });
+
+    await UserBookRepository.remove(db, 'ub-del1'); // м'яке видалення — рядок фізично лишається.
+
+    const result = await ReadingSessionRepository.finish(db, s.id, { endPage: 18 });
+    expect(result?.endedAt).not.toBeNull();
+
+    // UserBookRepository.getById фільтрує видалені книги — тож книга "зникла" для звичайних
+    // read-шляхів, але сирий рядок (і його current_page) фізично не зачеплений ON DELETE CASCADE
+    // (це саме м'яке видалення, не DELETE FROM user_book) — finish() його все одно оновлює.
+    expect(await UserBookRepository.getById(db, 'ub-del1')).toBeNull();
+    const raw = await getRawUserBookRow(db, 'ub-del1');
+    expect(raw?.deleted_at).not.toBeNull();
+    expect(raw?.current_page).toBe(18);
+  });
+});
 
 async function seedCompletedSession(db: SQLiteDatabase): Promise<void> {
   const now = new Date().toISOString();
