@@ -1,5 +1,32 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 25 (виправлення) — CI-знахідка: TS2769 у cover-upload/index.ts
+
+**Дата:** 2026-09-13
+
+Перший реальний прогін нового job `edge-functions` (CI run #80, одразу після коміту Фази 25) —
+саме та верифікація, яку неможливо було зробити локально (`docs/EDGE_FUNCTION_CI.md`, розділ "Не
+перевірено локально (сесійне обмеження)") — одразу впіймав справжню помилку типів: `deno check`
+падав на `supabase/functions/cover-upload/index.ts:185` (`TS2769: No overload matches this call`
+на виклику `fetch(..., { body })`).
+
+**Виправлено:**
+- `supabase/functions/cover-upload/index.ts` — сигнатура `readRequestBodyWithLimit` уточнена з
+  `Promise<Uint8Array | 'too_large'>` на `Promise<Uint8Array<ArrayBuffer> | 'too_large'>`. Корінь
+  проблеми: непараметризований `Uint8Array` (= `Uint8Array<ArrayBufferLike>`, тип, що теоретично
+  включає й `SharedArrayBuffer`) не збігається з жодним `BodyInit`-оверлоадом `fetch` у сучасних
+  DOM-типах. Обидва фактичні `return`-шляхи функції й без того завжди створюють `Uint8Array` над
+  справжнім (не спільним) `ArrayBuffer` (`new Uint8Array(await req.arrayBuffer())` і `new
+  Uint8Array(total)`) — це уточнення типу сигнатури під наявну поведінку, без жодної зміни
+  рантайм-логіки.
+- Корінь і виправлення підтверджено локально мінімальним репро через звичайний
+  `tsc --strict --lib dom --noEmit` (сам `deno` недоступний з мережі цієї сесії, `docs/
+  EDGE_FUNCTION_CI.md`): та сама помилка (`Uint8Array<ArrayBufferLike>` не підходить під
+  `BodyInit`) відтворюється без виправлення й зникає (exit 0) з ним.
+
+0 нових тестів (774 без змін) — Deno Edge Function-код, поза межами Jest/tsc/ESLint scope
+застосунку (`tsconfig.json`/`eslint.config.js` свідомо виключають `supabase/functions/**`).
+
 ## POLYTSIA V1.6.1, Фаза 25 — Edge Function CI + npm audit
 
 **Дата:** 2026-09-13

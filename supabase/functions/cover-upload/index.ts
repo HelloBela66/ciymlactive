@@ -93,7 +93,16 @@ function sniffImageType(bytes: Uint8Array): { mime: string; extension: string } 
 /** Читає тіло запиту з жорсткою межею байтів (не лише `Content-Length`) — той самий підхід, що
  * `isbndb-proxy/index.ts` `readBodyWithLimit`, тут — для вхідного запиту, а не відповіді
  * ISBNdb (симетричний ризик: клієнт міг би спробувати надіслати величезне тіло навмисно). */
-async function readRequestBodyWithLimit(req: Request, maxBytes: number): Promise<Uint8Array | 'too_large'> {
+// Повернення явно `Uint8Array<ArrayBuffer>` (не голий `Uint8Array`, тобто
+// `Uint8Array<ArrayBufferLike>`) — CI-знахідка (POLYTSIA V1.6.1, Фаза 25, перший реальний прогін
+// `deno check` на GitHub Actions, локально в цій сесії не відтворювано — `deno` недоступний з
+// мережі сесії, `docs/EDGE_FUNCTION_CI.md`): TS2769 на виклику `fetch(..., { body })` нижче,
+// бо звужений тип `Uint8Array<ArrayBufferLike>` (включає теоретичний `SharedArrayBuffer`) не
+// збігається з жодним `BodyInit`-оверлоадом `fetch`. Обидва фактичні шляхи повернення тут і так
+// завжди створюють `Uint8Array` над СПРАВЖНІМ (не спільним) `ArrayBuffer` (`new
+// Uint8Array(await req.arrayBuffer())` і `new Uint8Array(total)`) — це чисто уточнення типу
+// сигнатури функції під те, що вона й без того робить у рантаймі, жодної зміни поведінки.
+async function readRequestBodyWithLimit(req: Request, maxBytes: number): Promise<Uint8Array<ArrayBuffer> | 'too_large'> {
   const reader = req.body?.getReader();
   if (!reader) {
     const buffer = new Uint8Array(await req.arrayBuffer());
