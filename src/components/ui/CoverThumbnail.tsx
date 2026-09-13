@@ -23,6 +23,13 @@ interface CoverThumbnailProps {
    * "URL є, але картинка не завантажилась" (застаріле посилання на мініатюру провайдера,
    * мережева помилка тощо), а не лише "coverUrl порожній". */
   onLoadError?: () => void;
+  /** Календар 2.0 (Фаза 19, `docs/CALENDAR_2_0.md`) — для мініатюр значно менших за поріг
+   * `width >= 100` (клітинка дня в сітці місяця, ~20-40px), сам fallback-ініціал (варіант
+   * `'caption'`, 13px) фізично не влазить у плашку й переповнює її. За замовчуванням `false`
+   * (без зміни поведінки жодного з наявних викликів — Бібліотека/Пошук/Book Details/Полиці й
+   * так завжди ≥40px) — лише Календар передає `true`, показуючи саму кольорову плашку без
+   * літери на такому масштабі. */
+  hideFallbackLetter?: boolean;
 }
 
 /**
@@ -62,6 +69,7 @@ export function CoverThumbnail({
   borderRadius,
   style,
   onLoadError,
+  hideFallbackLetter,
 }: CoverThumbnailProps) {
   const theme = useTheme();
   const [hasError, setHasError] = useState(false);
@@ -121,9 +129,11 @@ export function CoverThumbnail({
       accessibilityElementsHidden
       importantForAccessibility="no"
     >
-      <AppText variant={width >= 100 ? 'display' : 'caption'} color="onAccent">
-        {title.trim().charAt(0).toUpperCase() || '?'}
-      </AppText>
+      {hideFallbackLetter ? null : (
+        <AppText variant={width >= 100 ? 'display' : 'caption'} color="onAccent">
+          {title.trim().charAt(0).toUpperCase() || '?'}
+        </AppText>
+      )}
     </View>
   );
 }

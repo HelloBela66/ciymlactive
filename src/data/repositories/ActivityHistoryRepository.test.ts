@@ -280,3 +280,79 @@ describe('ActivityHistoryRepository.listRecent — spoiler-safe фільтрац
     expect(ids).toContain('quote-behind');
   });
 });
+
+/**
+ * Календар 2.0 (Фаза 19, `docs/CALENDAR_2_0.md`) — `listBetween` перевикористовує той самий
+ * `ACTIVITY_UNION_SQL`/spoiler-safe фільтр, що вже перевірений вище для `listRecent`; ці тести
+ * зосереджені на тому, що дійсно відрізняється — межі діапазону `[startIso, endIso)` і порядок
+ * `ASC` (а не `DESC`).
+ */
+describe('ActivityHistoryRepository.listBetween', () => {
+  it('повертає лише події в межах [startIso, endIso), відсортовані найстаріша перша', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksAcrossAllEventTypes(db);
+
+    // [STARTED_1, FINISHED_1) — включає started_1/started_2/session_ended/note_created,
+    // виключає added_1/added_2 (раніше діапазону) і finished_1/rating/quote/shelf (на межі чи пізніше).
+    const events = await ActivityHistoryRepository.listBetween(db, STARTED_1, FINISHED_1);
+
+    expect(events.map((e) => e.type)).toEqual(['book_started', 'book_started', 'session_completed', 'journal_entry']);
+  });
+
+  it('верхня межа виключна: подія РІВНО в endIso не потрапляє', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksAcrossAllEventTypes(db);
+
+    const events = await ActivityHistoryRepository.listBetween(db, ADDED_1, FINISHED_1);
+    expect(events.some((e) => e.type === 'book_finished')).toBe(false);
+  });
+
+  it('нижня межа включна: подія РІВНО в startIso потрапляє', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksAcrossAllEventTypes(db);
+
+    const events = await ActivityHistoryRepository.listBetween(db, FINISHED_1, RATING_CREATED);
+    expect(events.some((e) => e.type === 'book_finished')).toBe(true);
+  });
+
+  it('поза діапазоном будь-якої активності — порожній масив', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksAcrossAllEventTypes(db);
+
+    const events = await ActivityHistoryRepository.listBetween(
+      db,
+      '2025-01-01T00:00:00.000Z',
+      '2025-02-01T00:00:00.000Z',
+    );
+    expect(events).toEqual([]);
+  });
+
+  it('та сама spoiler-safe фільтрація journal_entry/quote, що й listRecent', async () => {
+    const db = await openMigratedTestDb();
+    const T1 = '2026-02-01T10:00:00.000Z';
+    const T2 = '2026-02-02T10:00:00.000Z';
+    const T3 = '2026-02-03T10:00:00.000Z';
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, ['work-1', 'Книга', T1, T1]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at, page_count) VALUES (?,?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга', 'uk', 'paperback', T1, T1, 400],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, spoiler_safe_enabled, added_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['user_book-1', 'edition-1', 'reading', 50, 1, T1, T1],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, page, text, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+      ['note-ahead', 'user_book-1', 'thought', 300, 'Спойлер з кінця.', '[]', T2, T2],
+    );
+    await db.runAsync(
+      `INSERT INTO quote (id, user_book_id, edition_id, page, text, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['quote-behind', 'user_book-1', 'edition-1', 10, 'Цитата з початку.', T3, T3],
+    );
+
+    const events = await ActivityHistoryRepository.listBetween(db, T1, '2026-02-10T00:00:00.000Z');
+    const ids = events.map((e) => e.id);
+    expect(ids).not.toContain('note-ahead');
+    expect(ids).toContain('quote-behind');
+  });
+});

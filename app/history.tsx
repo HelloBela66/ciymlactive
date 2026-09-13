@@ -13,25 +13,10 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { useTheme } from '@/design/ThemeProvider';
 import { activityEventTypeLabels } from '@/design/i18n-labels';
+import { EVENT_ICON, eventDetail } from '@/design/activityEventDisplay';
 import { useActivityHistory } from '@/features/activity-history/useActivityHistory';
 import { groupActivityEventsByDate, type ActivityHistorySection } from '@/lib/activityHistory';
-import { formatDuration } from '@/lib/sessionTiming';
-import type { ActivityEvent, ActivityEventType } from '@/types/activityEvent';
-
-type IconName = React.ComponentProps<typeof Ionicons>['name'];
-
-/** Іконка на рядок події — той самий принцип, що й `CATEGORY_ICON` у `JournalTimeline.tsx`
- * (Фаза 10): форма іконки розрізняє тип, а не окремий колірний код. */
-const EVENT_ICON: Record<ActivityEventType, IconName> = {
-  session_completed: 'time-outline',
-  book_started: 'play-outline',
-  book_finished: 'checkmark-circle-outline',
-  book_added: 'add-circle-outline',
-  rating_added: 'star-outline',
-  journal_entry: 'create-outline',
-  quote: 'chatbox-outline',
-  shelf_addition: 'albums-outline',
-};
+import type { ActivityEvent } from '@/types/activityEvent';
 
 /** "Сьогодні"/"Вчора" для двох найновіших днів (як у більшості читацьких/соцмережевих
  * стрічок), інакше повна дата з роком лише коли рік не поточний — той самий принцип
@@ -48,29 +33,6 @@ function formatSectionTitle(date: Date, today: Date = new Date()): string {
 
   const pattern = date.getFullYear() === today.getFullYear() ? 'd MMMM' : 'd MMMM yyyy';
   return format(date, pattern, { locale: uk });
-}
-
-/** Другий рядок картки — деталі, що різняться за типом події (ТЗ: сесія/початок/фініш/
- * додавання/оцінка/запис/цитата/полиця). `null` — коли типу нема що додати понад назву книги
- * (`book_started`/`book_finished`/`book_added` самі по собі вже все кажуть). */
-function eventDetail(event: ActivityEvent): string | null {
-  switch (event.type) {
-    case 'session_completed':
-      return event.durationSeconds != null && event.durationSeconds > 0
-        ? formatDuration(event.durationSeconds * 1000)
-        : null;
-    case 'rating_added':
-      return event.ratingValue != null ? `${event.ratingValue.toFixed(1).replace(/\.0$/, '')} / 5` : null;
-    case 'journal_entry':
-    case 'quote':
-      return event.entryText;
-    case 'shelf_addition':
-      return event.shelfName;
-    case 'book_started':
-    case 'book_finished':
-    case 'book_added':
-      return null;
-  }
 }
 
 function ActivityEventRow({ event }: { event: ActivityEvent }) {

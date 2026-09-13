@@ -313,3 +313,50 @@ describe('ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns', () => {
     expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual(['ub-multi5a']);
   });
 });
+
+/**
+ * Календар 2.0 (Фаза 19, `docs/CALENDAR_2_0.md`) — `listByIds` пакетно завантажує run'и для
+ * "run-aware day details": декілька сесій дня можуть належати різним `reading_run_id`, тож
+ * деталі дня запитують їх ОДНИМ IN-запитом замість по одному на сесію.
+ */
+describe('ReadingRunRepository.listByIds', () => {
+  it('порожній список id — порожня Map, без запиту', async () => {
+    const db = await openMigratedTestDb();
+    expect((await ReadingRunRepository.listByIds(db, [])).size).toBe(0);
+  });
+
+  it('повертає Map id → run лише для реально знайдених id', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-batch1');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-batch1' });
+
+    const result = await ReadingRunRepository.listByIds(db, [run.id, 'nonexistent-id']);
+
+    expect(result.size).toBe(1);
+    expect(result.get(run.id)).toMatchObject({ userBookId: 'ub-batch1', runNumber: 1 });
+    expect(result.has('nonexistent-id')).toBe(false);
+  });
+
+  it('м\'яко видалений run не потрапляє в результат', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-batch2');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-batch2' });
+    await ReadingRunRepository.discard(db, run.id);
+
+    const result = await ReadingRunRepository.listByIds(db, [run.id]);
+    expect(result.has(run.id)).toBe(false);
+  });
+
+  it('декілька run різних книг одним викликом', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-batch3a');
+    await seedUserBook(db, 'ub-batch3b');
+    const runA = await ReadingRunRepository.start(db, { userBookId: 'ub-batch3a' });
+    const runB = await ReadingRunRepository.start(db, { userBookId: 'ub-batch3b' });
+
+    const result = await ReadingRunRepository.listByIds(db, [runA.id, runB.id]);
+    expect(result.size).toBe(2);
+    expect(result.get(runA.id)?.userBookId).toBe('ub-batch3a');
+    expect(result.get(runB.id)?.userBookId).toBe('ub-batch3b');
+  });
+});

@@ -76,26 +76,15 @@ const SPOILER_CONTEXT_COLUMNS = `ub.status AS ub_status, ub.spoiler_safe_enabled
   ub.current_page AS ub_current_page, e.page_count AS edition_page_count`;
 
 /**
- * ТЗ Фази 12 (READING ACTIVITY HISTORY) — «Якщо timeline можна derived з існуючих timestamped
- * tables — використовуй derived model»: саме це тут і зроблено. Жодної нової таблиці, жодного
- * write-шляху — один SQL-запит, що об'єднує (UNION ALL) вісім джерел, кожне вже своєю власною
- * timestamped-колонкою (reading_session.ended_at, user_book.started_at/finished_at/added_at,
- * rating.created_at, note.created_at, quote.created_at, shelf_book.added_at), сортує спільно за
- * часом і повертає єдину, однорідну стрічку подій. Це read-only: тут немає жодного методу
- * запису — сама природа "похідної" моделі виключає write-шлях (кожна подія й так уже записана
- * своїм "рідним" репозиторієм).
+ * Восьмигіллевий `UNION ALL` (без `ORDER BY`/`LIMIT`/фільтра діапазону — ті додаються навколо
+ * ЦІЄЇ константи двома різними способами нижче, `listRecent`/`listBetween`) — єдине джерело
+ * правди для "усі вісім типів подій ТЗ", щоб два методи не тримали дві копії того самого SQL,
+ * які могли б розійтись (наприклад, якщо колись з'явиться дев'ятий тип події). Кожна гілка й
+ * так уже має власний `WHERE` (живість книги/soft-delete джерела) — обидва методи-обгортки
+ * додають ЛИШЕ те, що відрізняє їх: `ORDER BY`+`LIMIT` для стрічки, чи `WHERE occurred_at
+ * BETWEEN` для діапазону.
  */
-export const ActivityHistoryRepository = {
-  /** `limit` застосовується ПІСЛЯ спільного сортування за `occurred_at DESC` (не по
-   * `limit` на кожне з восьми джерел окремо) — інакше рідкісний тип події (наприклад,
-   * `rating_added`) міг би витіснити частину стрічки, хоча насправді найновіші події
-   * належать іншим типам. За замовчуванням 300 — з запасом на "нескінченний скрол" у
-   * майбутньому (ТЗ не вимагає пагінації для Фази 12: "Це read-only history", без згадки
-   * про підвантаження), і достатньо для будь-якої реалістичної активності одного користувача
-   * за розумний період перегляду. */
-  async listRecent(db: SQLiteDatabase, limit = 300): Promise<ActivityEvent[]> {
-    const rows = await db.getAllAsync<ActivityEventRow>(
-      `
+const ACTIVITY_UNION_SQL = `
       SELECT 'session_completed' AS type, rs.id AS id, rs.ended_at AS occurred_at, ${BOOK_COLUMNS},
              rs.duration_seconds AS duration_seconds, NULL AS rating_value, NULL AS entry_text, NULL AS shelf_name,
              NULL AS entry_page, ${SPOILER_CONTEXT_COLUMNS}
@@ -171,16 +160,55 @@ export const ActivityHistoryRepository = {
       JOIN user_book ub ON ub.id = sb.user_book_id
       ${BOOK_JOIN}
       WHERE ${BOOK_ALIVE}
+`;
 
-      ORDER BY occurred_at DESC
-      LIMIT ?
-      `,
+/**
+ * ТЗ Фази 12 (READING ACTIVITY HISTORY) — «Якщо timeline можна derived з існуючих timestamped
+ * tables — використовуй derived model»: саме це тут і зроблено. Жодної нової таблиці, жодного
+ * write-шляху — один SQL-запит, що об'єднує (UNION ALL) вісім джерел, кожне вже своєю власною
+ * timestamped-колонкою (reading_session.ended_at, user_book.started_at/finished_at/added_at,
+ * rating.created_at, note.created_at, quote.created_at, shelf_book.added_at), сортує спільно за
+ * часом і повертає єдину, однорідну стрічку подій. Це read-only: тут немає жодного методу
+ * запису — сама природа "похідної" моделі виключає write-шлях (кожна подія й так уже записана
+ * своїм "рідним" репозиторієм).
+ */
+export const ActivityHistoryRepository = {
+  /** `limit` застосовується ПІСЛЯ спільного сортування за `occurred_at DESC` (не по
+   * `limit` на кожне з восьми джерел окремо) — інакше рідкісний тип події (наприклад,
+   * `rating_added`) міг би витіснити частину стрічки, хоча насправді найновіші події
+   * належать іншим типам. За замовчуванням 300 — з запасом на "нескінченний скрол" у
+   * майбутньому (ТЗ не вимагає пагінації для Фази 12: "Це read-only history", без згадки
+   * про підвантаження), і достатньо для будь-якої реалістичної активності одного користувача
+   * за розумний період перегляду. */
+  async listRecent(db: SQLiteDatabase, limit = 300): Promise<ActivityEvent[]> {
+    const rows = await db.getAllAsync<ActivityEventRow>(
+      `SELECT * FROM (${ACTIVITY_UNION_SQL}) ORDER BY occurred_at DESC LIMIT ?`,
       [limit],
     );
     // ТЗ Фази 3 V1.6.1 — фільтр ПІСЛЯ спільного сортування/LIMIT (`limit` тут — "скільки
     // найновіших подій узагалі", не "скільки видимих" — той самий свідомий вибір, що й лічильник
     // на Book Details: приховані події й далі існують і стануть видимі пізніше, стрічка просто
     // трохи коротша за `limit`, доки читання не дожене приховані записи).
+    return rows.filter((row) => !isActivityRowSpoilerHidden(row)).map(mapRow);
+  },
+
+  /**
+   * Календар 2.0 (Фаза 19, `docs/CALENDAR_2_0.md`) — той самий 8-branch `UNION ALL`/spoiler-safe
+   * фільтр, що й `listRecent`, але замість `LIMIT` — фільтр за діапазоном `[startIso, endIso)`
+   * (та сама межова умова, що й `ReadingSessionRepository.listStartedBetween`). Одним запитом
+   * покриває ОБИДВІ потреби Календаря без N+1: місячна агрегація (підсумок місяця — скільки книг
+   * почато/закінчено/скільки нотаток-цитат) і деталі дня (нотатки/цитати/оцінки/полиці/старт-
+   * фініш книги того дня) — `session_completed` тут теж присутній, але деталі дня свідомо й далі
+   * читають сесії через `ReadingSessionRepository.listStartedBetween` (уже мала книжкові деталі
+   * через `UserBookRepository`, а не лише "назва книги" з `BOOK_COLUMNS`), тож для сесій ця подія
+   * просто ігнорується на виклику — дублювання джерела нешкідливе (той самий рядок, просто
+   * менше полів), а не додатковий запит.
+   */
+  async listBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ActivityEvent[]> {
+    const rows = await db.getAllAsync<ActivityEventRow>(
+      `SELECT * FROM (${ACTIVITY_UNION_SQL}) WHERE occurred_at >= ? AND occurred_at < ? ORDER BY occurred_at ASC`,
+      [startIso, endIso],
+    );
     return rows.filter((row) => !isActivityRowSpoilerHidden(row)).map(mapRow);
   },
 };

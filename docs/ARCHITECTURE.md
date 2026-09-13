@@ -200,6 +200,14 @@ ActiveSessionScreen
  └ QuickAddQuoteButton
 ```
 
+> **Календар — POLYTSIA V1.6.1, Фаза 19** (`docs/CALENDAR_2_0.md`, не плутати з "Фазою 19 V1.6"
+> нижче — інша нумерація, інший milestone-трек): `DayCell (indicator-крапка/книжка за
+> інтенсивністю)` із цього діаграми реалізовано буквально (обкладинка "головної" книги дня +
+> крапки інтенсивності 1-3). `DaySummarySheet` — свідомо НЕ реалізовано як bottom sheet: деталі
+> дня лишились окремим route-екраном (`app/day/[date].tsx`, як і до цієї фази), лише значно
+> змістовнішим за вмістом. Докладне обґрунтування — `docs/CALENDAR_2_0.md` §"Чому лишився route,
+> не sheet".
+
 Спільні низькорівневі компоненти (`src/components/ui`): `AppText`, `Button`, `Card`,
 `ChipSelect`, `CollapsibleSection`, `CoverThumbnail` (обкладинка з fallback-кольором),
 `EmptyState`, `LabeledInput`, `QueryErrorState`, `ReadingProgressBar`, `ScreenContainer`,

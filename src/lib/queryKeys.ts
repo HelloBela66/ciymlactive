@@ -172,6 +172,9 @@ export const queryKeys = {
   calendar: {
     month: (monthKey: string) => ['calendar', 'month', monthKey] as const,
     day: (dayKey: string) => ['calendar', 'day', dayKey] as const,
+    // Календар 2.0 (Фаза 19) — підсумок КАЛЕНДАРНОГО місяця (не сітки з паддінгом сусідніх
+    // місяців, на відміну від `month` вище) — окремий ключ, бо межі діапазону інші.
+    monthSummary: (monthKey: string) => ['calendar', 'monthSummary', monthKey] as const,
   },
   goals: {
     all: ['goals', 'all'] as const,

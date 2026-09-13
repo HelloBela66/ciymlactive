@@ -160,6 +160,26 @@ export const ReadingRunRepository = {
   },
 
   /**
+   * Пакетний вибір за списком id (Календар 2.0, Фаза 19, `docs/CALENDAR_2_0.md`) — "run-aware
+   * day details": `app/day/[date].tsx` показує позначку "Перечитування, прохід №N" на сесіях
+   * дня, коли `session.readingRunId` вказує на run із `runNumber > 1`. Той самий "один IN-запит
+   * замість N окремих" підхід, що й `UserBookRepository.listByIds` — днів із сесіями кількох
+   * різних `reading_run_id` мало, але навіть це лишається одним запитом, не N.
+   */
+  async listByIds(db: SQLiteDatabase, ids: string[]): Promise<Map<string, ReadingRun>> {
+    const result = new Map<string, ReadingRun>();
+    if (ids.length === 0) return result;
+
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await db.getAllAsync<ReadingRunRow>(
+      `SELECT * FROM reading_run WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+      ids,
+    );
+    for (const row of rows) result.set(row.id, mapRow(row));
+    return result;
+  },
+
+  /**
    * `userBookId` усіх книг, що мають ≥2 ЗАВЕРШЕНИХ (`status = 'finished'`) run — тобто книг, які
    * реально можна порівняти на `app/reread-comparison/[workId].tsx` (`selectComparableRuns`,
    * `useReadingRunsDetail.ts`, той самий поріг ≥2 `finished`). Фаза 16 (MEMORY HUB HIERARCHY,

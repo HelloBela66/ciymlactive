@@ -1,5 +1,49 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 19 — Calendar 2.0
+
+**Дата:** 2026-09-13
+
+Повний редизайн Календаря: `docs/ARCHITECTURE.md` (ще з Milestone 0) називав цільову форму
+(`DayCell` з обкладинкою за інтенсивністю, `DaySummarySheet`), якої відвантажений Milestone-4
+Календар недотягував — проста пілюля з числом і boolean-крапкою "була активність", деталі дня —
+плаский список сесій без книжкових деталей. Ця фаза добудовує задумане: обкладинка "головної"
+книги дня, індикатор інтенсивності (1-3 крапки), значно змістовніші деталі дня (підсумок/сесії/
+"журнальний" превʼю нотаток-цитат, уже spoiler-safe/старт-фініш книги/позначка перечитування),
+підсумок місяця, і без N+1 у жодному з нових запитів. Повне обґрунтування, включно з тим, чому
+деталі дня лишились route-екраном, а не bottom sheet — `docs/CALENDAR_2_0.md`.
+
+**Додано:**
+- `src/lib/calendarIntensity.ts` — чисті функції `selectPrimaryBookForDay` (правило "головної"
+  книги дня — найбільша сума хвилин, tie-break за часом старту) і `computeDayIntensity` (0-3
+  рівні за сумою хвилин дня).
+- `src/data/repositories/ActivityHistoryRepository.ts` — `listBetween(db, startIso, endIso)`:
+  той самий 8-branch `UNION ALL`/spoiler-safe фільтр, що й `listRecent`, обидва тепер загорнуті
+  навколо спільного `ACTIVITY_UNION_SQL`, лише замість `LIMIT` — фільтр діапазону. Одним
+  запитом покриває і підсумок місяця, і "решту семи типів подій" деталей дня.
+- `src/data/repositories/ReadingRunRepository.ts` — `listByIds` (пакетний `IN`-запит для
+  run-aware деталей дня).
+- `src/components/ui/CoverThumbnail.tsx` — новий необов'язковий проп `hideFallbackLetter`
+  (за замовчуванням `false`, не чіпає жоден наявний виклик) — для мініатюр Календаря, значно
+  менших за поріг, на якому fallback-ініціал ще влазить.
+- `src/features/calendar/useCalendarSessions.ts` — переписано: `useMonthCalendarData` (сітка
+  місяця, без N+1 — один пакетний запит книжкових деталей на всі унікальні "головні" книги
+  місяця), нове `useMonthSummary` (підсумок КАЛЕНДАРНОГО місяця), `useDaySessions` тепер без
+  N+1 (був `Promise.all(sessions.map(getByIdWithDetails))`, тепер один пакетний
+  `listWithDetailsByIds`) і повертає й "решту подій" дня, і run-номери сесій-перечитувань.
+- `src/design/activityEventDisplay.ts` — `EVENT_ICON`/`eventDetail` піднято сюди з
+  `app/history.tsx` (перевикористано Day Details, не задубльовано).
+- `app/(tabs)/calendar.tsx` — обкладинка головної книги дня + індикатор інтенсивності
+  (крапки), підсумок місяця під сіткою, `accessibilityLabel` з датою/інтенсивністю/назвою
+  книги на кожній клітинці, розмір обкладинки рахується від ширини екрана
+  (`useWindowDimensions`, адаптивно на вузьких екранах).
+- `app/day/[date].tsx` — підсумок дня, сесії з позначкою "Перечитування, прохід №N" (коли
+  застосовно), і нова секція "Інша активність" (початок/фініш книги, нотатки/цитати вже
+  spoiler-safe, оцінки, полиці).
+- `docs/CALENDAR_2_0.md` (нове), addendum у `docs/ARCHITECTURE.md`.
+- 20 нових тестів (751 → 771): 11 для `calendarIntensity.ts`, 5 для
+  `ActivityHistoryRepository.listBetween`, 4 для `ReadingRunRepository.listByIds`.
+
 ## POLYTSIA V1.6.1, Фаза 18 — Progressive onboarding
 
 **Дата:** 2026-09-13
