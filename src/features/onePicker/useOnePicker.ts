@@ -87,8 +87,14 @@ export function useOnePicker() {
       const filtered = filterCandidates(candidates, filters);
       if (filtered.length === 0) return null;
 
-      // Темп читання — той самий rolling pace (останні сесії, не lifetime-середнє), що й
-      // «Що почитати завтра?»/TBR reality check, з тим самим фолбеком, коли історії ще нема.
+      // Темп читання — СПРАВЖНІЙ rolling pace (лише останні `DEFAULT_WINDOW` (5) сесій,
+      // `computeRollingPace` без явного `windowSize`), той самий фолбек на нестачу історії, що
+      // й «Що почитати завтра?»/TBR reality check — АЛЕ НЕ той самий вибір вікна: обидві ті
+      // фічі свідомо передають `sessions.length` як `windowSize`, тобто рахують lifetime-
+      // середнє, а не rolling (аудит V1.6.1, §18 — CODE VERIFIED розбіжність, задокументована
+      // явно, а не мовчки лишена; `docs/NEXT_READ.md` §"Темп читання" Фази 14). Попередня версія
+      // цього коментаря хибно стверджувала "той самий rolling pace... що й Tomorrow/TBR" —
+      // виправлено тут, поведінка НЕ змінена жодною з трьох фіч.
       const pace = computeRollingPace(
         sessions.map((s) => ({
           startPage: s.startPage,

@@ -39,8 +39,11 @@ POLYTSIA V1.6, Фаза 16 (ONE BOOK PICKER). Той самий "фіксує р
   сесію звідти); secondary «Іншу» → повторний вибір, виключаючи вже показані книги цього сеансу
   (клієнтський `Set`, без нової таблиці — пул кандидатів тут маленький і локальний, на відміну
   від зовнішнього пошуку `tomorrowRecommendation.ts`, якому потрібна персистентна shown-history).
-- Home: новий `OnePickerEntryPointCard` (`app/(tabs)/index.tsx`) поруч із
-  `TomorrowEntryPointCard`, той самий візуальний патерн.
+- ~~Home: новий `OnePickerEntryPointCard` (`app/(tabs)/index.tsx`) поруч із
+  `TomorrowEntryPointCard`, той самий візуальний патерн.~~ — POLYTSIA V1.6.1, Фаза 14
+  (RECOMMENDATION CONSOLIDATION, `docs/NEXT_READ.md`): цей окремий вхід на Home видалено,
+  екран `app/one-book-picker.tsx` сам без змін, доступний тепер через `/next-read` (розділ
+  "З моєї полиці").
 
 ## Фільтри
 

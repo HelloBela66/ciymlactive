@@ -260,57 +260,24 @@ function HomeShortcuts() {
 }
 
 /**
- * Вхід до «Що почитати завтра?» (Milestone 11, доповнення, пряме прохання власника продукту)
- * — завжди видима картка, корисна незалежно від того, чи зараз щось читаєш (підбір НАСТУПНОЇ
- * книги). З Фази 18 (HOME REDESIGN) — під ТЗ-обов'язковими розділами Home, не серед чотирьох
- * компактних shortcuts (`HomeShortcuts` вище): це рекомендаційна фіча, не навігаційний ярлик.
+ * Вхід до «Що читати далі?» (`app/next-read.tsx`, POLYTSIA V1.6.1, Фаза 14 — RECOMMENDATION
+ * CONSOLIDATION, `docs/NEXT_READ.md`) — ОДНА завжди видима картка замість трьох, що стояли тут
+ * до цієї фази (`TomorrowEntryPointCard`/`OnePickerEntryPointCard`/`TrendsEntryPointCard`,
+ * видалені саме як КОМПОНЕНТИ Home — усі чотири екрани, на які вони вели, і весь їхній
+ * алгоритмічний код лишаються повністю незмінними, лише перегруповані на новому проміжному
+ * екрані). Той самий "рекомендаційна фіча, не навігаційний ярлик" аргумент, яким Фаза 18
+ * виправдала `variant="row"` (а не tile) для попередніх трьох карток, — тепер стосується цієї
+ * однієї.
  */
-function TomorrowEntryPointCard() {
+function NextReadEntryPointCard() {
   return (
     // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом: маршрут
-    // `app/tomorrow.tsx` реальний, лише локальний кеш typed routes відстає.
+    // `app/next-read.tsx` реальний, лише локальний кеш typed routes відстає.
     <QuickAction
-      icon="sparkles"
-      label="Що почитати завтра?"
-      description="Жанр, час і настрій — підберемо конкретну книгу"
-      onPress={() => router.push('/tomorrow' as unknown as Href)}
-    />
-  );
-}
-
-/**
- * Вхід до «Обери мені книгу» (ТЗ Фази 16, ONE BOOK PICKER, `docs/ONE_BOOK_PICKER.md`) — той
- * самий візуальний патерн, що й `TomorrowEntryPointCard` вище: завжди видима картка. Навмисно
- * ОКРЕМА від «Що почитати завтра?» (ТЗ: "Не видаляй existing recommendation logic без причини")
- * — там підбирається НОВА книга ззовні, тут — ОДНА книга з уже наявної бібліотеки користувача.
- */
-function OnePickerEntryPointCard() {
-  return (
-    // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом (`TomorrowEntryPointCard`
-    // вище): маршрут `app/one-book-picker.tsx` реальний, лише локальний кеш typed routes відстає.
-    <QuickAction
-      icon="shuffle-outline"
-      label="Обери мені книгу"
-      description="Час, настрій, довжина — одна книга з твоєї полиці"
-      onPress={() => router.push('/one-book-picker' as unknown as Href)}
-    />
-  );
-}
-
-/**
- * Вхід до «Трендів» (Milestone 11, доповнення) — той самий візуальний патерн, що й
- * `TomorrowEntryPointCard` вище: завжди видима картка, незалежно від стану бібліотеки
- * користувача.
- */
-function TrendsEntryPointCard() {
-  return (
-    // `as unknown as Href` — той самий, уже усталений у цьому файлі прийом: маршрут
-    // `app/trends.tsx` реальний, лише локальний кеш typed routes відстає.
-    <QuickAction
-      icon="trending-up"
-      label="Тренди"
-      description="Топ-10 книг, які зараз найчастіше додають"
-      onPress={() => router.push('/trends' as unknown as Href)}
+      icon="compass-outline"
+      label="Що читати далі?"
+      description="З твоєї полиці або щось нове — обери й отримай пропозицію"
+      onPress={() => router.push('/next-read' as unknown as Href)}
     />
   );
 }
@@ -363,15 +330,14 @@ export default function HomeScreen() {
         <HomeShortcuts />
       </View>
 
-      {/* Рекомендаційні входи поза чотирма ТЗ-шорткатами вище (Milestone 11/Фаза 16 —
-          «Що почитати завтра?»/«Обери мені книгу»/«Тренди») — навмисно ЗБЕРЕЖЕНІ (не входять у
-          заборону "Не роби великі cards" — вона стосується лише чотирьох названих у ТЗ пунктів),
-          лише переміщені під ТЗ-обов'язкові розділи, щоб Home не показував десять карток
-          одразу однаковою вагою (`docs/HOME_REDESIGN.md` §Чому рекомендаційні картки лишились). */}
-      <View style={{ marginTop: theme.spacing.xl, gap: theme.spacing.sm }}>
-        <TomorrowEntryPointCard />
-        <OnePickerEntryPointCard />
-        <TrendsEntryPointCard />
+      {/* Рекомендаційний вхід поза чотирма ТЗ-шорткатами вище (Milestone 11/Фаза 16 —
+          «Що почитати завтра?»/«Обери мені книгу»/«Тренди», Фаза 14 — TBR reality check) —
+          навмисно ЗБЕРЕЖЕНИЙ (не входить у заборону "Не роби великі cards" — вона стосується
+          лише чотирьох названих у ТЗ пунктів HOME SHORTCUTS вище), лише тепер ОДНА картка
+          замість трьох (Фаза 14 — RECOMMENDATION CONSOLIDATION, `docs/NEXT_READ.md`): усі
+          чотири рекомендаційні екрани лишаються доступні, згруповані на `/next-read`. */}
+      <View style={{ marginTop: theme.spacing.xl }}>
+        <NextReadEntryPointCard />
       </View>
 
       {showEmptyState ? (
