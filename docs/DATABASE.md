@@ -638,6 +638,9 @@ CREATE INDEX idx_quote_revisit_later ON quote(revisit_later);
 -- і друге прочитання БЕЗПОВОРОТНО перезаписувало оцінку першого). reading_run_id — СВІДОМО
 -- БЕЗ SQL REFERENCES (той самий задокументований урок), nullable — книга без жодного
 -- reading_run (Фаза 7 addToLibrary, свідомо не підключена) і далі має "книжкову" оцінку.
+-- deleted_at (POLYTSIA V1.6.1, Фаза 26, `027_soft_delete_readiness.ts`, `docs/SOFT_DELETE_READINESS.md`)
+-- — м'яке видалення: review — вільний, написаний користувачем текст, той самий принцип, що вже
+-- діє для user_book/note/quote/тощо. RatingRepository.remove тепер UPDATE, не DELETE.
 CREATE TABLE rating (
   id TEXT PRIMARY KEY,
   user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
@@ -645,7 +648,8 @@ CREATE TABLE rating (
   value REAL NOT NULL CHECK (value >= 0.5 AND value <= 5 AND (value * 2) = CAST(value * 2 AS INTEGER)),
   review TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
 
 CREATE INDEX idx_rating_user_book ON rating(user_book_id);
@@ -687,6 +691,8 @@ CREATE INDEX idx_pre_reading_reflection_user_book ON pre_reading_reflection(user
 -- із заготовлених шаблонів картки обрав користувач (Фаза 8 Milestone 11,
 -- `MemoryCardTemplateId`); БЕЗ CHECK — див. коментар у міграції 005. Саме зображення картки
 -- (PNG для шерингу/збереження) — Фаза 9, тут його ще немає.
+-- deleted_at (Фаза 26, `027_soft_delete_readiness.ts`) — м'яке видалення, revive-on-upsert через
+-- UNIQUE(reading_run_id) — докладніше `docs/SOFT_DELETE_READINESS.md` §"UNIQUE і revive on upsert".
 CREATE TABLE book_memory (
   id TEXT PRIMARY KEY,
   user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
@@ -695,7 +701,8 @@ CREATE TABLE book_memory (
   entry_refs TEXT NOT NULL DEFAULT '[]',
   template_id TEXT NOT NULL DEFAULT 'classic',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
 CREATE INDEX idx_book_memory_user_book ON book_memory(user_book_id);
 
@@ -730,7 +737,10 @@ CREATE TABLE book_capsule (
   notification_identifier TEXT,
   completed_at TEXT,                  -- знімок user_book.finished_at на момент створення капсули
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT                     -- Фаза 26, `027_soft_delete_readiness.ts` — побічний ефект:
+                                       -- capsule_recall ON DELETE CASCADE більше не спрацьовує
+                                       -- при remove(), `docs/SOFT_DELETE_READINESS.md`.
 );
 
 CREATE INDEX idx_book_capsule_user_book ON book_capsule(user_book_id);

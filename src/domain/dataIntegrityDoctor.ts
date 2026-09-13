@@ -93,6 +93,12 @@ export interface ReadingSessionSnapshotRow {
   endedAt: string | null;
   durationSeconds: number | null;
   pausedIntervals: string;
+  /** SOFT-DELETE READINESS / REREADING DATA DOCTOR (POLYTSIA V1.6.1, Фаза 26) — до якого
+   * `reading_run` належить ця сесія (`ReadingSessionRepository.start`, REREADING MODEL Фаза 7:
+   * нова сесія ЗАВЖДИ отримує run). `null` — легітимно лише для сесій, записаних ДО Фази 7
+   * (backfill `020_reading_run_backfill.ts` міг не знайти відповідного run для кожної старої
+   * сесії) — саме такі й ловить `session_without_run` нижче. */
+  readingRunId: string | null;
 }
 
 export interface ReadingProgressSnapshotRow {
@@ -138,6 +144,52 @@ export interface BookCapsuleSnapshotRow {
   id: string;
   userBookId: string;
   journalEntryId: string | null;
+  /** REREADING DATA DOCTOR (Фаза 26) — необов'язкове, за замовчуванням `null` нижче (та сама
+   * причина, що й у `DataIntegritySnapshot.bookCapsules?` — старі тестові фікстури Фази 4-5,
+   * написані ДО прив'язки капсул до run (Фаза 10), лишаються валідними без змін). */
+  readingRunId?: string | null;
+  /** Те саме — `undefined`/`null` трактується як "не видалено" нижче (капсула отримала
+   * `deleted_at` лише в Фазі 26, `027_soft_delete_readiness.ts`). */
+  deletedAt?: string | null;
+}
+
+/** REREADING DATA DOCTOR (POLYTSIA V1.6.1, Фаза 26) — той самий рівень деталізації, що й
+ * `BookCapsuleSnapshotRow` вище: `book_memory` не отримало соло-перевірки в жодній попередній
+ * фазі Data Doctor, лише тепер, разом із самим ReadingRun. */
+export interface BookMemorySnapshotRow {
+  id: string;
+  userBookId: string;
+  readingRunId: string | null;
+  deletedAt: string | null;
+}
+
+/** «До» (Фаза 9) і «Не дочитав»-знімок (Фаза 11) — обидва без `deleted_at` (лишаються жорстко
+ * видалюваними, Фаза 26 їх не чіпає, `docs/SOFT_DELETE_READINESS.md`), тож для обох досить
+ * самого посилання на run — рядок, що дійшов до знімку, за визначенням ще існує. */
+export interface PreReadingReflectionSnapshotRow {
+  id: string;
+  userBookId: string;
+  readingRunId: string | null;
+}
+
+export interface DnfReflectionSnapshotRow {
+  id: string;
+  userBookId: string;
+  readingRunId: string | null;
+}
+
+/** REREADING MODEL / DATA DOCTOR (POLYTSIA V1.6.1, Фаза 26) — `019_reading_run.ts`. Той самий
+ * рівень деталізації, що й `UserBookSnapshotRow` — лише колонки, реально потрібні перевіркам
+ * нижче (`status`/`startedAt`/`finishedAt`/`deletedAt` для узгодженості власного стану run, не
+ * `isLegacyBackfill`/`createdAt`/`updatedAt`, яких жодна перевірка не потребує). */
+export interface ReadingRunSnapshotRow {
+  id: string;
+  userBookId: string;
+  runNumber: number;
+  status: 'in_progress' | 'finished' | 'did_not_finish';
+  startedAt: string;
+  finishedAt: string | null;
+  deletedAt: string | null;
 }
 
 export interface DataIntegritySnapshot {
@@ -156,6 +208,13 @@ export interface DataIntegritySnapshot {
   // передавати; існуючі фікстури тестів Фази 5, написані ДО цієї фази, лишаються валідними
   // без змін, `bookCapsules` за замовчуванням трактується як порожній список нижче).
   bookCapsules?: BookCapsuleSnapshotRow[];
+  // REREADING DATA DOCTOR (POLYTSIA V1.6.1, Фаза 26) — усі чотири необов'язкові тим самим
+  // способом і з тією самою причиною, що й `bookCapsules` вище: фікстури репозиторних тестів
+  // цього самого файлу, написані до цієї фази, не зобов'язані знати про ReadingRun узагалі.
+  readingRuns?: ReadingRunSnapshotRow[];
+  bookMemories?: BookMemorySnapshotRow[];
+  preReadingReflections?: PreReadingReflectionSnapshotRow[];
+  dnfReflections?: DnfReflectionSnapshotRow[];
 }
 
 function isValidPausedIntervals(raw: string): boolean {
@@ -475,6 +534,171 @@ export function runDataIntegrityCheck(snapshot: DataIntegritySnapshot): DataInte
         code: 'capsule_orphan_journal_entry',
         message: `Капсула ${capsule.id} посилається на неіснуючий запис щоденника ${capsule.journalEntryId}.`,
         link: workLink(capsule.userBookId),
+      });
+    }
+  }
+
+  // ---- Прочитання (REREADING DATA DOCTOR — POLYTSIA V1.6.1, Фаза 26) ----
+  // Категорії свідомо НЕ нові ('books'/'sessions', ті самі 6, що ТЗ Фази 5 зафіксувало як
+  // вичерпний список) — той самий вибір, що й для капсул вище (Фаза 4): нова сутність
+  // інтегрується в наявну структуру звіту/UI (`app/data-doctor.tsx` ітерує фіксований
+  // `DATA_INTEGRITY_CATEGORIES` і мапить кожну на `DataIntegrityLink`, якого для "run" own
+  // немає) замість заводити нову категорію/тип посилання заради однієї фази.
+  const readingRuns = snapshot.readingRuns ?? [];
+  const liveRunById = new Map(readingRuns.filter((r) => !r.deletedAt).map((r) => [r.id, r]));
+  const runsByUserBook = new Map<string, ReadingRunSnapshotRow[]>();
+  for (const run of readingRuns) {
+    if (run.deletedAt) continue;
+    const list = runsByUserBook.get(run.userBookId) ?? [];
+    list.push(run);
+    runsByUserBook.set(run.userBookId, list);
+  }
+
+  // Сесія без прив'язки до жодного run — легітимно лише для сесій, записаних ДО REREADING
+  // MODEL Фаза 7 (докладніше — коментар над `ReadingSessionSnapshotRow.readingRunId`).
+  for (const session of snapshot.readingSessions) {
+    if (session.readingRunId !== null) continue;
+    issues.push({
+      category: 'sessions',
+      code: 'session_without_run',
+      message: `Сесія ${session.id} не прив'язана до жодного прочитання (reading run) — ймовірно, застарілий запис до Фази 6b/7.`,
+      link: { type: 'session', sessionId: session.id },
+    });
+  }
+
+  // Сесія посилається на run іншої книги — той самий клас перевірки, що вже є для note/quote
+  // проти сесії (`*_session_mismatch` вище), тепер симетрично для самого run.
+  for (const session of snapshot.readingSessions) {
+    if (!session.readingRunId) continue;
+    const run = liveRunById.get(session.readingRunId);
+    if (run && run.userBookId !== session.userBookId) {
+      issues.push({
+        category: 'sessions',
+        code: 'run_session_mismatch',
+        message: `Сесія ${session.id} посилається на прочитання (${session.readingRunId}) іншої книги.`,
+        link: { type: 'session', sessionId: session.id },
+      });
+    }
+  }
+
+  for (const [userBookId, runs] of runsByUserBook) {
+    const userBook = userBookById.get(userBookId);
+    if (userBook?.deletedAt) continue;
+
+    // Кілька одночасно "активних" (`in_progress`) run на одну книгу — `019_reading_run.ts`
+    // (п.4) свідомо НЕ забороняє це на рівні схеми (UNIQUE), "активний" визначається запитом
+    // (найновіший за run_number), а не констрейнтом — тож це можливий, хоч і аномальний, стан
+    // даних, а не гарантовано неможливий.
+    const activeRuns = runs.filter((r) => r.status === 'in_progress');
+    if (activeRuns.length > 1) {
+      issues.push({
+        category: 'books',
+        code: 'multiple_active_runs',
+        message: `Книга ${userBookId} має ${activeRuns.length} одночасно активних прочитань: ${activeRuns.map((r) => r.id).join(', ')}.`,
+        link: workLink(userBookId),
+      });
+    }
+
+    // Завершений run без finishedAt — той самий дисбаланс, що `finished_without_finished_at`
+    // перевіряє для user_book, тепер симетрично для самого run.
+    for (const run of runs) {
+      if ((run.status === 'finished' || run.status === 'did_not_finish') && !run.finishedAt) {
+        issues.push({
+          category: 'books',
+          code: 'run_finished_without_finished_at',
+          message: `Прочитання ${run.id} книги ${userBookId} має статус "${run.status}", але без дати завершення.`,
+          link: workLink(userBookId),
+        });
+      }
+    }
+
+    // Послідовність run_number має відповідати реальній хронології (started_at): пізніше
+    // прочитання не може розпочатись РАНІШЕ за попереднє — інакше номери й реальний порядок
+    // подій розходяться (typo в backfilled даті, ручне редагування заднім числом тощо).
+    const bySequence = [...runs].sort((a, b) => a.runNumber - b.runNumber);
+    for (let i = 1; i < bySequence.length; i += 1) {
+      const prev = bySequence[i - 1];
+      const next = bySequence[i];
+      if (prev && next && next.startedAt < prev.startedAt) {
+        issues.push({
+          category: 'books',
+          code: 'run_invalid_sequence',
+          message: `Книга ${userBookId}: прочитання №${next.runNumber} (${next.id}) розпочалось раніше за прочитання №${prev.runNumber} (${prev.id}).`,
+          link: workLink(userBookId),
+        });
+      }
+    }
+
+    // Застаріла суперечність (до реального "підключення" статусу книги до run, Фаза 7):
+    // найновіший run книги каже одне, `user_book.status` — протилежне.
+    const latestRun = bySequence[bySequence.length - 1];
+    if (userBook && latestRun) {
+      const bookIsReading = userBook.status === 'reading' || userBook.status === 'rereading';
+      const bookIsDone = userBook.status === 'finished' || userBook.status === 'did_not_finish';
+      if (latestRun.status === 'in_progress' && bookIsDone) {
+        issues.push({
+          category: 'books',
+          code: 'legacy_contradictory_status',
+          message: `Книга ${userBookId}: найновіше прочитання (${latestRun.id}) досі активне, але сама книга вже позначена як "${userBook.status}".`,
+          link: workLink(userBookId),
+        });
+      } else if ((latestRun.status === 'finished' || latestRun.status === 'did_not_finish') && bookIsReading) {
+        issues.push({
+          category: 'books',
+          code: 'legacy_contradictory_status',
+          message: `Книга ${userBookId}: найновіше прочитання (${latestRun.id}) уже завершене ("${latestRun.status}"), але книга досі позначена як "${userBook.status}".`,
+          link: workLink(userBookId),
+        });
+      }
+    }
+  }
+
+  // Капсула/спогад/знімок "До"/DNF-знімок, що посилається на НЕІСНУЮЧИЙ або м'яко видалений
+  // run — та сама перевірка (посилання на "невалідну" ціль), що вже є для видаленого user_book/
+  // edition/note-категорії, тепер поширена на ReadingRun. Пропускаємо, коли сама дитяча
+  // сутність уже м'яко видалена (capsule/memory) — той самий принцип, що й `if
+  // (userBook.deletedAt) continue;` на початку файлу: немає сенсу репортувати посилання
+  // видаленого запису.
+  for (const capsule of snapshot.bookCapsules ?? []) {
+    if (capsule.deletedAt) continue;
+    const readingRunId = capsule.readingRunId ?? null;
+    if (readingRunId && !liveRunById.has(readingRunId)) {
+      issues.push({
+        category: 'books',
+        code: 'capsule_references_invalid_run',
+        message: `Капсула ${capsule.id} посилається на неіснуюче або скасоване прочитання ${readingRunId}.`,
+        link: workLink(capsule.userBookId),
+      });
+    }
+  }
+  for (const memory of snapshot.bookMemories ?? []) {
+    if (memory.deletedAt) continue;
+    if (memory.readingRunId && !liveRunById.has(memory.readingRunId)) {
+      issues.push({
+        category: 'books',
+        code: 'memory_references_invalid_run',
+        message: `Спогад ${memory.id} посилається на неіснуюче або скасоване прочитання ${memory.readingRunId}.`,
+        link: workLink(memory.userBookId),
+      });
+    }
+  }
+  for (const reflection of snapshot.preReadingReflections ?? []) {
+    if (reflection.readingRunId && !liveRunById.has(reflection.readingRunId)) {
+      issues.push({
+        category: 'books',
+        code: 'pre_reading_reflection_references_invalid_run',
+        message: `Нотатка "До" ${reflection.id} посилається на неіснуюче або скасоване прочитання ${reflection.readingRunId}.`,
+        link: workLink(reflection.userBookId),
+      });
+    }
+  }
+  for (const reflection of snapshot.dnfReflections ?? []) {
+    if (reflection.readingRunId && !liveRunById.has(reflection.readingRunId)) {
+      issues.push({
+        category: 'books',
+        code: 'dnf_reflection_references_invalid_run',
+        message: `DNF-знімок ${reflection.id} посилається на неіснуюче або скасоване прочитання ${reflection.readingRunId}.`,
+        link: workLink(reflection.userBookId),
       });
     }
   }

@@ -5,6 +5,7 @@ import {
   type UserBookSnapshotRow,
   type EditionSnapshotRow,
   type ReadingSessionSnapshotRow,
+  type ReadingRunSnapshotRow,
 } from './dataIntegrityDoctor';
 
 function emptySnapshot(): DataIntegritySnapshot {
@@ -48,6 +49,12 @@ function session(overrides: Partial<ReadingSessionSnapshotRow> = {}): ReadingSes
     endedAt: '2026-08-01T10:30:00.000Z',
     durationSeconds: 1800,
     pausedIntervals: '[]',
+    // REREADING DATA DOCTOR (Фаза 26) — непорожній за замовчуванням (не `null`): решта тестів
+    // у цьому файлі (написаних ДО Фази 26) не мають викликати новий `session_without_run`
+    // просто через те, що не задають це поле явно. Значення навмисно НЕ відповідає жодному
+    // run у `readingRuns` більшості тестів — `run_session_mismatch` перевіряє лише коли run
+    // РЕАЛЬНО знайдений у знімку (`if (run && ...)`), тож "висячий" id тут безпечний no-op.
+    readingRunId: 'run1',
     ...overrides,
   };
 }
@@ -387,6 +394,171 @@ describe('runDataIntegrityCheck', () => {
       const snapshot = emptySnapshot();
       snapshot.userBooks = [userBook()];
       snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: null }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.hasIssues).toBe(false);
+    });
+  });
+
+  // REREADING DATA DOCTOR (POLYTSIA V1.6.1, Фаза 26, `docs/SOFT_DELETE_READINESS.md`).
+  describe('прочитання (ReadingRun)', () => {
+    function run(overrides: Partial<ReadingRunSnapshotRow> = {}): ReadingRunSnapshotRow {
+      return {
+        id: 'run1',
+        userBookId: 'ub1',
+        runNumber: 1,
+        status: 'finished' as const,
+        startedAt: '2026-08-01T00:00:00.000Z',
+        finishedAt: '2026-08-02T00:00:00.000Z',
+        deletedAt: null,
+        ...overrides,
+      };
+    }
+
+    it('повністю узгоджена книга з одним завершеним run — жодної проблеми', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'finished', finishedAt: '2026-08-02T00:00:00.000Z' })];
+      snapshot.readingRuns = [run()];
+      snapshot.readingSessions = [session({ readingRunId: 'run1' })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.hasIssues).toBe(false);
+    });
+
+    it('сесія без прив’язки до жодного run (readingRunId: null)', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.readingSessions = [session({ readingRunId: null })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.sessions.map((i) => i.code)).toContain('session_without_run');
+    });
+
+    it('сесія посилається на run ІНШОЇ книги (run/session mismatch)', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [
+        userBook({ id: 'ub1', status: 'finished', finishedAt: '2026-08-02T00:00:00.000Z' }),
+        userBook({ id: 'ub2', editionId: 'ed2' }),
+      ];
+      snapshot.readingRuns = [run({ id: 'run1', userBookId: 'ub1' })];
+      snapshot.readingSessions = [session({ userBookId: 'ub2', readingRunId: 'run1' })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.sessions.map((i) => i.code)).toContain('run_session_mismatch');
+    });
+
+    it('дві одночасно активні (in_progress) run для однієї книги', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'reading' })];
+      snapshot.readingRuns = [
+        run({ id: 'run1', runNumber: 1, status: 'in_progress', finishedAt: null }),
+        run({ id: 'run2', runNumber: 2, status: 'in_progress', finishedAt: null }),
+      ];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('multiple_active_runs');
+    });
+
+    it('одна активна run — жодної проблеми multiple_active_runs', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'reading' })];
+      snapshot.readingRuns = [run({ status: 'in_progress', finishedAt: null })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).not.toContain('multiple_active_runs');
+    });
+
+    it('м’яко скасовані (discard) run НЕ рахуються при пошуку дублікатів активних', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'reading' })];
+      snapshot.readingRuns = [
+        run({ id: 'run1', runNumber: 1, status: 'in_progress', finishedAt: null }),
+        run({ id: 'run2', runNumber: 2, status: 'in_progress', finishedAt: null, deletedAt: '2026-08-03T00:00:00.000Z' }),
+      ];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).not.toContain('multiple_active_runs');
+    });
+
+    it('run зі статусом finished/did_not_finish, але без finishedAt', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'did_not_finish' })];
+      snapshot.readingRuns = [run({ status: 'did_not_finish', finishedAt: null })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('run_finished_without_finished_at');
+    });
+
+    it('невалідна послідовність — пізніший run_number розпочався раніше за попередній', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'finished', finishedAt: '2026-08-11T00:00:00.000Z' })];
+      snapshot.readingRuns = [
+        run({ id: 'run1', runNumber: 1, startedAt: '2026-08-10T00:00:00.000Z', finishedAt: '2026-08-11T00:00:00.000Z' }),
+        run({ id: 'run2', runNumber: 2, startedAt: '2026-08-05T00:00:00.000Z', finishedAt: '2026-08-06T00:00:00.000Z' }),
+      ];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('run_invalid_sequence');
+    });
+
+    it('run_number зростає РАЗОМ із started_at — жодної проблеми послідовності', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'finished', finishedAt: '2026-08-11T00:00:00.000Z' })];
+      snapshot.readingRuns = [
+        run({ id: 'run1', runNumber: 1, startedAt: '2026-08-01T00:00:00.000Z', finishedAt: '2026-08-02T00:00:00.000Z' }),
+        run({ id: 'run2', runNumber: 2, startedAt: '2026-08-10T00:00:00.000Z', finishedAt: '2026-08-11T00:00:00.000Z' }),
+      ];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).not.toContain('run_invalid_sequence');
+    });
+
+    it('застаріла суперечність — найновіший run ще in_progress, але книга вже "фінішована"', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'finished', finishedAt: '2026-08-02T00:00:00.000Z' })];
+      snapshot.readingRuns = [run({ status: 'in_progress', finishedAt: null })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('legacy_contradictory_status');
+    });
+
+    it('застаріла суперечність — найновіший run уже завершений, але книга досі "читається"', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'reading' })];
+      snapshot.readingRuns = [run({ status: 'finished' })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('legacy_contradictory_status');
+    });
+
+    it('капсула/спогад/"До"/DNF-знімок посилаються на неіснуючий run', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: null, readingRunId: 'does-not-exist', deletedAt: null }];
+      snapshot.bookMemories = [{ id: 'mem1', userBookId: 'ub1', readingRunId: 'does-not-exist', deletedAt: null }];
+      snapshot.preReadingReflections = [{ id: 'pre1', userBookId: 'ub1', readingRunId: 'does-not-exist' }];
+      snapshot.dnfReflections = [{ id: 'dnf1', userBookId: 'ub1', readingRunId: 'does-not-exist' }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code).sort()).toEqual([
+        'capsule_references_invalid_run',
+        'dnf_reflection_references_invalid_run',
+        'memory_references_invalid_run',
+        'pre_reading_reflection_references_invalid_run',
+      ]);
+    });
+
+    it('капсула/спогад посилаються на М\'ЯКО ВИДАЛЕНИЙ (discard) run — теж "невалідний"', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.readingRuns = [run({ deletedAt: '2026-08-03T00:00:00.000Z' })];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: null, readingRunId: 'run1', deletedAt: null }];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('capsule_references_invalid_run');
+    });
+
+    it('М\'ЯКО ВИДАЛЕНА сама капсула — посилання на невалідний run НЕ репортується (сенсу нема, запис і так видалений)', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.bookCapsules = [
+        { id: 'cap1', userBookId: 'ub1', journalEntryId: null, readingRunId: 'does-not-exist', deletedAt: '2026-08-03T00:00:00.000Z' },
+      ];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).not.toContain('capsule_references_invalid_run');
+    });
+
+    it('капсула/спогад/"До"/DNF-знімок без readingRunId (книжковий фолбек, Фази 8-11) — жодної проблеми', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook()];
+      snapshot.bookCapsules = [{ id: 'cap1', userBookId: 'ub1', journalEntryId: null, readingRunId: null, deletedAt: null }];
+      snapshot.bookMemories = [{ id: 'mem1', userBookId: 'ub1', readingRunId: null, deletedAt: null }];
       const report = runDataIntegrityCheck(snapshot);
       expect(report.hasIssues).toBe(false);
     });

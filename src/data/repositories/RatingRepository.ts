@@ -12,6 +12,7 @@ interface RatingRow {
   review: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 function mapRow(row: RatingRow): Rating {
@@ -23,12 +24,17 @@ function mapRow(row: RatingRow): Rating {
     review: row.review,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at,
   };
 }
 
 /** Оцінка для конкретного run, якщо є; інакше (книга без жодного `reading_run` — той самий
  * фолбек, що й у Фазах 8-11) — "книжкова" оцінка без прив'язки до run (`reading_run_id IS
- * NULL`), той самий фолбек, що діяв для ВСІХ оцінок до Фази 12. */
+ * NULL`), той самий фолбек, що діяв для ВСІХ оцінок до Фази 12.
+ *
+ * СВІДОМО БЕЗ `deleted_at IS NULL` тут — SOFT-DELETE READINESS (Фаза 26), той самий підхід (і
+ * та сама причина: `reading_run_id UNIQUE` НЕЗАЛЕЖНО від `deleted_at`, `025_rating_run.ts`), що
+ * й `BookMemoryRepository.getForBookAndRun`. Публічний `getCurrent` нижче фільтрує сам. */
 async function getForBookAndRun(
   db: SQLiteDatabase,
   userBookId: string,
@@ -67,15 +73,19 @@ async function getForBookAndRun(
 export const RatingRepository = {
   /** Оцінка конкретного run напряму — Фаза 12, майбутнє порівняння історії. */
   async getByReadingRunId(db: SQLiteDatabase, readingRunId: string): Promise<Rating | null> {
-    const row = await db.getFirstAsync<RatingRow>(`SELECT * FROM rating WHERE reading_run_id = ?`, [readingRunId]);
+    const row = await db.getFirstAsync<RatingRow>(
+      `SELECT * FROM rating WHERE reading_run_id = ? AND deleted_at IS NULL`,
+      [readingRunId],
+    );
     return row ? mapRow(row) : null;
   },
 
   /** УСІ оцінки книги, за всіма її run, найновіша перша — Фаза 12, порівняння прочитань. */
   async listByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<Rating[]> {
-    const rows = await db.getAllAsync<RatingRow>(`SELECT * FROM rating WHERE user_book_id = ? ORDER BY created_at DESC`, [
-      userBookId,
-    ]);
+    const rows = await db.getAllAsync<RatingRow>(
+      `SELECT * FROM rating WHERE user_book_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`,
+      [userBookId],
+    );
     return rows.map(mapRow);
   },
 
@@ -96,7 +106,7 @@ export const RatingRepository = {
     if (userBookIds.length === 0) return result;
     const placeholders = userBookIds.map(() => '?').join(',');
     const rows = await db.getAllAsync<RatingRow>(
-      `SELECT * FROM rating WHERE user_book_id IN (${placeholders}) ORDER BY created_at DESC, rowid DESC`,
+      `SELECT * FROM rating WHERE user_book_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY created_at DESC, rowid DESC`,
       userBookIds,
     );
     // ORDER BY ... + "перший запис на userBookId перемагає" — той самий трюк, що дає
@@ -107,10 +117,13 @@ export const RatingRepository = {
     return result;
   },
 
-  /** Оцінка ПОТОЧНОГО (найновішого) run книги — те, що показує `RatingSection` на Book Details. */
+  /** Оцінка ПОТОЧНОГО (найновішого) run книги — те, що показує `RatingSection` на Book Details.
+   * Фільтрує `deletedAt` тут (не всередині `getForBookAndRun`) — той самий підхід, що й
+   * `BookMemoryRepository.getCurrent` (SOFT-DELETE READINESS, Фаза 26). */
   async getCurrent(db: SQLiteDatabase, userBookId: string): Promise<Rating | null> {
     const run = await ReadingRunRepository.getLatestByUserBookId(db, userBookId);
-    return getForBookAndRun(db, userBookId, run?.id ?? null);
+    const rating = await getForBookAndRun(db, userBookId, run?.id ?? null);
+    return rating && !rating.deletedAt ? rating : null;
   },
 
   async upsertCurrent(
@@ -121,16 +134,20 @@ export const RatingRepository = {
     const readingRunId = run?.id ?? null;
 
     const now = nowIso();
+    // Невідфільтроване (бачить і м'яко видалені) — SOFT-DELETE READINESS (Фаза 26), докладніше
+    // коментар над `getForBookAndRun`: `reading_run_id` лишається UNIQUE незалежно від
+    // `deleted_at`, тож повторний виклик після `remove` мусить ВІДРОДИТИ (UPDATE), а не спробувати
+    // INSERT у зайнятий UNIQUE-слот.
     const existing = await getForBookAndRun(db, params.userBookId, readingRunId);
 
     if (existing) {
-      await db.runAsync(`UPDATE rating SET value = ?, review = ?, updated_at = ? WHERE id = ?`, [
+      await db.runAsync(`UPDATE rating SET value = ?, review = ?, updated_at = ?, deleted_at = NULL WHERE id = ?`, [
         params.value,
         params.review ?? null,
         now,
         existing.id,
       ]);
-      return { ...existing, value: params.value, review: params.review ?? null, updatedAt: now };
+      return { ...existing, value: params.value, review: params.review ?? null, updatedAt: now, deletedAt: null };
     }
 
     const id = generateId();
@@ -146,10 +163,15 @@ export const RatingRepository = {
       review: params.review ?? null,
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
     };
   },
 
+  /** SOFT-DELETE READINESS (Фаза 26, `027_soft_delete_readiness.ts`) — м'яке видалення: рецензія
+   * (`review`, вільний текст) — так само незамінний написаний користувачем контент, як і
+   * капсула/спогад. Той самий "revive on upsert" підхід — див. коментар над
+   * `getForBookAndRun`/`upsertCurrent`. */
   async remove(db: SQLiteDatabase, id: string): Promise<void> {
-    await db.runAsync(`DELETE FROM rating WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE rating SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
   },
 };

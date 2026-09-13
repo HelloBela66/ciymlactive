@@ -231,6 +231,40 @@ describe('BookCapsuleRepository', () => {
     expect(await BookCapsuleRepository.getById(db, created.id)).toBeNull();
   });
 
+  it('SOFT-DELETE READINESS (Фаза 26) — remove лишає рядок фізично в базі (deleted_at, не DELETE); зникає лише з read-методів', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-1');
+    const created = await BookCapsuleRepository.create(db, {
+      userBookId: 'ub-1',
+      lastingThought: 'Незамінна думка',
+      oneSentenceMemory: null,
+      favoriteCharacterText: null,
+      favoriteLoreEntityId: null,
+      journalEntryKind: null,
+      journalEntryId: null,
+      reopenOption: 'none',
+      reopenAt: null,
+      notificationIdentifier: null,
+      completedAt: null,
+    });
+
+    await BookCapsuleRepository.remove(db, created.id);
+
+    // Зникає з усіх публічних read-методів...
+    expect(await BookCapsuleRepository.getById(db, created.id)).toBeNull();
+    expect(await BookCapsuleRepository.getByUserBookId(db, 'ub-1')).toBeNull();
+    expect(await BookCapsuleRepository.listByUserBookId(db, 'ub-1')).toHaveLength(0);
+    expect(await BookCapsuleRepository.listAll(db)).toHaveLength(0);
+
+    // ...але рядок і його контент фізично лишаються в базі з проставленим deleted_at.
+    const raw = await db.getFirstAsync<{ lasting_thought: string | null; deleted_at: string | null }>(
+      `SELECT lasting_thought, deleted_at FROM book_capsule WHERE id = ?`,
+      [created.id],
+    );
+    expect(raw?.lasting_thought).toBe('Незамінна думка');
+    expect(raw?.deleted_at).not.toBeNull();
+  });
+
   it('кілька книг — капсули різних userBookId не змішуються', async () => {
     const db = await openMigratedTestDb();
     await seedUserBook(db, 'ub-1');

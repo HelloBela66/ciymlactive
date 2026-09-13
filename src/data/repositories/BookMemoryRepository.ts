@@ -13,6 +13,7 @@ interface BookMemoryRow {
   template_id: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 const TEMPLATE_IDS: MemoryCardTemplateId[] = ['classic', 'quote', 'stats', 'minimal'];
@@ -50,12 +51,19 @@ function mapRow(row: BookMemoryRow): BookMemory {
     templateId: parseTemplateId(row.template_id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at,
   };
 }
 
 /** Спогад для конкретного run, якщо він є; інакше (книга без жодного `reading_run` — Фаза 7
  * `addToLibrary`, свідомо не підключена) — "книжковий" спогад без прив'язки до run
- * (`reading_run_id IS NULL`), той самий фолбек, що діяв для ВСІХ спогадів до Фази 8. */
+ * (`reading_run_id IS NULL`), той самий фолбек, що діяв для ВСІХ спогадів до Фази 8.
+ *
+ * СВІДОМО БЕЗ `deleted_at IS NULL` тут (на відміну від публічних read-методів нижче) —
+ * SOFT-DELETE READINESS (Фаза 26): `reading_run_id` лишається `UNIQUE` (`021_book_memory_run.ts`)
+ * НЕЗАЛЕЖНО від `deleted_at`, тож `upsertCurrent` мусить бачити навіть м'яко видалений рядок
+ * цього run, щоб UPDATE (відновлюючи його) замість INSERT, який інакше впав би на порушенні
+ * того самого UNIQUE. Публічний `getCurrent` нижче фільтрує результат сам, окремо. */
 async function getForBookAndRun(
   db: SQLiteDatabase,
   userBookId: string,
@@ -90,25 +98,30 @@ async function getForBookAndRun(
 export const BookMemoryRepository = {
   /** Спогад для конкретного run напряму — Фаза 8, майбутня історія спогадів (Фаза 12). */
   async getByReadingRunId(db: SQLiteDatabase, readingRunId: string): Promise<BookMemory | null> {
-    const row = await db.getFirstAsync<BookMemoryRow>(`SELECT * FROM book_memory WHERE reading_run_id = ?`, [
-      readingRunId,
-    ]);
+    const row = await db.getFirstAsync<BookMemoryRow>(
+      `SELECT * FROM book_memory WHERE reading_run_id = ? AND deleted_at IS NULL`,
+      [readingRunId],
+    );
     return row ? mapRow(row) : null;
   },
 
   /** УСІ спогади книги, за всіма її run — Фаза 8, майбутня історія спогадів (Фаза 12). */
   async listByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<BookMemory[]> {
     const rows = await db.getAllAsync<BookMemoryRow>(
-      `SELECT * FROM book_memory WHERE user_book_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM book_memory WHERE user_book_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`,
       [userBookId],
     );
     return rows.map(mapRow);
   },
 
-  /** Спогад "поточного" (найновішого) run книги — те, що показує UI сьогодні. */
+  /** Спогад "поточного" (найновішого) run книги — те, що показує UI сьогодні. Фільтрує
+   * `deletedAt` тут (а не всередині `getForBookAndRun`, який `upsertCurrent` теж використовує
+   * невідфільтровано — див. коментар над функцією) — видалений спогад поточного run має
+   * виглядати для UI як "спогаду ще немає", а не показувати стерті дані. */
   async getCurrent(db: SQLiteDatabase, userBookId: string): Promise<BookMemory | null> {
     const run = await ReadingRunRepository.getLatestByUserBookId(db, userBookId);
-    return getForBookAndRun(db, userBookId, run?.id ?? null);
+    const memory = await getForBookAndRun(db, userBookId, run?.id ?? null);
+    return memory && !memory.deletedAt ? memory : null;
   },
 
   async upsertCurrent(
@@ -125,11 +138,17 @@ export const BookMemoryRepository = {
 
     const now = nowIso();
     const entryRefsJson = JSON.stringify(params.entryRefs);
+    // Невідфільтроване (бачить і м'яко видалені рядки того самого run) — SOFT-DELETE READINESS
+    // (Фаза 26), докладніше коментар над `getForBookAndRun`.
     const existing = await getForBookAndRun(db, params.userBookId, readingRunId);
 
     if (existing) {
+      // `deleted_at = NULL` тут навіть коли `existing` НЕ був видалений — безпечний no-op у
+      // тому випадку, і саме те, що відроджує запис, якщо він був: новий контент для цього run
+      // означає, що спогад знову активний, а не тихо лишається похованим під UNIQUE-зайнятим
+      // слотом `reading_run_id`.
       await db.runAsync(
-        `UPDATE book_memory SET reflection = ?, entry_refs = ?, template_id = ?, updated_at = ? WHERE id = ?`,
+        `UPDATE book_memory SET reflection = ?, entry_refs = ?, template_id = ?, updated_at = ?, deleted_at = NULL WHERE id = ?`,
         [params.reflection, entryRefsJson, params.templateId, now, existing.id],
       );
       return {
@@ -138,6 +157,7 @@ export const BookMemoryRepository = {
         entryRefs: params.entryRefs,
         templateId: params.templateId,
         updatedAt: now,
+        deletedAt: null,
       };
     }
 
@@ -156,10 +176,15 @@ export const BookMemoryRepository = {
       templateId: params.templateId,
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
     };
   },
 
+  /** SOFT-DELETE READINESS (Фаза 26, `027_soft_delete_readiness.ts`) — м'яке видалення (не
+   * фізичне `DELETE`), той самий сенс і те саме обґрунтування, що й
+   * `BookCapsuleRepository.remove` (незамінний написаний текст). `reading_run_id` лишається
+   * зайнятим до наступного `upsertCurrent` для того самого run — див. коментар там. */
   async remove(db: SQLiteDatabase, id: string): Promise<void> {
-    await db.runAsync(`DELETE FROM book_memory WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE book_memory SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
   },
 };

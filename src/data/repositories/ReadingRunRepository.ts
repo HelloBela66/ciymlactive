@@ -13,6 +13,7 @@ interface ReadingRunRow {
   is_legacy_backfill: number;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 function mapRow(row: ReadingRunRow): ReadingRun {
@@ -26,6 +27,11 @@ function mapRow(row: ReadingRunRow): ReadingRun {
     isLegacyBackfill: row.is_legacy_backfill === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // SOFT-DELETE READINESS (Фаза 26) — усі публічні read-методи нижче фільтрують
+    // `deleted_at IS NULL`, тож для будь-якого рядка, що доходить сюди, це завжди `null`; поле
+    // проноситься все одно, щоб домен-тип чесно відповідав ТЗ (id+createdAt+updatedAt+deletedAt
+    // обов'язково), а не тому, що тут колись може прийти не-NULL значення.
+    deletedAt: row.deleted_at,
   };
 }
 
@@ -125,6 +131,7 @@ export const ReadingRunRepository = {
       isLegacyBackfill: false,
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
     };
   },
 

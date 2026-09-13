@@ -68,6 +68,12 @@ export interface BookCapsule {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** SOFT-DELETE READINESS (POLYTSIA V1.6.1, Фаза 26, `027_soft_delete_readiness.ts`) —
+   * `BookCapsuleRepository.remove` тепер м'яко видаляє (не `DELETE`) — незамінний написаний
+   * текст капсули більше не стирається безповоротно. `null` для будь-якого рядка, що доходить
+   * до звичайного UI (усі read-методи репозиторія фільтрують `deleted_at IS NULL`) — поле існує
+   * заради невідфільтрованих читань (`DataIntegrityRepository`). */
+  deletedAt: string | null;
 }
 
 /** Вхід створення — усе, крім службових id/дат (п.12 ТЗ, "приблизні fields"). */

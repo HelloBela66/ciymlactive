@@ -14,6 +14,10 @@ import {
   type ShelfBookSnapshotRow,
   type SeriesEntrySnapshotRow,
   type BookCapsuleSnapshotRow,
+  type ReadingRunSnapshotRow,
+  type BookMemorySnapshotRow,
+  type PreReadingReflectionSnapshotRow,
+  type DnfReflectionSnapshotRow,
 } from '@/domain/dataIntegrityDoctor';
 
 /**
@@ -80,6 +84,7 @@ interface ReadingSessionRow {
   ended_at: string | null;
   duration_seconds: number | null;
   paused_intervals: string;
+  reading_run_id: string | null;
 }
 function mapReadingSession(row: ReadingSessionRow): ReadingSessionSnapshotRow {
   return {
@@ -89,6 +94,7 @@ function mapReadingSession(row: ReadingSessionRow): ReadingSessionSnapshotRow {
     endedAt: row.ended_at,
     durationSeconds: row.duration_seconds,
     pausedIntervals: row.paused_intervals,
+    readingRunId: row.reading_run_id,
   };
 }
 
@@ -145,14 +151,72 @@ function mapSeriesEntry(row: SeriesEntryRow): SeriesEntrySnapshotRow {
   return { id: row.id, seriesId: row.series_id, workId: row.work_id };
 }
 
-/** POLYTSIA V1.6, Фаза 4 («Капсула книги»). */
+/** POLYTSIA V1.6, Фаза 4 («Капсула книги»); `reading_run_id`/`deleted_at` — Фаза 10/26. */
 interface BookCapsuleRow {
   id: string;
   user_book_id: string;
   journal_entry_id: string | null;
+  reading_run_id: string | null;
+  deleted_at: string | null;
 }
 function mapBookCapsule(row: BookCapsuleRow): BookCapsuleSnapshotRow {
-  return { id: row.id, userBookId: row.user_book_id, journalEntryId: row.journal_entry_id };
+  return {
+    id: row.id,
+    userBookId: row.user_book_id,
+    journalEntryId: row.journal_entry_id,
+    readingRunId: row.reading_run_id,
+    deletedAt: row.deleted_at,
+  };
+}
+
+/** REREADING DATA DOCTOR (POLYTSIA V1.6.1, Фаза 26). */
+interface ReadingRunRow {
+  id: string;
+  user_book_id: string;
+  run_number: number;
+  status: 'in_progress' | 'finished' | 'did_not_finish';
+  started_at: string;
+  finished_at: string | null;
+  deleted_at: string | null;
+}
+function mapReadingRun(row: ReadingRunRow): ReadingRunSnapshotRow {
+  return {
+    id: row.id,
+    userBookId: row.user_book_id,
+    runNumber: row.run_number,
+    status: row.status,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    deletedAt: row.deleted_at,
+  };
+}
+
+interface BookMemoryRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+  deleted_at: string | null;
+}
+function mapBookMemory(row: BookMemoryRow): BookMemorySnapshotRow {
+  return { id: row.id, userBookId: row.user_book_id, readingRunId: row.reading_run_id, deletedAt: row.deleted_at };
+}
+
+interface PreReadingReflectionRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+}
+function mapPreReadingReflection(row: PreReadingReflectionRow): PreReadingReflectionSnapshotRow {
+  return { id: row.id, userBookId: row.user_book_id, readingRunId: row.reading_run_id };
+}
+
+interface DnfReflectionRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+}
+function mapDnfReflection(row: DnfReflectionRow): DnfReflectionSnapshotRow {
+  return { id: row.id, userBookId: row.user_book_id, readingRunId: row.reading_run_id };
 }
 
 async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapshot> {
@@ -169,12 +233,16 @@ async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapsho
     seriesRows,
     seriesEntryRows,
     bookCapsuleRows,
+    readingRunRows,
+    bookMemoryRows,
+    preReadingReflectionRows,
+    dnfReflectionRows,
   ] = await Promise.all([
     db.getAllAsync<UserBookRow>('SELECT id, edition_id, status, started_at, finished_at, current_page, deleted_at FROM user_book'),
     db.getAllAsync<EditionRow>('SELECT id, work_id, isbn10, isbn13, page_count, deleted_at FROM edition'),
     db.getAllAsync<WorkRow>('SELECT id, deleted_at FROM work'),
     db.getAllAsync<ReadingSessionRow>(
-      'SELECT id, user_book_id, started_at, ended_at, duration_seconds, paused_intervals FROM reading_session',
+      'SELECT id, user_book_id, started_at, ended_at, duration_seconds, paused_intervals, reading_run_id FROM reading_session',
     ),
     db.getAllAsync<ReadingProgressRow>('SELECT id, user_book_id, page FROM reading_progress'),
     db.getAllAsync<NoteRow>('SELECT id, user_book_id, session_id, category_id FROM note'),
@@ -183,7 +251,13 @@ async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapsho
     db.getAllAsync<ShelfBookRow>('SELECT shelf_id, user_book_id FROM shelf_book'),
     db.getAllAsync<{ id: string }>('SELECT id FROM series'),
     db.getAllAsync<SeriesEntryRow>('SELECT id, series_id, work_id FROM series_entry'),
-    db.getAllAsync<BookCapsuleRow>('SELECT id, user_book_id, journal_entry_id FROM book_capsule'),
+    db.getAllAsync<BookCapsuleRow>('SELECT id, user_book_id, journal_entry_id, reading_run_id, deleted_at FROM book_capsule'),
+    db.getAllAsync<ReadingRunRow>(
+      'SELECT id, user_book_id, run_number, status, started_at, finished_at, deleted_at FROM reading_run',
+    ),
+    db.getAllAsync<BookMemoryRow>('SELECT id, user_book_id, reading_run_id, deleted_at FROM book_memory'),
+    db.getAllAsync<PreReadingReflectionRow>('SELECT id, user_book_id, reading_run_id FROM pre_reading_reflection'),
+    db.getAllAsync<DnfReflectionRow>('SELECT id, user_book_id, reading_run_id FROM dnf_reflection'),
   ]);
 
   return {
@@ -199,6 +273,10 @@ async function collectSnapshot(db: SQLiteDatabase): Promise<DataIntegritySnapsho
     seriesIds: seriesRows.map((row) => row.id),
     seriesEntries: seriesEntryRows.map(mapSeriesEntry),
     bookCapsules: bookCapsuleRows.map(mapBookCapsule),
+    readingRuns: readingRunRows.map(mapReadingRun),
+    bookMemories: bookMemoryRows.map(mapBookMemory),
+    preReadingReflections: preReadingReflectionRows.map(mapPreReadingReflection),
+    dnfReflections: dnfReflectionRows.map(mapDnfReflection),
   };
 }
 

@@ -26,6 +26,15 @@ export const ReadingRunSchema = z.object({
   isLegacyBackfill: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** SOFT-DELETE READINESS (POLYTSIA V1.6.1, Фаза 26) — DB-колонка `deleted_at` існувала з
+   * самого початку (`019_reading_run.ts`, `ReadingRunRepository.discard`), але цей домен-тип
+   * її досі не проносив далі рядка бази — код, якому потрібно було б знати, чи саме цей run
+   * скасовано (а не просто відфільтрований геть читанням), не мав такої можливості. Усі наявні
+   * публічні read-методи `ReadingRunRepository` й далі фільтрують `deleted_at IS NULL`, тож для
+   * них це поле завжди `null` — воно існує заради майбутніх невідфільтрованих читань
+   * (`DataIntegrityRepository`, майбутній sync) і заради самої гарантії ТЗ: ReadingRun
+   * обов'язково несе UUID + createdAt + updatedAt + deletedAt. */
+  deletedAt: z.string().nullable(),
 });
 
 export type ReadingRun = z.infer<typeof ReadingRunSchema>;

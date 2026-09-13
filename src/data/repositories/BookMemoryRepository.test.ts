@@ -184,4 +184,54 @@ describe('BookMemoryRepository.remove', () => {
     expect(await BookMemoryRepository.getCurrent(db, 'ub-6')).toBeNull();
     expect(await BookMemoryRepository.listByUserBookId(db, 'ub-6')).toHaveLength(0);
   });
+
+  it('SOFT-DELETE READINESS (Фаза 26) — remove лишає рядок фізично (deleted_at, не DELETE)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-7');
+    await ReadingRunRepository.start(db, { userBookId: 'ub-7' });
+    const memory = await BookMemoryRepository.upsertCurrent(db, {
+      userBookId: 'ub-7',
+      reflection: 'Незамінна рефлексія',
+      entryRefs: [],
+      templateId: 'classic',
+    });
+
+    await BookMemoryRepository.remove(db, memory.id);
+
+    const raw = await db.getFirstAsync<{ reflection: string | null; deleted_at: string | null }>(
+      `SELECT reflection, deleted_at FROM book_memory WHERE id = ?`,
+      [memory.id],
+    );
+    expect(raw?.reflection).toBe('Незамінна рефлексія');
+    expect(raw?.deleted_at).not.toBeNull();
+  });
+
+  it('SOFT-DELETE READINESS (Фаза 26) — upsertCurrent після remove ВІДРОДЖУЄ той самий рядок (reading_run_id лишається UNIQUE), а не падає/дублює', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-8');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-8' });
+    const memory = await BookMemoryRepository.upsertCurrent(db, {
+      userBookId: 'ub-8',
+      reflection: 'Перша версія',
+      entryRefs: [],
+      templateId: 'classic',
+    });
+    await BookMemoryRepository.remove(db, memory.id);
+    expect(await BookMemoryRepository.getCurrent(db, 'ub-8')).toBeNull();
+
+    const revived = await BookMemoryRepository.upsertCurrent(db, {
+      userBookId: 'ub-8',
+      reflection: 'Нова версія після видалення',
+      entryRefs: [],
+      templateId: 'quote',
+    });
+
+    // Той самий фізичний рядок (той самий id, UNIQUE(reading_run_id) не дозволив би другий),
+    // просто відроджений з новим вмістом.
+    expect(revived.id).toBe(memory.id);
+    expect(revived.deletedAt).toBeNull();
+    const current = await BookMemoryRepository.getCurrent(db, 'ub-8');
+    expect(current?.reflection).toBe('Нова версія після видалення');
+    expect(current?.readingRunId).toBe(run.id);
+  });
 });

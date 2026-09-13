@@ -190,6 +190,44 @@ describe('RatingRepository.remove', () => {
 
     expect(await RatingRepository.getCurrent(db, 'ub-10')).toBeNull();
   });
+
+  it('SOFT-DELETE READINESS (Фаза 26) — remove лишає рядок фізично (deleted_at, не DELETE)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-12');
+    await ReadingRunRepository.start(db, { userBookId: 'ub-12' });
+    const rating = await RatingRepository.upsertCurrent(db, {
+      userBookId: 'ub-12',
+      value: 4.5,
+      review: 'Незамінна рецензія',
+    });
+
+    await RatingRepository.remove(db, rating.id);
+
+    const raw = await db.getFirstAsync<{ review: string | null; deleted_at: string | null }>(
+      `SELECT review, deleted_at FROM rating WHERE id = ?`,
+      [rating.id],
+    );
+    expect(raw?.review).toBe('Незамінна рецензія');
+    expect(raw?.deleted_at).not.toBeNull();
+  });
+
+  it('SOFT-DELETE READINESS (Фаза 26) — upsertCurrent після remove ВІДРОДЖУЄ той самий рядок (reading_run_id лишається UNIQUE), а не падає/дублює', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-13');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-13' });
+    const rating = await RatingRepository.upsertCurrent(db, { userBookId: 'ub-13', value: 3 });
+    await RatingRepository.remove(db, rating.id);
+    expect(await RatingRepository.getCurrent(db, 'ub-13')).toBeNull();
+
+    const revived = await RatingRepository.upsertCurrent(db, { userBookId: 'ub-13', value: 5, review: 'Друга спроба' });
+
+    expect(revived.id).toBe(rating.id);
+    expect(revived.deletedAt).toBeNull();
+    const current = await RatingRepository.getCurrent(db, 'ub-13');
+    expect(current?.value).toBe(5);
+    expect(current?.review).toBe('Друга спроба');
+    expect(current?.readingRunId).toBe(run.id);
+  });
 });
 
 describe('RatingRepository — cascade delete разом із user_book', () => {

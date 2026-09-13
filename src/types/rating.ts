@@ -21,6 +21,11 @@ export const RatingSchema = z.object({
   review: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** SOFT-DELETE READINESS (POLYTSIA V1.6.1, Фаза 26, `027_soft_delete_readiness.ts`) —
+   * `RatingRepository.remove` тепер м'яко видаляє (рецензія — вільний текст, незамінний
+   * контент). `null` для будь-якого рядка, що доходить до звичайного UI (публічні read-методи
+   * репозиторія фільтрують `deleted_at IS NULL`). */
+  deletedAt: z.string().nullable(),
 });
 
 export type Rating = z.infer<typeof RatingSchema>;

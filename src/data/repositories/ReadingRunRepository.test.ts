@@ -175,6 +175,21 @@ describe('ReadingRunRepository.discard', () => {
     const second = await ReadingRunRepository.start(db, { userBookId: 'ub-disc2' });
     expect(second.runNumber).toBe(2); // не 1 — номери монотонні, навіть крізь видалені рядки.
   });
+
+  it('SOFT-DELETE READINESS (Фаза 26) — ReadingRun несе deletedAt: null для живого run, фізичний рядок і далі позначений deleted_at після discard', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-disc3');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-disc3' });
+    expect(run.deletedAt).toBeNull();
+
+    await ReadingRunRepository.discard(db, run.id);
+
+    const raw = await db.getFirstAsync<{ deleted_at: string | null }>(
+      `SELECT deleted_at FROM reading_run WHERE id = ?`,
+      [run.id],
+    );
+    expect(raw?.deleted_at).not.toBeNull();
+  });
 });
 
 describe('ReadingRunRepository — обмеження схеми (019_reading_run.ts)', () => {

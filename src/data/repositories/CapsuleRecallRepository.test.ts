@@ -93,14 +93,25 @@ describe('CapsuleRecallRepository', () => {
     expect(await CapsuleRecallRepository.listByBookCapsuleId(db, capsule.id)).toEqual([]);
   });
 
-  it('видалення капсули каскадно видаляє її recall-історію (ON DELETE CASCADE)', async () => {
+  it('SOFT-DELETE READINESS (Фаза 26) — видалення капсули БІЛЬШЕ НЕ каскадно стирає recall-історію: BookCapsuleRepository.remove тепер м’яке (deleted_at), рядок book_capsule фізично лишається, тож ON DELETE CASCADE на capsule_recall не спрацьовує', async () => {
     const db = await openMigratedTestDb();
     await seedUserBook(db, 'ub-1');
     const capsule = await seedCapsule(db, 'ub-1');
-    await CapsuleRecallRepository.create(db, { bookCapsuleId: capsule.id, currentMemoryText: 'Спроба' });
+    const attempt = await CapsuleRecallRepository.create(db, { bookCapsuleId: capsule.id, currentMemoryText: 'Спроба' });
 
     await BookCapsuleRepository.remove(db, capsule.id);
 
-    expect(await CapsuleRecallRepository.listByBookCapsuleId(db, capsule.id)).toEqual([]);
+    // До Фази 26 цей виклик повертав [] (фізичний DELETE + ON DELETE CASCADE). Тепер капсула
+    // лише м'яко видалена (`027_soft_delete_readiness.ts`) — рядок `book_capsule` фізично
+    // лишається в базі, тож FK CASCADE не спрацьовує, і recall-історія (теж написаний
+    // користувачем текст) зберігається разом з нею, а не знищується безповоротно.
+    const history = await CapsuleRecallRepository.listByBookCapsuleId(db, capsule.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.id).toBe(attempt.id);
+
+    // Капсула сама при цьому коректно зникає зі звичайних read-методів (див.
+    // `BookCapsuleRepository.test.ts`) — лише її фізичний рядок і те, що на нього посилається,
+    // лишаються фізично присутніми.
+    expect(await BookCapsuleRepository.getById(db, capsule.id)).toBeNull();
   });
 });

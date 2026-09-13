@@ -1,5 +1,61 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 26 — Soft-delete readiness + Data Doctor extension
+
+**Дата:** 2026-09-13
+
+Три незалежні частини. Повне обґрунтування — `docs/SOFT_DELETE_READINESS.md`.
+
+**Додано (soft-delete):**
+- `027_soft_delete_readiness.ts` — нова колонка `deleted_at` на `book_capsule`/`book_memory`/
+  `rating` (`ALTER TABLE ... ADD COLUMN`, без rebuild, без backfill). `remove()` усіх трьох
+  репозиторіїв тепер м'яко видаляє (`UPDATE ... SET deleted_at`), не фізично; усі read-методи
+  фільтрують `deleted_at IS NULL`. `BookMemoryRepository`/`RatingRepository.upsertCurrent` —
+  "revive on upsert" (UPDATE з `deleted_at = NULL`) замість наївного фільтра, щоб не порушити
+  `UNIQUE(reading_run_id)` після повторного запису для того самого run.
+- `Shelf`/`ReadingGoal`/`Reminder` — СВІДОМО НЕ отримали `deleted_at` цією фазою (структурні/
+  конфігураційні сутності без незамінного тексту, кожна вже мала власне обґрунтування "чому
+  жорстко" в коді до цієї фази) — детальне обґрунтування для кожної окремо в
+  `docs/SOFT_DELETE_READINESS.md` §1.
+- Побічний ефект: `capsule_recall` `ON DELETE CASCADE` більше не спрацьовує при видаленні
+  капсули (рядок `book_capsule` фізично лишається) — recall-історія тепер зберігається разом із
+  м'яко видаленою капсулою, а не знищується безповоротно. Навмисно, не недогляд.
+
+**Виправлено (ReadingRun):**
+- `ReadingRunSchema`/`ReadingRunRepository` — домен-тип нарешті проносить `deletedAt`
+  (DB-колонка існувала з Фази 6, `019_reading_run.ts`, але жоден TS-тип/мапінг її не читав) —
+  ReadingRun тепер гарантовано несе id (UUID v4) + createdAt + updatedAt + deletedAt наскрізь.
+
+**Додано (Data Doctor):**
+- `src/domain/dataIntegrityDoctor.ts`/`DataIntegrityRepository.ts` — 7 нових перевірок:
+  `session_without_run`, `run_session_mismatch`, `multiple_active_runs`,
+  `run_finished_without_finished_at`, `run_invalid_sequence`, `legacy_contradictory_status`,
+  `capsule_references_invalid_run`/`memory_references_invalid_run`/
+  `pre_reading_reflection_references_invalid_run`/`dnf_reflection_references_invalid_run`. Усі —
+  у наявних категоріях `books`/`sessions` (без нової категорії чи нового типу посилання, без
+  змін у `app/data-doctor.tsx`/`i18n-labels.ts`). Без destructive auto-fix — той самий принцип,
+  що й решта Data Doctor.
+- `docs/DATABASE.md` — оновлено CREATE TABLE для `rating`/`book_memory`/`book_capsule`
+  (`deleted_at`).
+- `docs/SOFT_DELETE_READINESS.md` (нове).
+- 23 нових тести (797 всього, було 774): `BookCapsuleRepository.test.ts` (+1),
+  `BookMemoryRepository.test.ts` (+2), `RatingRepository.test.ts` (+2),
+  `ReadingRunRepository.test.ts` (+1), `migrationRunner.test.ts` (+2, міграція 027),
+  `dataIntegrityDoctor.test.ts` (+15, усі 7 нових перевірок). `CapsuleRecallRepository.test.ts`
+  — існуючий тест переписано під нову поведінку (кількість тестів у файлі не змінилась).
+
+**Свідомо НЕ зроблено:** індекс на нових `deleted_at`-колонках (той самий низький пріоритет, що
+й для решти `deleted_at`-колонок схеми, `V1_6_FULL_AUDIT_REPORT.md` розділ 29); перевірка "run
+без жодної сесії" (легітимний нормальний стан щойно розпочатого прочитання, не аномалія).
+
+**Виправлено (`npm test`-знахідка, до коміту):** `DataIntegrityRepository.test.ts` — тест
+"узгоджені реалістичні дані" сідив `reading_session` через сирий SQL без `reading_run_id`
+(фікстура написана до Фази 6/26 й не знала про новий `session_without_run`). У реальному
+застосунку `ReadingSessionRepository.start()` ЗАВЖДИ прив'язує сесію до якогось run — новий чекер
+відпрацював правильно, впіймавши застарілу фікстуру, а не хибний спрацьовування. Фікстуру
+доповнено власним `reading_run` для `user_book-1`, на який тепер посилається `session-1`; сама
+перевірка `session_without_run` не змінена. Кількість тестів не змінилась (797).
+
 ## POLYTSIA V1.6.1, Фаза 25 (виправлення) — CI-знахідка: TS2769 у cover-upload/index.ts
 
 **Дата:** 2026-09-13

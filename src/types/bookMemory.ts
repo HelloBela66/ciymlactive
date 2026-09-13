@@ -38,4 +38,8 @@ export interface BookMemory {
   templateId: MemoryCardTemplateId;
   createdAt: string;
   updatedAt: string;
+  /** SOFT-DELETE READINESS (POLYTSIA V1.6.1, Фаза 26, `027_soft_delete_readiness.ts`) —
+   * `BookMemoryRepository.remove` тепер м'яко видаляє. `null` для будь-якого рядка, що доходить
+   * до звичайного UI (публічні read-методи репозиторія фільтрують `deleted_at IS NULL`). */
+  deletedAt: string | null;
 }

@@ -50,10 +50,22 @@ describe('DataIntegrityRepository.runCheck', () => {
   it('узгоджені реалістичні дані — «Проблем не знайдено»', async () => {
     const db = await openMigratedTestDb();
     await seedBaseBook(db);
+    // REREADING MODEL (Фаза 26) — `seedBaseBook` вставляє `user_book` напряму через SQL уже
+    // ПІСЛЯ того, як `migrateDbIfNeeded` відпрацював (а не через `UserBookRepository`), тож
+    // backfill-міграція 020 його не бачить і жодного `reading_run` для нього не створює. У
+    // реальному застосунку `ReadingSessionRepository.start()` ЗАВЖДИ прив'язує нову сесію до
+    // якогось run (коментар над `session_without_run` у `dataIntegrityDoctor.ts`) — тож
+    // узгоджені "реалістичні" дані цього тесту мають явно відтворити той самий інваріант, а не
+    // лишати `reading_run_id` порожнім.
     await db.runAsync(
-      `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, start_page, end_page, duration_seconds, paused_intervals, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      ['session-1', 'user_book-1', NOW, NOW, 0, 50, 1800, '[]', NOW, NOW],
+      `INSERT INTO reading_run (id, user_book_id, run_number, status, started_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      ['run-1', 'user_book-1', 1, 'in_progress', NOW, NOW, NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, start_page, end_page, duration_seconds, paused_intervals, created_at, updated_at, reading_run_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      ['session-1', 'user_book-1', NOW, NOW, 0, 50, 1800, '[]', NOW, NOW, 'run-1'],
     );
     await db.runAsync(
       `INSERT INTO reading_progress (id, user_book_id, session_id, page, recorded_at, created_at) VALUES (?,?,?,?,?,?)`,

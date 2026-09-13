@@ -22,6 +22,7 @@ interface BookCapsuleRow {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 function mapRow(row: BookCapsuleRow): BookCapsule {
@@ -42,6 +43,7 @@ function mapRow(row: BookCapsuleRow): BookCapsule {
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at,
   };
 }
 
@@ -145,11 +147,15 @@ export const BookCapsuleRepository = {
       completedAt: params.completedAt,
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
     };
   },
 
   async getById(db: SQLiteDatabase, id: string): Promise<BookCapsule | null> {
-    const row = await db.getFirstAsync<BookCapsuleRow>(`SELECT * FROM book_capsule WHERE id = ?`, [id]);
+    const row = await db.getFirstAsync<BookCapsuleRow>(
+      `SELECT * FROM book_capsule WHERE id = ? AND deleted_at IS NULL`,
+      [id],
+    );
     return row ? mapRow(row) : null;
   },
 
@@ -158,7 +164,7 @@ export const BookCapsuleRepository = {
    * нижче. */
   async getByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<BookCapsule | null> {
     const row = await db.getFirstAsync<BookCapsuleRow>(
-      `SELECT * FROM book_capsule WHERE user_book_id = ? ORDER BY created_at DESC LIMIT 1`,
+      `SELECT * FROM book_capsule WHERE user_book_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
       [userBookId],
     );
     return row ? mapRow(row) : null;
@@ -168,7 +174,7 @@ export const BookCapsuleRepository = {
    * (теоретично, без UNIQUE) кілька капсул припадають на той самий run — найновіша. */
   async getByReadingRunId(db: SQLiteDatabase, readingRunId: string): Promise<BookCapsule | null> {
     const row = await db.getFirstAsync<BookCapsuleRow>(
-      `SELECT * FROM book_capsule WHERE reading_run_id = ? ORDER BY created_at DESC LIMIT 1`,
+      `SELECT * FROM book_capsule WHERE reading_run_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
       [readingRunId],
     );
     return row ? mapRow(row) : null;
@@ -183,11 +189,11 @@ export const BookCapsuleRepository = {
     const run = await ReadingRunRepository.getLatestByUserBookId(db, userBookId);
     const row = run
       ? await db.getFirstAsync<BookCapsuleRow>(
-          `SELECT * FROM book_capsule WHERE reading_run_id = ? ORDER BY created_at DESC LIMIT 1`,
+          `SELECT * FROM book_capsule WHERE reading_run_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
           [run.id],
         )
       : await db.getFirstAsync<BookCapsuleRow>(
-          `SELECT * FROM book_capsule WHERE user_book_id = ? AND reading_run_id IS NULL ORDER BY created_at DESC LIMIT 1`,
+          `SELECT * FROM book_capsule WHERE user_book_id = ? AND reading_run_id IS NULL AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
           [userBookId],
         );
     return row ? mapRow(row) : null;
@@ -198,7 +204,7 @@ export const BookCapsuleRepository = {
    * (найновішу), але метод потрібен вже зараз для repository-тестів і майбутнього UI списку. */
   async listByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<BookCapsule[]> {
     const rows = await db.getAllAsync<BookCapsuleRow>(
-      `SELECT * FROM book_capsule WHERE user_book_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM book_capsule WHERE user_book_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`,
       [userBookId],
     );
     return rows.map(mapRow);
@@ -243,8 +249,20 @@ export const BookCapsuleRepository = {
     ]);
   },
 
+  /** SOFT-DELETE READINESS (POLYTSIA V1.6.1, Фаза 26, `027_soft_delete_readiness.ts`) — М'ЯКЕ
+   * видалення (`deleted_at`), НЕ фізичне `DELETE`, той самий сенс, що й `user_book.remove`/
+   * `reading_session.remove` тощо. Капсула несе незамінний, написаний користувачем текст —
+   * фізичне стирання назавжди прибирало можливість відновлення без будь-якої користі (на
+   * відміну від, скажімо, `Shelf`, який не несе історичного контенту — докладніше
+   * `docs/SOFT_DELETE_READINESS.md`). Побічний ефект: `capsule_recall.book_capsule_id REFERENCES
+   * book_capsule(id) ON DELETE CASCADE` (`013_capsule_recall.ts`) більше НЕ спрацьовує тут —
+   * рядок `book_capsule` фізично лишається, тож recall-історія видаленої капсули відтепер теж
+   * зберігається (раніше — знищувалась безповоротно разом із капсулою). Той самий ефект, що вже
+   * задокументований для `book_capsule.user_book_id ON DELETE CASCADE` проти м'яко видаленого
+   * `user_book` (коментар у `012_book_capsule.ts`) — навмисно, не забута деталь.
+   */
   async remove(db: SQLiteDatabase, id: string): Promise<void> {
-    await db.runAsync(`DELETE FROM book_capsule WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE book_capsule SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
   },
 
   /** ТЗ Фази 18 (HOME REDESIGN §HOME SHORTCUTS, «Моя пам'ять», `useMemoryIndex.ts`) — усі
@@ -252,7 +270,9 @@ export const BookCapsuleRepository = {
    * без пагінації лишається дешевою — той самий підхід, що й `ReadingSessionRepository.
    * listAllCompleted` для значно більшої таблиці сесій. */
   async listAll(db: SQLiteDatabase): Promise<BookCapsule[]> {
-    const rows = await db.getAllAsync<BookCapsuleRow>(`SELECT * FROM book_capsule ORDER BY created_at DESC`);
+    const rows = await db.getAllAsync<BookCapsuleRow>(
+      `SELECT * FROM book_capsule WHERE deleted_at IS NULL ORDER BY created_at DESC`,
+    );
     return rows.map(mapRow);
   },
 
@@ -262,7 +282,7 @@ export const BookCapsuleRepository = {
    * (`src/lib/homeContext.ts#findCapsuleDueCandidate`, `openedAt`-фільтр — там же). */
   async getDue(db: SQLiteDatabase, referenceDateIso: string): Promise<BookCapsule[]> {
     const rows = await db.getAllAsync<BookCapsuleRow>(
-      `SELECT * FROM book_capsule WHERE reopen_at IS NOT NULL AND reopen_at <= ? ORDER BY reopen_at ASC`,
+      `SELECT * FROM book_capsule WHERE reopen_at IS NOT NULL AND reopen_at <= ? AND deleted_at IS NULL ORDER BY reopen_at ASC`,
       [referenceDateIso],
     );
     return rows.map(mapRow);
@@ -274,7 +294,7 @@ export const BookCapsuleRepository = {
    * scheduling notifications для reopenAt у минулому"). */
   async listWithFutureReminder(db: SQLiteDatabase, referenceDateIso: string): Promise<BookCapsule[]> {
     const rows = await db.getAllAsync<BookCapsuleRow>(
-      `SELECT * FROM book_capsule WHERE reopen_at IS NOT NULL AND reopen_at > ? ORDER BY reopen_at ASC`,
+      `SELECT * FROM book_capsule WHERE reopen_at IS NOT NULL AND reopen_at > ? AND deleted_at IS NULL ORDER BY reopen_at ASC`,
       [referenceDateIso],
     );
     return rows.map(mapRow);

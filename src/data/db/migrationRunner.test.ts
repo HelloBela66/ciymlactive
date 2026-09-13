@@ -1560,3 +1560,103 @@ describe('migrateDbIfNeeded — 026_hot_query_indexes (Фаза 24)', () => {
     expect(isbn13Index?.name).toBe('idx_edition_isbn13');
   });
 });
+
+/**
+ * `027_soft_delete_readiness.ts` (POLYTSIA V1.6.1, Фаза 26, `docs/SOFT_DELETE_READINESS.md`) —
+ * той самий "чиста ALTER TABLE ADD COLUMN, без rebuild і без per-row backfill" клас міграції, що
+ * й `009_shelf_theme.ts`/`010_reading_experience.ts`: наявні рядки мають лишитись недоторканими,
+ * а нова колонка — читатись як `NULL` (== "не видалено") для КОЖНОГО рядка, що існував до
+ * міграції, без жодного явного backfill-кроку (SQLite сам проставляє `NULL` новій колонці на
+ * старих рядках).
+ */
+const MIGRATION_027_NOW = '2026-09-13T00:00:00.000Z';
+
+describe('migrateDbIfNeeded — 027_soft_delete_readiness (Фаза 26)', () => {
+  async function seedPreMigration027Data(db: SQLiteDatabase): Promise<void> {
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-1',
+      'Книга 1',
+      MIGRATION_027_NOW,
+      MIGRATION_027_NOW,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга 1', 'uk', 'paperback', MIGRATION_027_NOW, MIGRATION_027_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'finished',0,?,?)`,
+      ['ub-1', 'edition-1', MIGRATION_027_NOW, MIGRATION_027_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO book_capsule (id, user_book_id, lasting_thought, reopen_option, created_at, updated_at)
+       VALUES (?,?,?,'none',?,?)`,
+      ['capsule-1', 'ub-1', 'Думка до міграції 027', MIGRATION_027_NOW, MIGRATION_027_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO book_memory (id, user_book_id, reflection, entry_refs, template_id, created_at, updated_at)
+       VALUES (?,?,?,'[]','classic',?,?)`,
+      ['memory-1', 'ub-1', 'Спогад до міграції 027', MIGRATION_027_NOW, MIGRATION_027_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO rating (id, user_book_id, value, review, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
+      ['rating-1', 'ub-1', 4.5, 'Рецензія до міграції 027', MIGRATION_027_NOW, MIGRATION_027_NOW],
+    );
+  }
+
+  it('старі рядки (book_capsule/book_memory/rating) лишаються недоторканими; нова колонка deleted_at читається як NULL для кожного', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 26);
+    await seedPreMigration027Data(db);
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const capsule = await db.getFirstAsync<{ lasting_thought: string; deleted_at: string | null }>(
+      `SELECT lasting_thought, deleted_at FROM book_capsule WHERE id = ?`,
+      ['capsule-1'],
+    );
+    expect(capsule?.lasting_thought).toBe('Думка до міграції 027');
+    expect(capsule?.deleted_at).toBeNull();
+
+    const memory = await db.getFirstAsync<{ reflection: string; deleted_at: string | null }>(
+      `SELECT reflection, deleted_at FROM book_memory WHERE id = ?`,
+      ['memory-1'],
+    );
+    expect(memory?.reflection).toBe('Спогад до міграції 027');
+    expect(memory?.deleted_at).toBeNull();
+
+    const rating = await db.getFirstAsync<{ review: string; deleted_at: string | null }>(
+      `SELECT review, deleted_at FROM rating WHERE id = ?`,
+      ['rating-1'],
+    );
+    expect(rating?.review).toBe('Рецензія до міграції 027');
+    expect(rating?.deleted_at).toBeNull();
+  });
+
+  it('нова колонка deleted_at реально записувана (UPDATE) на всіх трьох таблицях', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 26);
+    await seedPreMigration027Data(db);
+    await migrateDbIfNeeded(db);
+
+    await db.runAsync(`UPDATE book_capsule SET deleted_at = ? WHERE id = ?`, [MIGRATION_027_NOW, 'capsule-1']);
+    await db.runAsync(`UPDATE book_memory SET deleted_at = ? WHERE id = ?`, [MIGRATION_027_NOW, 'memory-1']);
+    await db.runAsync(`UPDATE rating SET deleted_at = ? WHERE id = ?`, [MIGRATION_027_NOW, 'rating-1']);
+
+    const capsule = await db.getFirstAsync<{ deleted_at: string | null }>(
+      `SELECT deleted_at FROM book_capsule WHERE id = ?`,
+      ['capsule-1'],
+    );
+    const memory = await db.getFirstAsync<{ deleted_at: string | null }>(
+      `SELECT deleted_at FROM book_memory WHERE id = ?`,
+      ['memory-1'],
+    );
+    const rating = await db.getFirstAsync<{ deleted_at: string | null }>(
+      `SELECT deleted_at FROM rating WHERE id = ?`,
+      ['rating-1'],
+    );
+    expect(capsule?.deleted_at).toBe(MIGRATION_027_NOW);
+    expect(memory?.deleted_at).toBe(MIGRATION_027_NOW);
+    expect(rating?.deleted_at).toBe(MIGRATION_027_NOW);
+  });
+});
