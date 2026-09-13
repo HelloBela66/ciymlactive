@@ -18,6 +18,10 @@ function session(overrides: Partial<ReadingSession> & Pick<ReadingSession, 'id' 
     durationSeconds: 600,
     moodNote: null,
     readingExperience: null,
+    // ТЗ Фази 6b (REREADING MODEL) — те саме обмеження, що й вище для `readingExperience`:
+    // `readingRunId` теж обов'язкове поле типу `ReadingSession` (`string | null`, не `?:`),
+    // тож базовий літерал фабрики має задавати його явно.
+    readingRunId: null,
     isEdited: false,
     createdAt: overrides.startedAt,
     updatedAt: overrides.startedAt,

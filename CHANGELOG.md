@@ -1,5 +1,39 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 6b — reading_run_id + legacy backfill (REREADING MODEL)
+
+**Дата:** 2026-09-13
+
+Продовження Фази 6 (`ReadingRun` як сама сутність, без підключення). Ця фаза: (1) додає
+`reading_session.reading_run_id` — nullable, СВІДОМО без SQL `REFERENCES`/`ON DELETE` (пряме
+застосування вже задокументованого в цьому проєкті уроку, `008_note_category.ts` /
+`002_book_source_isbndb.ts`: FK з `ON DELETE SET NULL`, доданий через `ALTER TABLE`, мовчки
+обнулив би значення в усіх сесіях, якби `reading_run` колись пройшов rebuild-міграцію); (2)
+бекфілить legacy-дані — для кожної наявної книги щонайбільше ОДИН `reading_run` (`run_number =
+1`, `is_legacy_backfill = 1`) best-effort з наявних `started_at`/`finished_at`/сесій/статусу,
+без вигадування кількох старих перечитувань (пряма вимога ТЗ). Повна таблиця правил і свідомо
+задокументована втрата інформації для книг зі статусом `rereading` — `docs/READING_RUN.md`
+§Backfill.
+
+**Додано:**
+- `020_reading_run_backfill.ts` — єдина міграція проєкту з процедурною (не чистою
+  декларативною SQL) backfill-логікою в TypeScript, детально обґрунтовано в коментарі над
+  файлом: реальний `generateId()` на рядок (SQLite не має вбудованого UUID) і багаторівнева
+  `status`/`finished_at` логіка, яку чистий SQL `CASE` читав би значно гірше. Одна транзакція
+  (як завжди від `migrationRunner.ts`) — або весь backfill застосовується, або жоден рядок.
+- `docs/READING_RUN.md` §Backfill — повна таблиця правил вибору `status`/`finished_at`.
+- 6 нових тестів у `src/data/db/migrationRunner.test.ts` (636 → 642): усі гілки backfill
+  (`reading`/`rereading` без перенесення старої дати завершення, `finished` із трирівневим
+  fallback, `did_not_finish` із fallback на `dnf_reflection`, `want_to_read` без run узагалі,
+  кілька сесій під одним run_number, новий індекс).
+
+**Змінено:**
+- `src/types/readingSession.ts`/`src/data/repositories/ReadingSessionRepository.ts` —
+  `ReadingSession.readingRunId` (`string | null`), тепер читається з БД. Нові сесії
+  (`start()`) і надалі завжди створюються з `readingRunId: null` — реальне підключення нового
+  старту до конкретного run залишається за Фазою 7, свідомо не цією.
+- `docs/DATABASE.md` — запис міграції 020.
+
 ## POLYTSIA V1.6.1, Фаза 6 — ReadingRun: нова сутність для REREADING MODEL
 
 **Дата:** 2026-09-13

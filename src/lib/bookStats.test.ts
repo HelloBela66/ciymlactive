@@ -35,6 +35,10 @@ function session(overrides: Partial<ReadingSession> = {}): ReadingSession {
     // (typed `Partial<ReadingSession>`) робить властивість `string | null | undefined`,
     // що не збігається з обов'язковим `string | null`.
     readingExperience: null,
+    // ТЗ Фази 6b (REREADING MODEL) — те саме обмеження, що й у коментарі вище для
+    // `readingExperience`: `readingRunId` теж обов'язкове поле типу `ReadingSession`
+    // (`string | null`, не `?:`), тож базовий літерал фабрики має задавати його явно.
+    readingRunId: null,
     isEdited: false,
     createdAt: '2026-09-01T10:30:00.000Z',
     updatedAt: '2026-09-01T10:30:00.000Z',

@@ -21,6 +21,7 @@ interface ReadingSessionRow {
   is_edited: number;
   created_at: string;
   updated_at: string;
+  reading_run_id: string | null;
 }
 
 function parseIntervals(raw: string): PausedInterval[] {
@@ -48,6 +49,7 @@ function mapRow(row: ReadingSessionRow): ReadingSession {
     isEdited: row.is_edited === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    readingRunId: row.reading_run_id,
   };
 }
 
@@ -110,6 +112,9 @@ export const ReadingSessionRepository = {
       isEdited: false,
       createdAt: now,
       updatedAt: now,
+      // REREADING MODEL, Фаза 6b (`docs/READING_RUN.md`) — нові сесії поки завжди без run;
+      // реальне підключення до конкретного `ReadingRun` — Фаза 7, свідомо не ця.
+      readingRunId: null,
     };
   },
 

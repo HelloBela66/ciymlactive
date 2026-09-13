@@ -1,3 +1,4 @@
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { migrateDbIfNeeded, LATEST_SCHEMA_VERSION, __applyMigrationsForTests } from './migrationRunner';
 import { openTestDatabase } from './testDb';
 
@@ -243,5 +244,174 @@ describe('migrateDbIfNeeded', () => {
       `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_shelf_book_user_book'`,
     );
     expect(index?.name).toBe('idx_shelf_book_user_book');
+  });
+});
+
+/**
+ * `020_reading_run_backfill.ts` (POLYTSIA V1.6.1, Фаза 6b, `docs/READING_RUN.md` §Backfill) —
+ * той самий "populated DB на версії N-1, потім migrateDbIfNeeded" сценарій, що й тести
+ * 009/010/011/018 вище, але для міграції з реальною per-row backfill-логікою (а не чистого
+ * `ALTER TABLE`/`CREATE INDEX`) — кожен `it()` перевіряє одну гілку правила вибору
+ * `status`/`finished_at`, задокументованого в коментарі над самою міграцією.
+ */
+async function seedPreBackfillScenario(db: SQLiteDatabase): Promise<void> {
+  const now = '2026-06-01T00:00:00.000Z';
+
+  async function seedBook(id: string, status: string, startedAt: string | null, finishedAt: string | null): Promise<void> {
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      `${id}-work`,
+      `Книга ${id}`,
+      now,
+      now,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      [`${id}-edition`, `${id}-work`, `Книга ${id}`, 'uk', 'paperback', now, now],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, started_at, finished_at, current_page, added_at, updated_at)
+       VALUES (?,?,?,?,?,0,?,?)`,
+      [id, `${id}-edition`, status, startedAt, finishedAt, now, now],
+    );
+  }
+
+  async function seedSession(id: string, userBookId: string, startedAt: string, endedAt: string | null): Promise<void> {
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page,
+         duration_seconds, is_edited, created_at, updated_at
+       ) VALUES (?,?,?,?,'[]',0,?,?,0,?,?)`,
+      [id, userBookId, startedAt, endedAt, endedAt ? 10 : null, endedAt ? 600 : null, startedAt, endedAt ?? startedAt],
+    );
+  }
+
+  // A: активне читання, started_at заданий — очікується in_progress, finished_at NULL.
+  await seedBook('ub-a', 'reading', '2026-01-01T00:00:00.000Z', null);
+  await seedSession('session-a', 'ub-a', '2026-01-01T00:00:00.000Z', null);
+
+  // B: finished, і started_at, і finished_at на самій user_book задані — найвищий пріоритет.
+  await seedBook('ub-b', 'finished', '2026-01-01T00:00:00.000Z', '2026-01-10T00:00:00.000Z');
+  await seedSession('session-b', 'ub-b', '2026-01-01T00:00:00.000Z', '2026-01-10T00:00:00.000Z');
+
+  // C: finished, але user_book.finished_at чомусь NULL (аномалія) — fallback на ended_at
+  // найпізнішої сесії.
+  await seedBook('ub-c', 'finished', '2026-02-01T00:00:00.000Z', null);
+  await seedSession('session-c1', 'ub-c', '2026-02-01T00:00:00.000Z', '2026-02-05T00:00:00.000Z');
+  await seedSession('session-c2', 'ub-c', '2026-02-06T00:00:00.000Z', '2026-02-09T00:00:00.000Z');
+
+  // D: finished, і finished_at, і сесії відсутні — останній fallback: user_book.updated_at.
+  await seedBook('ub-d', 'finished', '2026-03-01T00:00:00.000Z', null);
+
+  // E: did_not_finish, є dnf_reflection — найточніший сигнал моменту DNF.
+  await seedBook('ub-e', 'did_not_finish', '2026-04-01T00:00:00.000Z', null);
+  await db.runAsync(
+    `INSERT INTO dnf_reflection (id, user_book_id, page, reason, note, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    ['dnf-e', 'ub-e', 42, null, null, '2026-04-05T00:00:00.000Z', '2026-04-05T00:00:00.000Z'],
+  );
+
+  // F: did_not_finish, БЕЗ dnf_reflection — fallback на user_book.updated_at.
+  await seedBook('ub-f', 'did_not_finish', '2026-04-10T00:00:00.000Z', null);
+
+  // G: rereading — user_book.finished_at і досі містить дату ПЕРШОГО завершення (заморожена,
+  // ніколи не оновлюється) — вона НЕ повинна потрапити в legacy run: run має бути in_progress,
+  // finished_at NULL, стара дата завершення відкинута, а не тихо "перенесена".
+  await seedBook('ub-g', 'rereading', '2025-01-01T00:00:00.000Z', '2025-06-01T00:00:00.000Z');
+
+  // H: want_to_read, узагалі не розпочата (started_at NULL, без сесій) — legacy run НЕ
+  // створюється взагалі, вигадувати дату старту нема з чого.
+  await seedBook('ub-h', 'want_to_read', null, null);
+
+  // I: кілька сесій (включно з м'яко скасованою) — усі мають зібратись під ОДИН run_number 1.
+  await seedBook('ub-i', 'reading', '2026-05-01T00:00:00.000Z', null);
+  await seedSession('session-i1', 'ub-i', '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z');
+  await seedSession('session-i2', 'ub-i', '2026-05-03T00:00:00.000Z', null);
+  await db.runAsync(`UPDATE reading_session SET deleted_at = ? WHERE id = ?`, [now, 'session-i2']);
+}
+
+interface LegacyRunRow {
+  id: string;
+  user_book_id: string;
+  run_number: number;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  is_legacy_backfill: number;
+}
+
+async function migrateWithBackfillScenario(): Promise<SQLiteDatabase> {
+  const db = await openTestDatabase();
+  await __applyMigrationsForTests(db, 19);
+  await seedPreBackfillScenario(db);
+  const finalVersion = await migrateDbIfNeeded(db);
+  expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+  return db;
+}
+
+async function getRun(db: SQLiteDatabase, userBookId: string): Promise<LegacyRunRow | null> {
+  return db.getFirstAsync<LegacyRunRow>(`SELECT * FROM reading_run WHERE user_book_id = ?`, [userBookId]);
+}
+
+describe('migrateDbIfNeeded — 020_reading_run_backfill (Фаза 6b)', () => {
+  it('reading/rereading — in_progress, finished_at NULL; стара дата ПЕРШОГО завершення НЕ переноситься', async () => {
+    const db = await migrateWithBackfillScenario();
+
+    const runA = await getRun(db, 'ub-a');
+    expect(runA).toMatchObject({ run_number: 1, status: 'in_progress', finished_at: null, is_legacy_backfill: 1 });
+    expect(runA?.started_at).toBe('2026-01-01T00:00:00.000Z');
+
+    const runG = await getRun(db, 'ub-g');
+    expect(runG).toMatchObject({ status: 'in_progress', finished_at: null });
+    expect(runG?.started_at).toBe('2025-01-01T00:00:00.000Z'); // started_at книги ЗБЕРІГАЄТЬСЯ.
+  });
+
+  it('finished — пріоритет: user_book.finished_at → останній ended_at сесії → user_book.updated_at', async () => {
+    const db = await migrateWithBackfillScenario();
+
+    const runB = await getRun(db, 'ub-b');
+    expect(runB?.status).toBe('finished');
+    expect(runB?.finished_at).toBe('2026-01-10T00:00:00.000Z'); // з user_book, не з сесії.
+
+    const runC = await getRun(db, 'ub-c');
+    expect(runC?.finished_at).toBe('2026-02-09T00:00:00.000Z'); // найпізніший ended_at (session-c2).
+
+    const runD = await getRun(db, 'ub-d');
+    expect(runD?.finished_at).toBe('2026-06-01T00:00:00.000Z'); // user_book.updated_at (`now`) — останній fallback.
+  });
+
+  it('did_not_finish — пріоритет: dnf_reflection.created_at → user_book.updated_at', async () => {
+    const db = await migrateWithBackfillScenario();
+
+    const runE = await getRun(db, 'ub-e');
+    expect(runE?.status).toBe('did_not_finish');
+    expect(runE?.finished_at).toBe('2026-04-05T00:00:00.000Z'); // з dnf_reflection.
+
+    const runF = await getRun(db, 'ub-f');
+    expect(runF?.finished_at).toBe('2026-06-01T00:00:00.000Z'); // user_book.updated_at (`now`).
+  });
+
+  it('want_to_read без started_at і без сесій — legacy run НЕ створюється', async () => {
+    const db = await migrateWithBackfillScenario();
+    expect(await getRun(db, 'ub-h')).toBeNull();
+  });
+
+  it('кілька сесій книги (включно з м\'яко скасованою) — усі отримують той самий reading_run_id', async () => {
+    const db = await migrateWithBackfillScenario();
+    const run = await getRun(db, 'ub-i');
+    expect(run).not.toBeNull();
+
+    const sessions = await db.getAllAsync<{ id: string; reading_run_id: string | null }>(
+      `SELECT id, reading_run_id FROM reading_session WHERE user_book_id = ? ORDER BY id`,
+      ['ub-i'],
+    );
+    expect(sessions).toHaveLength(2);
+    expect(sessions.every((s) => s.reading_run_id === run?.id)).toBe(true);
+  });
+
+  it('reading_session.reading_run_id — нова колонка, індекс справді створений', async () => {
+    const db = await migrateWithBackfillScenario();
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_reading_session_reading_run'`,
+    );
+    expect(index?.name).toBe('idx_reading_session_reading_run');
   });
 });

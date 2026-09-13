@@ -201,6 +201,18 @@ sync/catalog backend, але жодна читацька дія (старт се
     `ReadingSessionRepository.getActiveSession` (Фаза 5). Ця фаза — лише сама сутність, жоден
     інший файл її ще не викликає (нуль зміни продуктової поведінки); підключення — окремими
     наступними фазами, докладна дорожня карта — `docs/READING_RUN.md`.
+20. **020_reading_run_backfill** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 6b) —
+    `docs/READING_RUN.md` §Backfill. Дві частини: (1) `reading_session.reading_run_id` —
+    nullable, СВІДОМО без `REFERENCES`/`ON DELETE` (той самий вже задокументований у цьому
+    проєкті урок, що й `note.category_id`, `008_note_category.ts` — FK з `ON DELETE SET NULL`
+    на `ALTER TABLE`-колонці мовчки обнулився б при майбутньому rebuild референсованої
+    таблиці); (2) backfill — для кожного наявного `user_book` щонайбільше ОДИН legacy
+    `reading_run` (`run_number = 1`, `is_legacy_backfill = 1`) best-effort з наявних
+    `started_at`/`finished_at`/сесій/статусу, без вигадування кількох старих перечитувань
+    (книга, що зараз `rereading`, отримує ОДИН `in_progress` run — стара заморожена
+    `user_book.finished_at` НЕ переноситься). Єдина міграція проєкту з процедурною (не чистою
+    декларативною SQL) backfill-логікою в TypeScript — обґрунтування винятку та повна таблиця
+    правил вибору `status`/`finished_at` — `docs/READING_RUN.md` §Backfill.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
