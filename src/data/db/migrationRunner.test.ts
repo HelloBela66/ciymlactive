@@ -1238,3 +1238,199 @@ describe('migrateDbIfNeeded — 024_dnf_reflection_run (Фаза 11)', () => {
     expect(row?.page).toBe(3);
   });
 });
+
+/**
+ * `025_rating_run.ts` (POLYTSIA V1.6.1, Фаза 12, `docs/READING_RUN.md` §"Фаза 12") — rebuild
+ * `rating` (`UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`) + JS-backfill. Структура й сам
+ * пріоритет backfill дзеркалять `021_book_memory_run` (НЕ `024_dnf_reflection_run` — рейтинг,
+ * на відміну від DNF-знімка, не обмежений лише `did_not_finish` run: найновіший
+ * `finished`/`did_not_finish` run, інакше найновіший run узагалі, інакше `NULL`).
+ */
+const MIGRATION_025_NOW = '2026-09-13T00:00:00.000Z';
+
+async function seedBookForRatingMigration(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+    `${id}-work`,
+    `Книга ${id}`,
+    MIGRATION_025_NOW,
+    MIGRATION_025_NOW,
+  ]);
+  await db.runAsync(
+    `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    [`${id}-edition`, `${id}-work`, `Книга ${id}`, 'uk', 'paperback', MIGRATION_025_NOW, MIGRATION_025_NOW],
+  );
+  await db.runAsync(
+    `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'finished',0,?,?)`,
+    [id, `${id}-edition`, MIGRATION_025_NOW, MIGRATION_025_NOW],
+  );
+}
+
+async function seedRunForRatingMigration(
+  db: SQLiteDatabase,
+  params: { id: string; userBookId: string; runNumber: number; status: string },
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO reading_run (
+       id, user_book_id, run_number, status, started_at, finished_at, is_legacy_backfill, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,0,?,?)`,
+    [
+      params.id,
+      params.userBookId,
+      params.runNumber,
+      params.status,
+      MIGRATION_025_NOW,
+      params.status === 'in_progress' ? null : MIGRATION_025_NOW,
+      MIGRATION_025_NOW,
+      MIGRATION_025_NOW,
+    ],
+  );
+}
+
+/** Оцінка у СТАРІЙ схемі `rating` (версія 24 — ще без `reading_run_id`). */
+async function seedLegacyRating(db: SQLiteDatabase, id: string, userBookId: string, value: number): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO rating (id, user_book_id, value, review, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
+    [id, userBookId, value, null, MIGRATION_025_NOW, MIGRATION_025_NOW],
+  );
+}
+
+interface LegacyRatingRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+  value: number;
+}
+
+async function getRatingRow(db: SQLiteDatabase, id: string): Promise<LegacyRatingRow | null> {
+  return db.getFirstAsync<LegacyRatingRow>(`SELECT * FROM rating WHERE id = ?`, [id]);
+}
+
+describe('migrateDbIfNeeded — 025_rating_run (Фаза 12)', () => {
+  it('книга з finished і in_progress run — оцінка лінкується на FINISHED, не на новіший in_progress', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-j');
+    await seedRunForRatingMigration(db, { id: 'run-j1', userBookId: 'ub-j', runNumber: 1, status: 'finished' });
+    await seedRunForRatingMigration(db, { id: 'run-j2', userBookId: 'ub-j', runNumber: 2, status: 'in_progress' });
+    await seedLegacyRating(db, 'rating-j', 'ub-j', 4);
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const rating = await getRatingRow(db, 'rating-j');
+    expect(rating?.reading_run_id).toBe('run-j1');
+  });
+
+  it('кілька FINISHED run — обирається найновіший (найвищий run_number), не перший знайдений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-n');
+    await seedRunForRatingMigration(db, { id: 'run-n1', userBookId: 'ub-n', runNumber: 1, status: 'finished' });
+    await seedRunForRatingMigration(db, { id: 'run-n2', userBookId: 'ub-n', runNumber: 2, status: 'finished' });
+    await seedLegacyRating(db, 'rating-n', 'ub-n', 3.5);
+
+    await migrateDbIfNeeded(db);
+
+    const rating = await getRatingRow(db, 'rating-n');
+    expect(rating?.reading_run_id).toBe('run-n2');
+  });
+
+  it('did_not_finish run теж рахується кандидатом — оцінка кинутої, але оціненої книги лінкується на нього', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-q');
+    await seedRunForRatingMigration(db, { id: 'run-q1', userBookId: 'ub-q', runNumber: 1, status: 'did_not_finish' });
+    await seedLegacyRating(db, 'rating-q', 'ub-q', 1.5);
+
+    await migrateDbIfNeeded(db);
+
+    const rating = await getRatingRow(db, 'rating-q');
+    expect(rating?.reading_run_id).toBe('run-q1');
+  });
+
+  it('лише in_progress run (без жодного finished/did_not_finish) — фолбек на найновіший run узагалі', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-k');
+    await seedRunForRatingMigration(db, { id: 'run-k1', userBookId: 'ub-k', runNumber: 1, status: 'in_progress' });
+    await seedLegacyRating(db, 'rating-k', 'ub-k', 5);
+
+    await migrateDbIfNeeded(db);
+
+    const rating = await getRatingRow(db, 'rating-k');
+    expect(rating?.reading_run_id).toBe('run-k1');
+  });
+
+  it('книга без жодного reading_run — reading_run_id лишається NULL, нічого не вигадується', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-l');
+    await seedLegacyRating(db, 'rating-l', 'ub-l', 2);
+
+    await migrateDbIfNeeded(db);
+
+    const rating = await getRatingRow(db, 'rating-l');
+    expect(rating?.reading_run_id).toBeNull();
+  });
+
+  it('стара UNIQUE(user_book_id) знята: дві оцінки на одну книгу (різні reading_run_id) — без конфлікту', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-m');
+    await seedRunForRatingMigration(db, { id: 'run-m1', userBookId: 'ub-m', runNumber: 1, status: 'finished' });
+    await seedRunForRatingMigration(db, { id: 'run-m2', userBookId: 'ub-m', runNumber: 2, status: 'finished' });
+    await seedLegacyRating(db, 'rating-m1', 'ub-m', 3);
+
+    await migrateDbIfNeeded(db);
+
+    // Backfill лінкує rating-m1 на run-m2 (найновіший FINISHED, п. вище) — друга оцінка
+    // навмисно на РЕШТУ run цієї самої книги (run-m1), яка ще без оцінки: після rebuild це
+    // більше не конфлікт (стара UNIQUE(user_book_id) заборонила б будь-який другий рядок для
+    // ub-m взагалі, незалежно від run).
+    const linked = await getRatingRow(db, 'rating-m1');
+    expect(linked?.reading_run_id).toBe('run-m2');
+
+    await db.runAsync(
+      `INSERT INTO rating (id, user_book_id, reading_run_id, value, review, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['rating-m2', 'ub-m', 'run-m1', 4.5, null, MIGRATION_025_NOW, MIGRATION_025_NOW],
+    );
+
+    const rows = await db.getAllAsync<LegacyRatingRow>(`SELECT * FROM rating WHERE user_book_id = ?`, ['ub-m']);
+    expect(rows).toHaveLength(2);
+  });
+
+  it('нова UNIQUE(reading_run_id) ДІЄ: друга оцінка на ТОЙ САМИЙ run кидає виняток', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-o');
+    await seedRunForRatingMigration(db, { id: 'run-o1', userBookId: 'ub-o', runNumber: 1, status: 'finished' });
+    await seedLegacyRating(db, 'rating-o1', 'ub-o', 4);
+    await migrateDbIfNeeded(db);
+
+    await expect(
+      db.runAsync(
+        `INSERT INTO rating (id, user_book_id, reading_run_id, value, review, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+        ['rating-o2', 'ub-o', 'run-o1', 5, null, MIGRATION_025_NOW, MIGRATION_025_NOW],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('rating.reading_run_id — нова колонка, індекс idx_rating_user_book справді створений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 24);
+    await seedBookForRatingMigration(db, 'ub-p');
+    await seedLegacyRating(db, 'rating-p', 'ub-p', 4);
+
+    await migrateDbIfNeeded(db);
+
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_rating_user_book'`,
+    );
+    expect(index?.name).toBe('idx_rating_user_book');
+
+    // Поле досі читається без винятку — sanity-check, що rebuild не втратив жодної колонки.
+    const rating = await getRatingRow(db, 'rating-p');
+    expect(rating?.user_book_id).toBe('ub-p');
+    expect(rating?.value).toBe(4);
+  });
+});

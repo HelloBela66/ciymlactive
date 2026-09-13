@@ -27,6 +27,11 @@ import { useMarkOwned, useUnmarkOwned } from '@/features/owned-library/useOwnedB
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
 import { useStartSession } from '@/features/reading-session/useSessionMutations';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
+import {
+  useReadingRunsDetail,
+  selectComparableRuns,
+  type ReadingRunDetail,
+} from '@/features/reading-runs/useReadingRunsDetail';
 import { useRating, useSetRating, useRemoveRating } from '@/features/book-details/useRating';
 import {
   usePreReadingReflection,
@@ -58,7 +63,7 @@ import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel'
 import { formatDuration } from '@/lib/sessionTiming';
 import { computeRollingPace } from '@/lib/readingPace';
 import { predictFinish } from '@/lib/finishPrediction';
-import { editionFormatLabels, userBookStatusLabels } from '@/design/i18n-labels';
+import { editionFormatLabels, userBookStatusLabels, readingRunStatusLabels } from '@/design/i18n-labels';
 import type { EditionWithRelations } from '@/types/edition';
 import type { UserBook, UserBookStatus } from '@/types/userBook';
 import type { OwnedBook } from '@/types/ownedBook';
@@ -453,6 +458,35 @@ function LibrarySection({
             <AppText variant="body" color="accent" style={{ flex: 1 }}>
               Переглянути підсумок читання
             </AppText>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+          </Card>
+        </Pressable>
+      ) : null}
+
+      {/* REREADING MODEL, Фаза 12 (`docs/READING_RUN.md` §"Фаза 12") — явна CTA поряд із
+          загальним чіпом статусу вище, де "Перечитую" — лише один з ~5 рівнозначних варіантів,
+          легко непомітний. Механізм НЕ новий: `handleStatusChange('rereading')` — той самий
+          виклик `useUpdateUserBookStatus`, що чіп і так уже викликав (`UserBookRepository.
+          updateStatus` сама стартує новий `reading_run`) — тут лише додано пояснювальну кнопку
+          з поясненням наслідку, нічого не прибрано з чіпа. Видима лише для `finished`: книга,
+          що вже `rereading`, і так у процесі нового прочитання. */}
+      {userBook && userBook.status === 'finished' ? (
+        <Pressable
+          onPress={() => handleStatusChange('rereading')}
+          disabled={isStatusPending}
+          accessibilityRole="button"
+          accessibilityLabel="Перечитати книгу — почати нове прочитання"
+        >
+          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <Ionicons name="refresh-outline" size={20} color={theme.colors.accent} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <AppText variant="body" color="accent">
+                Перечитати
+              </AppText>
+              <AppText variant="caption" color="secondary">
+                Почати нове прочитання — стара історія, спогади й оцінка збережуться
+              </AppText>
+            </View>
             <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
           </Card>
         </Pressable>
@@ -1422,6 +1456,89 @@ function ReadingHistorySection({ sessions }: { sessions: ReadingSession[] }) {
   );
 }
 
+/**
+ * "Історія прочитань" — REREADING MODEL, Фаза 12 (`docs/READING_RUN.md` §"Фаза 12"). НА
+ * ВІДМІНУ від `ReadingHistorySection` вище (плаский список окремих СЕСІЙ читання) — цей розділ
+ * групує за `reading_run` (кожне ОКРЕМЕ прочитання/перечитування книги, Фаза 6-7): один рядок
+ * на прочитання з підсумком (статус, дати, оцінка ЦЬОГО прочитання, скільки днів/часу пішло),
+ * а не на кожну сесію окремо. Додатковий, а не замінний розділ (`docs/READING_RUN.md` — той
+ * самий "additive UI" принцип, що й Фаза 10 Reread CTA вище): існуюча "Історія читання"
+ * (сесії) нікуди не подівалась.
+ *
+ * Кнопка "Порівняти прочитання" з'являється лише коли є ≥2 ЗАВЕРШЕНИХ (`finished`) run —
+ * менше ніж два просто нема що порівнювати (`selectComparableRuns`,
+ * `useReadingRunsDetail.ts`).
+ */
+function ReadingRunsHistorySection({ workId, details }: { workId: string; details: ReadingRunDetail[] }) {
+  const theme = useTheme();
+  const comparableRuns = selectComparableRuns(details);
+
+  return (
+    <View style={{ gap: theme.spacing.md }}>
+      {comparableRuns.length >= 2 ? (
+        <Pressable
+          onPress={() =>
+            router.push({ pathname: '/reread-comparison/[workId]', params: { workId } } as unknown as Href)
+          }
+        >
+          <Card
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: theme.spacing.sm,
+              backgroundColor: theme.colors.accentSoft,
+            }}
+          >
+            <Ionicons name="git-compare-outline" size={20} color={theme.colors.accent} />
+            <View style={{ flex: 1 }}>
+              <AppText variant="body" color="accent">
+                Як змінилася книга для тебе
+              </AppText>
+              <AppText variant="caption" color="secondary">
+                Порівняти {comparableRuns.length} прочитання
+              </AppText>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+          </Card>
+        </Pressable>
+      ) : null}
+
+      {[...details].reverse().map(({ run, rating, dnf, stats }) => (
+        <Card key={run.id} style={{ gap: theme.spacing.xs }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <AppText variant="body" style={{ fontWeight: '600' }}>
+              Прочитання №{run.runNumber}
+            </AppText>
+            <AppText variant="caption" color="secondary">
+              {readingRunStatusLabels[run.status]}
+            </AppText>
+          </View>
+          <AppText variant="caption" color="tertiary">
+            {new Date(run.startedAt).toLocaleDateString('uk-UA')}
+            {run.finishedAt ? ` → ${new Date(run.finishedAt).toLocaleDateString('uk-UA')}` : ''}
+          </AppText>
+          {rating?.value != null ? (
+            <AppText variant="caption" color="secondary">
+              Оцінка: {rating.value} · {stats.daysSpent} дн. читання
+              {stats.totalDurationSeconds > 0 ? ` · ${formatDuration(stats.totalDurationSeconds * 1000)}` : ''}
+            </AppText>
+          ) : (
+            <AppText variant="caption" color="secondary">
+              {stats.daysSpent} дн. читання
+              {stats.totalDurationSeconds > 0 ? ` · ${formatDuration(stats.totalDurationSeconds * 1000)}` : ''}
+            </AppText>
+          )}
+          {run.status === 'did_not_finish' && dnf ? (
+            <AppText variant="caption" color="secondary">
+              Покинуто на сторінці {dnf.page}
+            </AppText>
+          ) : null}
+        </Card>
+      ))}
+    </View>
+  );
+}
+
 export default function BookDetailsScreen() {
   const theme = useTheme();
   const { workId } = useLocalSearchParams<{ workId: string }>();
@@ -1432,6 +1549,10 @@ export default function BookDetailsScreen() {
   // `useReadingHistory` сам вимикається через `enabled: !!userBookId`, коли `data` ще не
   // завантажено або `userBook` відсутній.
   const { data: sessions } = useReadingHistory(data?.userBook?.id);
+  // REREADING MODEL, Фаза 12 — усі `reading_run` книги разом зі своїми даними, для нового
+  // "Історія прочитань" (нижче) і кнопки переходу на екран порівняння; той самий "один хук
+  // без умови, сам вимикається через enabled" підхід, що й `useReadingHistory` вище.
+  const { data: readingRuns } = useReadingRunsDetail(data?.userBook?.id);
 
   return (
     <>
@@ -1577,6 +1698,12 @@ export default function BookDetailsScreen() {
                 currentPage={data.userBook.currentPage}
                 pageCount={data.primaryEdition.pageCount}
               />
+            ) : null}
+
+            {data.userBook && readingRuns && readingRuns.length > 0 ? (
+              <CollapsibleSection title="Історія прочитань">
+                <ReadingRunsHistorySection workId={data.work.id} details={readingRuns} />
+              </CollapsibleSection>
             ) : null}
 
             {data.userBook && sessions && sessions.length > 0 ? (

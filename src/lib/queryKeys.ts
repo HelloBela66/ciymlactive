@@ -96,6 +96,10 @@ export const queryKeys = {
     reactionCounts: ['journal', 'reactionCounts'] as const,
   },
   ratings: {
+    // REREADING MODEL, Фаза 12 (`025_rating_run.ts`) — ключ НЕ перейменований разом з
+    // репозиторієм (`RatingRepository.getCurrent`) — сам ключ і досі про "запит по
+    // userBookId", лише те, ЩО він повертає, тепер прив'язане до поточного run, а не до книги
+    // взагалі (`rating.reading_run_id` — тепер UNIQUE, більше не `user_book_id`).
     byUserBook: (userBookId: string) => ['ratings', 'byUserBook', userBookId] as const,
   },
   bookMemory: {
@@ -127,6 +131,16 @@ export const queryKeys = {
     // userBookId", лише те, ЩО він повертає, тепер прив'язане до поточного run, а не до книги
     // взагалі (`dnf_reflection.reading_run_id` — тепер UNIQUE, більше не `user_book_id`).
     byUserBook: (userBookId: string) => ['dnfReflection', 'byUserBook', userBookId] as const,
+  },
+  readingRuns: {
+    // REREADING MODEL, Фаза 12 (`docs/READING_RUN.md` §"Фаза 12") — ВСІ run'и книги разом з
+    // повними даними по кожному (оцінка/спогад/До-Після/капсула/DNF/статистика сесій),
+    // РІВНО ОДИН запит на обидва UI-споживачі: "Історія прочитань" на Book Details
+    // (`ReadingRunsHistorySection`) і екран порівняння (`app/reread-comparison/[workId].tsx`)
+    // — той самий "один хук, спільний кеш" принцип, що й `sessions`/`FinishPredictionSection`
+    // вище (`ReadingHistorySection`). Порівняння сáме фільтрує лише `status === 'finished'`
+    // зі спільного результату, а не робить власний запит.
+    detailByUserBook: (userBookId: string) => ['readingRuns', 'detailByUserBook', userBookId] as const,
   },
   loreEntities: {
     // POLYTSIA V1.6, Фаза 9-10 («Персонажі» → PERSONAL LORE) — той самий рівень, що й

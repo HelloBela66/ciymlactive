@@ -32,7 +32,11 @@ async function importRow(db: SQLiteDatabase, row: GoodreadsImportRow): Promise<v
   });
 
   if (row.ratingValue != null) {
-    await RatingRepository.upsert(db, { userBookId: userBook.id, value: row.ratingValue });
+    // REREADING MODEL, Фаза 12 — `upsertCurrent` (перейменовано з `upsert`), але поведінка тут
+    // НЕ змінюється: імпортовані книги додаються через `addToLibrary` (Фаза 7, свідомо не
+    // підключена до `reading_run`), тож `getLatestByUserBookId` завжди поверне `null`, і
+    // оцінка, як і раніше, зберігається без прив'язки до run.
+    await RatingRepository.upsertCurrent(db, { userBookId: userBook.id, value: row.ratingValue });
   }
 
   for (const shelfName of row.shelfNames) {

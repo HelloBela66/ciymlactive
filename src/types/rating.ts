@@ -10,6 +10,13 @@ export const RatingValueSchema = z
 export const RatingSchema = z.object({
   id: z.string(),
   userBookId: z.string(),
+  /** REREADING MODEL, Фаза 12 (POLYTSIA V1.6.1, `025_rating_run.ts`, `docs/READING_RUN.md`
+   * §"Фаза 12") — run, чиїй оцінці належить цей рядок. Резолвиться ДИНАМІЧНО, той самий підхід,
+   * що й `BookMemory`/`PreReadingReflection`/`DnfReflection` (НЕ фіксується один раз назавжди,
+   * на відміну від `BookCapsule.readingRunId`): `RatingRepository.getCurrent`/`upsertCurrent`
+   * самі щоразу резолвлять поточний run через `ReadingRunRepository.getLatestByUserBookId`.
+   * `null` — книга без жодного `reading_run` (той самий фолбек, що й у Фазах 8-11). */
+  readingRunId: z.string().nullable(),
   value: RatingValueSchema,
   review: z.string().nullable(),
   createdAt: z.string(),

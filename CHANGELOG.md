@@ -1,5 +1,63 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 12 — Rating прив'язаний до reading_run; Reread UX + порівняння прочитань (REREADING MODEL, завершено)
+
+**Дата:** 2026-09-13
+
+Восьма й ОСТАННЯ частина REREADING MODEL. Три частини: (1) `rating` — архітектурна прогалина,
+виявлена лише зараз (жодна з попередніх Фаз 6-11 її не торкалась і не згадувала — навіть
+`docs/V1_6_FULL_AUDIT_REPORT.md`): щонайбільше ОДНА оцінка на книгу, друге прочитання
+БЕЗПОВОРОТНО перезаписувало оцінку першого; (2) явний CTA "Перечитати" на Book Details;
+(3) два нові UI-екрани — "Історія прочитань" (accordion) і "Як змінилася книга для тебе"
+(порівняння ≥2 завершених прочитань), що зводять докупи все, зроблене Фазами 6-11. Повне
+обґрунтування — `docs/READING_RUN.md` §"Фаза 12".
+
+**Додано:**
+- `025_rating_run.ts` — схемою й backfill-пріоритетом дзеркалить `021`/`022` (НЕ `024`):
+  `UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`; backfill — найновіший
+  `finished`/`did_not_finish` run, інакше найновіший run узагалі, інакше `NULL` (рейтинг, на
+  відміну від DNF-знімка, може стосуватись і `finished`, і `did_not_finish` run).
+- `RatingRepository.getByReadingRunId`/`listByUserBookId` — прямий доступ до оцінки конкретного
+  run і повної історії оцінок книги (основа порівняння прочитань).
+- Кнопка "Перечитати" на Book Details (`LibrarySection`, видима лише для `status === 'finished'`)
+  — викликає той самий `handleStatusChange('rereading')`, жодного нового шляху мутації.
+- `ReadingRunsHistorySection` ("Історія прочитань", `app/work/[workId].tsx`) — новий accordion,
+  групує за `reading_run` (на відміну від наявної "Історія читання" — плаский список сесій):
+  один рядок на прочитання (статус, дати, оцінка, дні/час читання).
+- `app/reread-comparison/[workId].tsx` ("Як змінилася книга для тебе") — новий екран порівняння
+  ≥2 завершених прочитань (оцінка/відгук/До-Після/спогад/капсула/дні/час/reading experience),
+  доступний кнопкою з "Історії прочитань" лише коли є ≥2 run зі `status === 'finished'`
+  (`selectComparableRuns`). ВИКЛЮЧНО дані, які користувач уже сам зберіг — без AI-генерації.
+- `src/features/reading-runs/useReadingRunsDetail.ts` — ОДИН хук на обидва нові UI-екрани
+  (той самий "один запит, спільний кеш" принцип, що й `useReadingHistory` у Фазі 2 ТЗ),
+  завантажує всі `reading_run` книги разом з оцінкою/спогадом/До-Після/капсулою/DNF-знімком
+  кожного (`getByReadingRunId`) і статистикою сесій.
+- `src/lib/rereadComparison.ts` — чисті функції: `computeRunReadingStats` (сума тривалості,
+  унікальні дні, домінантний `readingExperience`), `computeNumericDelta` (різниця між двома
+  числовими значеннями сусідніх прочитань, `null` — якщо нема з чим порівнювати).
+- `readingRunStatusLabels` (`src/design/i18n-labels.ts`) — українські підписи `reading_run.status`.
+- 24 нових тести (700 → 724): `RatingRepository.test.ts` (7 → 11 — перебудований під
+  `getCurrent`/`upsertCurrent`, перечитування отримує ВЛАСНУ оцінку, `listByUserBookIds`
+  повертає найновішу серед кількох run), `migrationRunner.test.ts` (+8 — той самий пріоритет,
+  що й `021`, включно з `did_not_finish`-кандидатом), `rereadComparison.test.ts` (+12, новий
+  файл — `computeRunReadingStats`/`computeNumericDelta`).
+
+**Змінено:**
+- `RatingRepository.getByUserBookId`/`upsert` → `.getCurrent`/`.upsertCurrent` (перейменовано,
+  той самий підхід, що й Фази 8-9, 11); `listByUserBookIds` НЕ перейменований — лишається під
+  тією самою назвою (4 зовнішні споживачі: Wrapped/Сезони/Профіль читача/"Цього дня"), лише
+  повертає тепер найновішу оцінку книги серед можливих кількох рядків. `ORDER BY created_at
+  DESC` доповнено тай-брейком `, rowid DESC` — з появою кількох оцінок на книгу (Фаза 12)
+  виявилось (тестом `RatingRepository.test.ts`), що дві оцінки, збережені в межах однієї
+  мілісекунди, мали рівний `created_at`, і без `rowid` "найновіша" непередбачувано могла
+  виявитись насправді старішою.
+- `useRating`/`useSetRating` — виклики змінено на `getCurrent`/`upsertCurrent`; форма виклику з
+  UI НЕ змінюється. `useImportGoodreadsCsv` — виклик змінено на `upsertCurrent`, поведінка
+  імпорту НЕ змінюється (`addToLibrary` не створює `reading_run`).
+- `docs/READING_RUN.md` — нова секція "Фаза 12" (rating + три UI-фічі), роадмап "Свідомо ПОЗА
+  межами" замінено на "Усі фази REREADING MODEL завершено". `docs/DATABASE.md` — запис міграції
+  25, схема `rating` оновлена.
+
 ## POLYTSIA V1.6.1, Фаза 11 — DNF прив'язаний до reading_run (REREADING MODEL)
 
 **Дата:** 2026-09-13

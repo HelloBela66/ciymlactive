@@ -8,13 +8,17 @@ import type { Rating } from '@/types/rating';
 
 const log = createLogger('features/book-details/rating');
 
+/** REREADING MODEL, Фаза 12 — оцінка ПОТОЧНОГО (найновішого) run книги: `getCurrent` (не
+ * `getByUserBookId` — Фаза 12 прибрала цей метод, `docs/READING_RUN.md` §"Фаза 12") резолвить
+ * поточний run динамічно, тож перечитування показує ВЛАСНУ оцінку, а не оцінку попереднього
+ * прочитання. */
 export function useRating(userBookId: string | undefined) {
   return useQuery<Rating | null>({
     queryKey: queryKeys.ratings.byUserBook(userBookId ?? ''),
     queryFn: async () => {
       if (!userBookId) return null;
       const db = await getDatabase();
-      return RatingRepository.getByUserBookId(db, userBookId);
+      return RatingRepository.getCurrent(db, userBookId);
     },
     enabled: !!userBookId,
   });
@@ -26,7 +30,7 @@ export function useSetRating() {
   return useMutation<Rating, Error, { userBookId: string; value: number; review?: string | null }>({
     mutationFn: async (params) => {
       const db = await getDatabase();
-      return RatingRepository.upsert(db, params);
+      return RatingRepository.upsertCurrent(db, params);
     },
     onSuccess: (rating) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ratings.byUserBook(rating.userBookId) });

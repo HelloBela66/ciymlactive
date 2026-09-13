@@ -271,6 +271,20 @@ sync/catalog backend, але жодна читацька дія (старт се
     вдруге, автоматично отримує ВЛАСНИЙ знімок — жодних змін в UI (`DnfReflectionSection`) не
     знадобилось, на відміну від Фази 10, бо тут немає "старого запису, що маскує пропозицію
     нового" — `getCurrent` сама завжди показує знімок актуального run.
+25. **025_rating_run** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 12) — `docs/READING_RUN.md`
+    §"Фаза 12". `rating` мала `UNIQUE(user_book_id)` від самого початку (Milestone 1) і НЕ була
+    згадана в жодній із попередніх фаз REREADING MODEL — прогалину виявлено лише при
+    проєктуванні порівняння прочитань ("Як змінилася книга для тебе"), яке вимагає оцінку як
+    одну з осей порівняння. Дзеркалить `021`/`022` і схемою (rebuild: `UNIQUE(user_book_id)` →
+    `UNIQUE(reading_run_id)`), і backfill-пріоритетом (найновіший `finished`/`did_not_finish`
+    run, інакше найновіший run узагалі, інакше `NULL`) — НЕ обмежений лише `did_not_finish`, на
+    відміну від `024`: рейтинг, на відміну від DNF-знімка, цілком може стосуватись і
+    `finished`, і `did_not_finish` run. `RatingRepository.getCurrent`/`upsertCurrent`
+    (перейменовані з `getByUserBookId`/`upsert`) — та сама динамічна ре-резолюція, що й
+    `BookMemoryRepository`/`PreReadingReflectionRepository`/`DnfReflectionRepository`.
+    `listByUserBookIds` (батч для Wrapped/Сезонів/Профілю читача/"Цього дня") НЕ перейменований
+    — лишається, лише повертає тепер найновішу оцінку книги серед (можливо кількох) рядків, той
+    самий принцип, що й `BookCapsuleRepository.getByUserBookId` (Фаза 10).
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -311,7 +325,7 @@ UserBook 1---* ReadingSession
 UserBook 1---* ReadingProgress    (immutable checkpoints, похідні від сесій + ручних правок)
 UserBook 1---* Note
 UserBook 1---* Quote
-UserBook 1---0..1 Rating
+UserBook 1---* Rating              (Фаза 12 — БЕЗ UNIQUE(user_book_id), щонайбільше одна НА ReadingRun)
 UserBook 1---0..1 BookMemory        (Milestone 11 Фаза 7 — рефлексія + посилання на записи щоденника)
 UserBook 1---* BookCapsule           (POLYTSIA V1.6 Фаза 4 — БЕЗ UNIQUE, перечитування може мати кілька;
                                        Фаза 10 — кожна капсула фіксує свій ReadingRun при створенні)
@@ -619,14 +633,22 @@ CREATE INDEX idx_quote_favorite ON quote(is_favorite);
 CREATE INDEX idx_quote_created_at ON quote(created_at);
 CREATE INDEX idx_quote_revisit_later ON quote(revisit_later);
 
+-- REREADING MODEL, Фаза 12 (`025_rating_run.ts`, `docs/READING_RUN.md`) — щонайбільше ОДНА
+-- НА RUN (UNIQUE(reading_run_id), НЕ user_book_id — до Фази 12 було навпаки: одна на книгу,
+-- і друге прочитання БЕЗПОВОРОТНО перезаписувало оцінку першого). reading_run_id — СВІДОМО
+-- БЕЗ SQL REFERENCES (той самий задокументований урок), nullable — книга без жодного
+-- reading_run (Фаза 7 addToLibrary, свідомо не підключена) і далі має "книжкову" оцінку.
 CREATE TABLE rating (
   id TEXT PRIMARY KEY,
-  user_book_id TEXT NOT NULL UNIQUE REFERENCES user_book(id) ON DELETE CASCADE,
+  user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
+  reading_run_id TEXT UNIQUE,
   value REAL NOT NULL CHECK (value >= 0.5 AND value <= 5 AND (value * 2) = CAST(value * 2 AS INTEGER)),
   review TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE INDEX idx_rating_user_book ON rating(user_book_id);
 
 -- «До/Після» (`014_pre_reading_reflection.ts`, POLYTSIA V1.6 Фаза 6; REREADING MODEL Фаза 9,
 -- `022_pre_reading_reflection_run.ts`, `docs/READING_RUN.md`) — щонайбільше ОДНА НА RUN

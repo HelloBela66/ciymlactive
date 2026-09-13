@@ -19,6 +19,19 @@ export const userBookStatusLabels = {
 
 export type UserBookStatus = keyof typeof userBookStatusLabels;
 
+/** REREADING MODEL, Фаза 12 (`docs/READING_RUN.md` §"Фаза 12") — підписи `reading_run.status`
+ * (`src/types/readingRun.ts`, `ReadingRunStatusSchema`) для нового "Історія прочитань"
+ * accordion на Book Details (`ReadingRunsHistorySection`) і екрана порівняння
+ * (`app/reread-comparison/[workId].tsx`). НЕ те саме, що `userBookStatusLabels` вище —
+ * `reading_run.status` має лише три значення (термінальний результат ОДНОГО прочитання), без
+ * "Хочу прочитати"/"Відкладено"/"Перечитую" (докладніше — `docs/READING_RUN.md`).
+ */
+export const readingRunStatusLabels = {
+  in_progress: 'Читається зараз',
+  finished: 'Прочитано',
+  did_not_finish: 'Не дочитано',
+} as const;
+
 export const editionFormatLabels = {
   hardcover: 'Тверда обкладинка',
   paperback: "М'яка обкладинка",
