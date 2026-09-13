@@ -177,6 +177,16 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     ['user_book-2', 'edition-2', 'finished', '2026-06-01T08:00:00.000Z', '2026-07-15T20:00:00.000Z', 1216, 1, t0, t1, null],
   );
 
+  // ---- прочитання (POLYTSIA V1.6.1, Фаза 6/27) — `reading_run` ДО Фази 27 взагалі не входила
+  // в `BACKUP_TABLE_ORDER` (реальна прогалина, закрита цією фазою); тут — одне поточне
+  // прочитання user_book-1, з обома його сесіями нижче явно пролінкованими на нього, щоб
+  // round-trip справді вправляв нову таблицю нетривіально, а не лише порожнім масивом.
+  await db.runAsync(
+    `INSERT INTO reading_run (id, user_book_id, run_number, status, started_at, finished_at, is_legacy_backfill, created_at, updated_at, deleted_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    ['run-1', 'user_book-1', 1, 'in_progress', '2026-08-10T08:00:00.000Z', null, 0, t0, t1, null],
+  );
+
   await db.runAsync(
     `INSERT INTO shelf (id, name, description, is_system, sort_order, created_at, updated_at, theme) VALUES (?,?,?,?,?,?,?,?)`,
     ['shelf-1', 'Улюблене', 'Книги, які варто перечитати', 0, 0, t0, t0, 'autumn'],
@@ -187,22 +197,23 @@ async function seedRepresentativeDatabase(db: SQLiteDatabase): Promise<void> {
     t1,
   ]);
 
-  // ---- сесії читання + прогрес (2 сесії на user_book-1: одна з паузою, одна без) ----
+  // ---- сесії читання + прогрес (2 сесії на user_book-1: одна з паузою, одна без; обидві
+  // пролінковані на run-1 вище) ----
   await db.runAsync(
     `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
-       start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at, deleted_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at, deleted_at, reading_run_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       'session-1', 'user_book-1', '2026-08-15T19:00:00.000Z', '2026-08-15T19:42:00.000Z', 30,
       JSON.stringify([{ start: '2026-08-15T19:20:00.000Z', end: '2026-08-15T19:25:00.000Z' }]),
-      60, 90, 2220, 'Тихий вечір', 0, t0, t0, null,
+      60, 90, 2220, 'Тихий вечір', 0, t0, t0, null, 'run-1',
     ],
   );
   await db.runAsync(
     `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
-       start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at, deleted_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ['session-2', 'user_book-1', '2026-09-09T21:00:00.000Z', '2026-09-09T21:30:00.000Z', null, '[]', 90, 120, 1800, null, 1, t1, t1, null],
+       start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at, deleted_at, reading_run_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ['session-2', 'user_book-1', '2026-09-09T21:00:00.000Z', '2026-09-09T21:30:00.000Z', null, '[]', 90, 120, 1800, null, 1, t1, t1, null, 'run-1'],
   );
 
   await db.runAsync(
@@ -391,6 +402,8 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
     expect(new Set(exported.user_book?.map((r) => r.status))).toEqual(new Set(['reading', 'finished'])); // статуси бібліотеки
     expect(exported.shelf).toHaveLength(1); // полиці
     expect(exported.series_entry).toHaveLength(1); // серії
+    expect(exported.reading_run).toHaveLength(1); // прочитання (Фаза 6/27)
+    expect(exported.reading_session?.every((r) => r.reading_run_id === 'run-1')).toBe(true); // обидві сесії пролінковані
     expect(exported.reading_session).toHaveLength(2); // сесії
     expect(exported.reading_progress).toHaveLength(2); // прогрес
     expect(exported.note).toHaveLength(2); // щоденник (note)

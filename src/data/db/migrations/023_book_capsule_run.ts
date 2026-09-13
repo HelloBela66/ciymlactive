@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { backfillCapsuleRunLinks } from '@/data/db/legacyRunBackfill';
 
 /**
  * Migration 023 — REREADING MODEL, Фаза 10 (POLYTSIA V1.6.1). `docs/READING_RUN.md` — повне
@@ -58,34 +59,16 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  */
 export const version = 23;
 
-interface LegacyCapsuleRow {
-  id: string;
-  user_book_id: string;
-  created_at: string;
-}
-
+/**
+ * ЧАСТИНА 2 (backfill) винесена в `src/data/db/legacyRunBackfill.ts`
+ * (`backfillCapsuleRunLinks`, POLYTSIA V1.6.1, Фаза 27) — дослівно той самий алгоритм, що й тут
+ * був раніше, лише перевикористовується ще й `BackupRepository`-відновленням старих бекапів.
+ */
 export async function up(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     ALTER TABLE book_capsule ADD COLUMN reading_run_id TEXT;
     CREATE INDEX idx_book_capsule_reading_run ON book_capsule(reading_run_id);
   `);
 
-  const legacyCapsules = await db.getAllAsync<LegacyCapsuleRow>(
-    `SELECT id, user_book_id, created_at FROM book_capsule WHERE reading_run_id IS NULL`,
-  );
-  if (legacyCapsules.length === 0) return;
-
-  for (const capsule of legacyCapsules) {
-    const run = await db.getFirstAsync<{ id: string }>(
-      `SELECT id FROM reading_run
-       WHERE user_book_id = ? AND deleted_at IS NULL
-         AND status IN ('finished', 'did_not_finish')
-         AND finished_at IS NOT NULL AND finished_at <= ?
-       ORDER BY finished_at DESC LIMIT 1`,
-      [capsule.user_book_id, capsule.created_at],
-    );
-    if (!run) continue;
-
-    await db.runAsync(`UPDATE book_capsule SET reading_run_id = ? WHERE id = ?`, [run.id, capsule.id]);
-  }
+  await backfillCapsuleRunLinks(db);
 }

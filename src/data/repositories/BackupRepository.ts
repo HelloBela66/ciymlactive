@@ -32,6 +32,19 @@ const BACKUP_TABLE_ORDER = [
   'series',
   'series_entry',
   'user_book',
+  // POLYTSIA V1.6.1, Фаза 27 — одразу після `user_book` (`019_reading_run.ts`): `reading_run`
+  // посилається лише на `user_book` (реальний FK, `ON DELETE CASCADE`), уже присутній у масиві
+  // раніше цього рядка. ДО цієї фази `reading_run` взагалі не входила в цей список — реальна
+  // прогалина (`docs/SOFT_DELETE_READINESS.md`-сусід за духом, але саме тут вперше знайдена):
+  // бекап тихо ГУБИВ УСЮ історію перечитувань користувача (жоден рядок `reading_run` ніколи не
+  // потрапляв у файл), і `restoreAll` не міг би її відновити навіть якби експорт її містив.
+  // `reading_session`/`book_memory`/`pre_reading_reflection`/`book_capsule`/`dnf_reflection`/
+  // `rating` нижче лише М'ЯКО посилаються на `reading_run_id` (без SQL FK, той самий
+  // задокументований урок — `008_note_category.ts`/`020_reading_run_backfill.ts`), тож формально
+  // порядок вставки між ними й `reading_run` не є вимогою FK-цілісності, але `reading_run` тут
+  // однаково йде ПЕРШОЮ серед них — той самий "батьки перед дітьми" принцип, що й усюди в цьому
+  // списку.
+  'reading_run',
   'shelf',
   'shelf_book',
   'reading_session',

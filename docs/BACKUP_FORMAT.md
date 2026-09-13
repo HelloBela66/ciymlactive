@@ -14,7 +14,7 @@
     "work": [...], "work_author": [...], "work_genre": [...], "lore_entity": [...],
     "edition": [...], "edition_translator": [...], "book_source": [...], "field_provenance": [...],
     "series": [...], "series_entry": [...],
-    "user_book": [...], "shelf": [...], "shelf_book": [...],
+    "user_book": [...], "reading_run": [...], "shelf": [...], "shelf_book": [...],
     "reading_session": [...], "reading_progress": [...],
     "note_category": [...], "note": [...], "quote": [...], "rating": [...],
     "pre_reading_reflection": [...], "dnf_reflection": [...], "book_memory": [...],
@@ -71,6 +71,17 @@
 10. POLYTSIA V1.6, Фаза 12 — `dnf_reflection` (знімок DNF, `docs/DNF_IMPROVEMENT.md`)
     відновлюється звичайною вставкою, той самий "без окремого кроку" випадок, що й решта пункту
     вище.
+11. POLYTSIA V1.6.1, Фаза 27 — `reading_run` (REREADING MODEL, `docs/READING_RUN.md`) додана до
+    списку таблиць лише в цій фазі (реальна прогалина до цього — бекап тихо губив УСЮ історію
+    перечитувань). Одразу після вставки — окремий крок, `backfillAllLegacyReadingRunLinks`
+    (`src/data/db/legacyRunBackfill.ts`, викликається з `useRestoreBackup`, той самий "збій не
+    валить весь restore" підхід, що й нагадування капсул вище): файл, зроблений ДО Фази 6, не
+    містить ні `reading_run`, ні `reading_run_id` на сесіях/спогадах/капсулах/рейтингах/нотатках
+    "До"/DNF-знімках — цей крок добудовує СУМІСНИЙ legacy `reading_run` для таких книг, той самий
+    алгоритм, що колись зробила одноразова міграція 020-025 (яка вдруге не спрацює — вона
+    виконується рівно раз у житті БД, а не при кожному restore). Для файлу, зробленого вже після
+    Фази 6 (де `reading_run` присутня) — безпечний no-op, нічого не дублює й не перезаписує.
+    Докладніше — `docs/READING_RUN.md` §"Фаза 27".
 
 ## Backup Health UX (Фаза 13)
 

@@ -1,6 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { generateId } from '@/lib/uuid';
-import { nowIso } from '@/lib/dateUtils';
+import { backfillLegacyReadingRuns } from '@/data/db/legacyRunBackfill';
 
 /**
  * Migration 020 — REREADING MODEL, Фаза 6b (POLYTSIA V1.6.1). Продовження `019_reading_run.ts`
@@ -77,84 +76,17 @@ import { nowIso } from '@/lib/dateUtils';
  */
 export const version = 20;
 
-interface LegacyUserBookRow {
-  id: string;
-  status: string;
-  started_at: string | null;
-  finished_at: string | null;
-  updated_at: string;
-}
-
-interface SessionAggregateRow {
-  user_book_id: string;
-  min_started_at: string | null;
-  max_ended_at: string | null;
-}
-
-interface DnfRow {
-  user_book_id: string;
-  created_at: string;
-}
-
+/**
+ * ЧАСТИНА 2 (backfill) винесена в `src/data/db/legacyRunBackfill.ts`
+ * (`backfillLegacyReadingRuns`, POLYTSIA V1.6.1, Фаза 27) — дослівно той самий алгоритм, що й
+ * тут був раніше, лише перевикористовується ще й `BackupRepository`-відновленням старих
+ * бекапів (докладне обґрунтування — коментар над самою функцією).
+ */
 export async function up(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     ALTER TABLE reading_session ADD COLUMN reading_run_id TEXT;
     CREATE INDEX idx_reading_session_reading_run ON reading_session(reading_run_id);
   `);
 
-  const userBooks = await db.getAllAsync<LegacyUserBookRow>(
-    `SELECT id, status, started_at, finished_at, updated_at FROM user_book`,
-  );
-  if (userBooks.length === 0) return; // Порожня/нова БД — нічого бекфілити.
-
-  const sessionAggregateRows = await db.getAllAsync<SessionAggregateRow>(
-    `SELECT
-       user_book_id,
-       MIN(started_at) AS min_started_at,
-       MAX(CASE WHEN ended_at IS NOT NULL THEN ended_at END) AS max_ended_at
-     FROM reading_session
-     GROUP BY user_book_id`,
-  );
-  const sessionAggregateByUserBookId = new Map(sessionAggregateRows.map((row) => [row.user_book_id, row]));
-
-  const dnfRows = await db.getAllAsync<DnfRow>(`SELECT user_book_id, created_at FROM dnf_reflection`);
-  const dnfCreatedAtByUserBookId = new Map(dnfRows.map((row) => [row.user_book_id, row.created_at]));
-
-  const now = nowIso();
-
-  for (const userBook of userBooks) {
-    const sessionAggregate = sessionAggregateByUserBookId.get(userBook.id);
-    const startedAt = userBook.started_at ?? sessionAggregate?.min_started_at ?? null;
-    if (!startedAt) continue; // Книга ніколи не була розпочата — legacy run не створюється.
-
-    let status: 'in_progress' | 'finished' | 'did_not_finish';
-    let finishedAt: string | null;
-
-    if (userBook.status === 'finished') {
-      status = 'finished';
-      finishedAt = userBook.finished_at ?? sessionAggregate?.max_ended_at ?? userBook.updated_at;
-    } else if (userBook.status === 'did_not_finish') {
-      status = 'did_not_finish';
-      finishedAt = dnfCreatedAtByUserBookId.get(userBook.id) ?? userBook.updated_at;
-    } else {
-      // 'reading' | 'rereading' | 'paused' | 'want_to_read' (аномалія даних, якщо started_at
-      // усе ж є) — усі трактуються як один незавершений run, докладніше в коментарі над файлом.
-      status = 'in_progress';
-      finishedAt = null;
-    }
-
-    const runId = generateId();
-    await db.runAsync(
-      `INSERT INTO reading_run (
-         id, user_book_id, run_number, status, started_at, finished_at,
-         is_legacy_backfill, created_at, updated_at
-       ) VALUES (?, ?, 1, ?, ?, ?, 1, ?, ?)`,
-      [runId, userBook.id, status, startedAt, finishedAt, now, now],
-    );
-
-    await db.runAsync(`UPDATE reading_session SET reading_run_id = ? WHERE user_book_id = ?`, [
-      runId,
-      userBook.id,
-    ]);
-  }
+  await backfillLegacyReadingRuns(db);
 }

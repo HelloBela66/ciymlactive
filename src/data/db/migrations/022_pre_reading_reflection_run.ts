@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { backfillNewestFinishedRunLink } from '@/data/db/legacyRunBackfill';
 
 /**
  * Migration 022 — REREADING MODEL, Фаза 9 (POLYTSIA V1.6.1). `docs/READING_RUN.md` — повне
@@ -46,17 +47,6 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 export const version = 22;
 export const manualTransaction = true;
 
-interface LegacyReflectionRow {
-  id: string;
-  user_book_id: string;
-}
-
-interface CandidateRunRow {
-  id: string;
-  status: 'in_progress' | 'finished' | 'did_not_finish';
-  run_number: number;
-}
-
 export async function up(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA foreign_keys = OFF;');
   try {
@@ -98,31 +88,11 @@ export async function up(db: SQLiteDatabase): Promise<void> {
     await db.execAsync('PRAGMA foreign_keys = ON;');
   }
 
-  const legacyReflections = await db.getAllAsync<LegacyReflectionRow>(
-    `SELECT id, user_book_id FROM pre_reading_reflection WHERE reading_run_id IS NULL`,
-  );
-  if (legacyReflections.length === 0) return;
-
+  // ЧАСТИНА 2 (backfill) винесена в `src/data/db/legacyRunBackfill.ts`
+  // (`backfillNewestFinishedRunLink`, POLYTSIA V1.6.1, Фаза 27) — дослівно той самий алгоритм,
+  // що й тут був раніше, лише перевикористовується ще й `BackupRepository`-відновленням старих
+  // бекапів.
   await db.withTransactionAsync(async () => {
-    for (const reflection of legacyReflections) {
-      const candidates = await db.getAllAsync<CandidateRunRow>(
-        `SELECT id, status, run_number FROM reading_run
-         WHERE user_book_id = ? AND deleted_at IS NULL
-         ORDER BY run_number DESC`,
-        [reflection.user_book_id],
-      );
-      if (candidates.length === 0) continue;
-
-      const finishedCandidate = candidates.find(
-        (run) => run.status === 'finished' || run.status === 'did_not_finish',
-      );
-      const chosenRun = finishedCandidate ?? candidates[0];
-      if (!chosenRun) continue;
-
-      await db.runAsync(`UPDATE pre_reading_reflection SET reading_run_id = ? WHERE id = ?`, [
-        chosenRun.id,
-        reflection.id,
-      ]);
-    }
+    await backfillNewestFinishedRunLink(db, 'pre_reading_reflection');
   });
 }

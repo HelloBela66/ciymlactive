@@ -15,6 +15,7 @@ import { createLogger } from '@/lib/logger';
 import { queryKeys } from '@/lib/queryKeys';
 import { useMutationErrorHandler } from '@/lib/useMutationErrorHandler';
 import { rebuildCapsuleRemindersAsync } from '@/features/memory/useBookCapsule';
+import { backfillAllLegacyReadingRunLinks } from '@/data/db/legacyRunBackfill';
 
 const log = createLogger('features/backup');
 
@@ -109,6 +110,24 @@ export function useRestoreBackup() {
     mutationFn: async (envelope: BackupEnvelope) => {
       const db = await getDatabase();
       await BackupRepository.restoreAll(db, envelope.data);
+      // POLYTSIA V1.6.1, Фаза 27 — `restoreAll` щойно вставила рядки файлу як є: якщо файл
+      // зроблено ДО Фази 6 (`reading_run` тоді ще не існувала й не входила в
+      // `BACKUP_TABLE_ORDER` — реальна прогалина, знайдена й закрита саме цією фазою), щойно
+      // відновлені сесії/спогади/капсули/рейтинги/нотатки "До"/DNF-знімки лишаються без
+      // `reading_run`/`reading_run_id`, точнісінько як до одноразової міграції 019-025 — яка,
+      // на відміну від restore, виконується РІВНО ОДИН РАЗ у житті БД і тут вдруге не
+      // спрацює. `backfillAllLegacyReadingRunLinks` — той самий backfill-алгоритм цих міграцій,
+      // винесений у спільний модуль (`docs/READING_RUN.md` §Restore) — заповнює прогалину
+      // одразу після restore; для СВІЖОГО бекапу (де `reading_run` вже заповнена) — безпечний
+      // no-op (докладніше — коментар над самою функцією). Той самий "збій допоміжного кроку не
+      // позначає весь restore невдалим" підхід, що й нижче для нагадувань капсул.
+      try {
+        await backfillAllLegacyReadingRunLinks(db);
+      } catch (error) {
+        log.error('Не вдалося доповнити легасі-прочитання (ReadingRun) після відновлення', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       // POLYTSIA V1.6, Фаза 4, п.36 ТЗ — дані капсул щойно відновлено, але OS-розклад їхніх
       // сповіщень (`notification_identifier` у файлі) належить іншому запуску/пристрою: тихо
       // (без запиту дозволу) перепланувати майбутні нагадування на щойно відновлених даних.

@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { backfillNewestFinishedRunLink } from '@/data/db/legacyRunBackfill';
 
 /**
  * Migration 025 — REREADING MODEL, Фаза 12 (POLYTSIA V1.6.1). `docs/READING_RUN.md`
@@ -32,17 +33,6 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  */
 export const version = 25;
 export const manualTransaction = true;
-
-interface LegacyRatingRow {
-  id: string;
-  user_book_id: string;
-}
-
-interface CandidateRunRow {
-  id: string;
-  status: 'in_progress' | 'finished' | 'did_not_finish';
-  run_number: number;
-}
 
 export async function up(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA foreign_keys = OFF;');
@@ -81,28 +71,11 @@ export async function up(db: SQLiteDatabase): Promise<void> {
     await db.execAsync('PRAGMA foreign_keys = ON;');
   }
 
-  const legacyRatings = await db.getAllAsync<LegacyRatingRow>(
-    `SELECT id, user_book_id FROM rating WHERE reading_run_id IS NULL`,
-  );
-  if (legacyRatings.length === 0) return;
-
+  // ЧАСТИНА 2 (backfill) винесена в `src/data/db/legacyRunBackfill.ts`
+  // (`backfillNewestFinishedRunLink`, POLYTSIA V1.6.1, Фаза 27) — дослівно той самий алгоритм,
+  // що й тут був раніше, лише перевикористовується ще й `BackupRepository`-відновленням старих
+  // бекапів.
   await db.withTransactionAsync(async () => {
-    for (const rating of legacyRatings) {
-      const candidates = await db.getAllAsync<CandidateRunRow>(
-        `SELECT id, status, run_number FROM reading_run
-         WHERE user_book_id = ? AND deleted_at IS NULL
-         ORDER BY run_number DESC`,
-        [rating.user_book_id],
-      );
-      if (candidates.length === 0) continue;
-
-      const finishedCandidate = candidates.find(
-        (run) => run.status === 'finished' || run.status === 'did_not_finish',
-      );
-      const chosenRun = finishedCandidate ?? candidates[0];
-      if (!chosenRun) continue;
-
-      await db.runAsync(`UPDATE rating SET reading_run_id = ? WHERE id = ?`, [chosenRun.id, rating.id]);
-    }
+    await backfillNewestFinishedRunLink(db, 'rating');
   });
 }

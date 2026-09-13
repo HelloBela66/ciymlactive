@@ -1660,3 +1660,278 @@ describe('migrateDbIfNeeded — 027_soft_delete_readiness (Фаза 26)', () => 
     expect(rating?.deleted_at).toBe(MIGRATION_027_NOW);
   });
 });
+
+/**
+ * ФАЗА 27 — "MIGRATION SAFETY NET": наскрізні тести, яких досі не було. Кожен тест 009-027 вище
+ * стартує з `__applyMigrationsForTests(db, N-1)` — рівно ОДИН крок перед конкретною міграцією, з
+ * мінімальним seed, побудованим САМЕ під неї. Це вичерпно доводить коректність КОЖНОЇ окремої
+ * міграції, але НІКОЛИ не перевіряло, що ВЕСЬ ланцюжок (12+ послідовних міграцій за один виклик
+ * `migrateDbIfNeeded`, а не по одній) коректно компонується РАЗОМ на РЕАЛІСТИЧНІЙ бібліотеці, де
+ * кілька різних типів сутностей (сесії + book_memory + рейтинг + капсула + DNF-знімок)
+ * співіснують на ОДНИХ і тих самих книгах одночасно — саме там і трапляються реальні
+ * cross-migration регресії (напр. `PRAGMA foreign_keys` перемикання в rebuild-міграціях 021/022/
+ * 024/025 на тлі реальних FK-посилань з note/quote/reading_progress, чи backfill 020-025, що
+ * мусить дати ТОЙ САМИЙ результат, коли виконується як частина одного великого стрибка, а не
+ * ізольовано). Два "історичні базові рівні" — межі, які реально існували в git-історії проєкту
+ * (`grep`-перевірено по коментарях самих файлів міграцій): V1.5 закінчується міграцією 011
+ * (`011_revisit_later.ts`, остання з явним "POLYTSIA V1.5"), V1.6 — міграцією 018
+ * (`018_shelf_book_index.ts`); V1.6.1 починається з 019.
+ */
+describe('migrateDbIfNeeded — Фаза 27, наскрізний стрибок: V1.5 baseline (migration 011) → LATEST_SCHEMA_VERSION', () => {
+  const V15_NOW = '2025-11-01T00:00:00.000Z';
+
+  /** Реалістична бібліотека "як вона виглядала б у V1.5" — до появи `book_capsule`/
+   * `pre_reading_reflection`/`dnf_reflection`/`lore_entity`/`reading_run` (усі — V1.6/V1.6.1).
+   * `book_memory` (004) уже існує на цьому рівні — у СТАРІЙ схемі (`UNIQUE(user_book_id)`, без
+   * `reading_run_id`), той самий легасі-рядок, що backfill 021 має підхопити. */
+  async function seedV15Library(db: SQLiteDatabase): Promise<void> {
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'v15-a-work', 'Книга A (у процесі)', V15_NOW, V15_NOW,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['v15-a-edition', 'v15-a-work', 'Книга A (у процесі)', 'uk', 'paperback', V15_NOW, V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, started_at, current_page, added_at, updated_at) VALUES (?,?,'reading',?,120,?,?)`,
+      ['v15-a', 'v15-a-edition', '2025-11-01T00:00:00.000Z', V15_NOW, V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page, duration_seconds, is_edited, created_at, updated_at)
+       VALUES ('v15-a-session-1','v15-a','2025-11-01T00:00:00.000Z','2025-11-01T01:00:00.000Z','[]',0,60,3600,0,?,?)`,
+      [V15_NOW, V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO note_category (id, user_book_id, label, sort_order, created_at) VALUES ('v15-cat-1','v15-a','Важливо',0,?)`,
+      [V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, session_id, type, text, category_id, created_at, updated_at)
+       VALUES ('v15-note-1','v15-a','v15-a-session-1','moment','Цікавий момент','v15-cat-1',?,?)`,
+      [V15_NOW, V15_NOW],
+    );
+
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'v15-b-work', 'Книга B (прочитана)', V15_NOW, V15_NOW,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['v15-b-edition', 'v15-b-work', 'Книга B (прочитана)', 'uk', 'paperback', V15_NOW, V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, started_at, finished_at, current_page, added_at, updated_at)
+       VALUES ('v15-b','v15-b-edition','finished','2025-10-01T00:00:00.000Z','2025-10-15T00:00:00.000Z',300,?,?)`,
+      [V15_NOW, '2025-10-15T00:00:00.000Z'],
+    );
+    await db.runAsync(
+      `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page, duration_seconds, is_edited, created_at, updated_at)
+       VALUES ('v15-b-session-1','v15-b','2025-10-01T00:00:00.000Z','2025-10-15T00:00:00.000Z','[]',0,300,7200,0,?,?)`,
+      [V15_NOW, V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO rating (id, user_book_id, value, review, created_at, updated_at) VALUES ('v15-rating-1','v15-b',4.5,'Дуже сподобалось',?,?)`,
+      ['2025-10-15T00:00:00.000Z', '2025-10-15T00:00:00.000Z'],
+    );
+    // Легасі `book_memory` — СТАРА схема (004/005), ще без `reading_run_id`.
+    await db.runAsync(
+      `INSERT INTO book_memory (id, user_book_id, reflection, entry_refs, template_id, created_at, updated_at)
+       VALUES ('v15-memory-1','v15-b','Книга, яку хочеться перечитати.','[]','classic',?,?)`,
+      ['2025-10-16T00:00:00.000Z', '2025-10-16T00:00:00.000Z'],
+    );
+
+    // Книга C — щe навіть не розпочата: жодної сесії, `started_at` NULL.
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'v15-c-work', 'Книга C (хочу прочитати)', V15_NOW, V15_NOW,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['v15-c-edition', 'v15-c-work', 'Книга C (хочу прочитати)', 'uk', 'paperback', V15_NOW, V15_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES ('v15-c','v15-c-edition','want_to_read',0,?,?)`,
+      [V15_NOW, V15_NOW],
+    );
+  }
+
+  it('фінальна версія — LATEST_SCHEMA_VERSION; уся стара бібліотека (сесії/нотатки/рейтинг/спогад) фізично неушкоджена', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 11);
+    const baselineVersion = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+    expect(baselineVersion?.user_version).toBe(11);
+    await seedV15Library(db);
+
+    const finalVersion = await migrateDbIfNeeded(db); // 12 → 27, 16 міграцій за один виклик.
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const session = await db.getFirstAsync<{ start_page: number; end_page: number }>(
+      `SELECT start_page, end_page FROM reading_session WHERE id = 'v15-a-session-1'`,
+    );
+    expect(session).toEqual({ start_page: 0, end_page: 60 });
+
+    const note = await db.getFirstAsync<{ text: string; category_id: string }>(
+      `SELECT text, category_id FROM note WHERE id = 'v15-note-1'`,
+    );
+    expect(note).toEqual({ text: 'Цікавий момент', category_id: 'v15-cat-1' });
+
+    const rating = await db.getFirstAsync<{ value: number; deleted_at: string | null }>(
+      `SELECT value, deleted_at FROM rating WHERE id = 'v15-rating-1'`,
+    );
+    expect(rating?.value).toBe(4.5);
+    expect(rating?.deleted_at).toBeNull(); // 027 (soft-delete) дійшла й до цього рядка.
+
+    const memory = await db.getFirstAsync<{ reflection: string }>(
+      `SELECT reflection FROM book_memory WHERE id = 'v15-memory-1'`,
+    );
+    expect(memory?.reflection).toBe('Книга, яку хочеться перечитати.');
+  });
+
+  it('019-021 (ReadingRun + backfill) відпрацювали в межах того самого стрибка: run на A (in_progress) і B (finished), НЕ на C; сесія A і спогад B пролінковані', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 11);
+    await seedV15Library(db);
+    await migrateDbIfNeeded(db);
+
+    const runA = await db.getFirstAsync<{ id: string; status: string }>(`SELECT id, status FROM reading_run WHERE user_book_id = 'v15-a'`);
+    expect(runA?.status).toBe('in_progress');
+
+    const runB = await db.getFirstAsync<{ id: string; status: string }>(`SELECT id, status FROM reading_run WHERE user_book_id = 'v15-b'`);
+    expect(runB?.status).toBe('finished');
+
+    const runC = await db.getFirstAsync(`SELECT id FROM reading_run WHERE user_book_id = 'v15-c'`);
+    expect(runC).toBeNull(); // ніколи не розпочата — legacy run не вигадується.
+
+    const sessionA = await db.getFirstAsync<{ reading_run_id: string | null }>(
+      `SELECT reading_run_id FROM reading_session WHERE id = 'v15-a-session-1'`,
+    );
+    expect(sessionA?.reading_run_id).toBe(runA?.id);
+
+    const memoryB = await db.getFirstAsync<{ reading_run_id: string | null }>(
+      `SELECT reading_run_id FROM book_memory WHERE id = 'v15-memory-1'`,
+    );
+    expect(memoryB?.reading_run_id).toBe(runB?.id);
+  });
+
+  it('нові V1.6/V1.6.1 таблиці (book_capsule/pre_reading_reflection/dnf_reflection/lore_entity) реально створені й читаються без помилок', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 11);
+    await seedV15Library(db);
+    await migrateDbIfNeeded(db);
+
+    const tables = await db.getAllAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'table'
+       AND name IN ('book_capsule', 'pre_reading_reflection', 'dnf_reflection', 'lore_entity', 'reading_run')
+       ORDER BY name`,
+    );
+    expect(tables.map((t) => t.name)).toEqual(
+      ['book_capsule', 'dnf_reflection', 'lore_entity', 'pre_reading_reflection', 'reading_run'].sort(),
+    );
+    await expect(db.getAllAsync(`SELECT * FROM book_capsule`)).resolves.toEqual([]);
+  });
+});
+
+describe('migrateDbIfNeeded — Фаза 27, наскрізний стрибок: V1.6 baseline (migration 018) → LATEST_SCHEMA_VERSION', () => {
+  const V16_NOW = '2026-06-01T00:00:00.000Z';
+
+  /** Реалістична бібліотека "як вона виглядала б у V1.6" — усі сутності Фаз 4-12 (капсула/
+   * спогад/нотатка "До"/DNF-знімок) уже існують, УСІ ще без `reading_run_id` (019-025 —
+   * V1.6.1, ще не застосовані на цьому рівні). */
+  async function seedV16Library(db: SQLiteDatabase): Promise<void> {
+    // Книга D — прочитана, з капсулою/спогадом/нотаткою "До"/рейтингом (усе — легасі-схема).
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'v16-d-work', 'Книга D (прочитана)', V16_NOW, V16_NOW,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['v16-d-edition', 'v16-d-work', 'Книга D (прочитана)', 'uk', 'paperback', V16_NOW, V16_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, started_at, finished_at, current_page, added_at, updated_at)
+       VALUES ('v16-d','v16-d-edition','finished','2026-05-01T00:00:00.000Z','2026-05-10T00:00:00.000Z',400,?,?)`,
+      [V16_NOW, '2026-05-10T00:00:00.000Z'],
+    );
+    await db.runAsync(
+      `INSERT INTO reading_session (id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page, duration_seconds, is_edited, created_at, updated_at)
+       VALUES ('v16-d-session-1','v16-d','2026-05-01T00:00:00.000Z','2026-05-10T00:00:00.000Z','[]',0,400,9000,0,?,?)`,
+      [V16_NOW, V16_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO rating (id, user_book_id, value, created_at, updated_at) VALUES ('v16-rating-1','v16-d',5,?,?)`,
+      ['2026-05-11T00:00:00.000Z', '2026-05-11T00:00:00.000Z'],
+    );
+    await db.runAsync(
+      `INSERT INTO book_memory (id, user_book_id, reflection, entry_refs, template_id, created_at, updated_at)
+       VALUES ('v16-memory-1','v16-d','Спогад','[]','classic',?,?)`,
+      ['2026-05-11T00:00:00.000Z', '2026-05-11T00:00:00.000Z'],
+    );
+    await db.runAsync(
+      `INSERT INTO pre_reading_reflection (id, user_book_id, reason_text, created_at, updated_at)
+       VALUES ('v16-reflection-1','v16-d','Порадили друзі',?,?)`,
+      ['2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'],
+    );
+    // Капсула створена ПІСЛЯ фінішу (finished_at) — саме той момент, за яким 023 лінкує "за
+    // найближчим у часі" run.
+    await db.runAsync(
+      `INSERT INTO book_capsule (id, user_book_id, lasting_thought, reopen_option, created_at, updated_at)
+       VALUES ('v16-capsule-1','v16-d','Незабутня книга','none',?,?)`,
+      ['2026-05-11T00:00:00.000Z', '2026-05-11T00:00:00.000Z'],
+    );
+
+    // Книга E — покинута, з DNF-знімком (легасі-схема).
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'v16-e-work', 'Книга E (покинута)', V16_NOW, V16_NOW,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['v16-e-edition', 'v16-e-work', 'Книга E (покинута)', 'uk', 'paperback', V16_NOW, V16_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, started_at, current_page, added_at, updated_at)
+       VALUES ('v16-e','v16-e-edition','did_not_finish','2026-05-20T00:00:00.000Z',80,?,?)`,
+      [V16_NOW, '2026-05-25T00:00:00.000Z'],
+    );
+    await db.runAsync(
+      `INSERT INTO dnf_reflection (id, user_book_id, page, reason, created_at, updated_at)
+       VALUES ('v16-dnf-1','v16-e',80,'too_slow',?,?)`,
+      ['2026-05-25T00:00:00.000Z', '2026-05-25T00:00:00.000Z'],
+    );
+  }
+
+  it('фінальна версія — LATEST_SCHEMA_VERSION; весь V1.6-корпус (капсула/спогад/нотатка "До"/DNF/рейтинг) фізично неушкоджений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 18);
+    const baselineVersion = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+    expect(baselineVersion?.user_version).toBe(18);
+    await seedV16Library(db);
+
+    const finalVersion = await migrateDbIfNeeded(db); // 19 → 27, 9 міграцій за один виклик.
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    expect((await db.getFirstAsync<{ value: number }>(`SELECT value FROM rating WHERE id = 'v16-rating-1'`))?.value).toBe(5);
+    expect((await db.getFirstAsync<{ reflection: string }>(`SELECT reflection FROM book_memory WHERE id = 'v16-memory-1'`))?.reflection).toBe('Спогад');
+    expect((await db.getFirstAsync<{ reason_text: string }>(`SELECT reason_text FROM pre_reading_reflection WHERE id = 'v16-reflection-1'`))?.reason_text).toBe('Порадили друзі');
+    expect((await db.getFirstAsync<{ lasting_thought: string }>(`SELECT lasting_thought FROM book_capsule WHERE id = 'v16-capsule-1'`))?.lasting_thought).toBe('Незабутня книга');
+    expect((await db.getFirstAsync<{ page: number }>(`SELECT page FROM dnf_reflection WHERE id = 'v16-dnf-1'`))?.page).toBe(80);
+  });
+
+  it('019-025 (ReadingRun + усі п\'ять backfill-міграцій) відпрацювали РАЗОМ на тих самих книгах: run D (finished)/E (did_not_finish), і рейтинг/спогад/нотатка "До"/капсула/DNF-знімок усі пролінковані на правильний run', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 18);
+    await seedV16Library(db);
+    await migrateDbIfNeeded(db);
+
+    const runD = await db.getFirstAsync<{ id: string; status: string }>(`SELECT id, status FROM reading_run WHERE user_book_id = 'v16-d'`);
+    expect(runD?.status).toBe('finished');
+    const runE = await db.getFirstAsync<{ id: string; status: string }>(`SELECT id, status FROM reading_run WHERE user_book_id = 'v16-e'`);
+    expect(runE?.status).toBe('did_not_finish');
+
+    expect((await db.getFirstAsync<{ reading_run_id: string }>(`SELECT reading_run_id FROM rating WHERE id = 'v16-rating-1'`))?.reading_run_id).toBe(runD?.id);
+    expect((await db.getFirstAsync<{ reading_run_id: string }>(`SELECT reading_run_id FROM book_memory WHERE id = 'v16-memory-1'`))?.reading_run_id).toBe(runD?.id);
+    expect((await db.getFirstAsync<{ reading_run_id: string }>(`SELECT reading_run_id FROM pre_reading_reflection WHERE id = 'v16-reflection-1'`))?.reading_run_id).toBe(runD?.id);
+    expect((await db.getFirstAsync<{ reading_run_id: string }>(`SELECT reading_run_id FROM book_capsule WHERE id = 'v16-capsule-1'`))?.reading_run_id).toBe(runD?.id);
+    expect((await db.getFirstAsync<{ reading_run_id: string }>(`SELECT reading_run_id FROM dnf_reflection WHERE id = 'v16-dnf-1'`))?.reading_run_id).toBe(runE?.id);
+
+    // 027 (soft-delete readiness) теж дійшла до цього стрибка — нова колонка присутня й NULL.
+    const capsule = await db.getFirstAsync<{ deleted_at: string | null }>(`SELECT deleted_at FROM book_capsule WHERE id = 'v16-capsule-1'`);
+    expect(capsule?.deleted_at).toBeNull();
+  });
+});

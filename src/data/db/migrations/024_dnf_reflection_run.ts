@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { backfillDnfReflectionRunLinks } from '@/data/db/legacyRunBackfill';
 
 /**
  * Migration 024 — REREADING MODEL, Фаза 11 (POLYTSIA V1.6.1). `docs/READING_RUN.md` §"Фаза 11"
@@ -46,18 +47,6 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 export const version = 24;
 export const manualTransaction = true;
 
-interface LegacyDnfReflectionRow {
-  id: string;
-  user_book_id: string;
-  created_at: string;
-}
-
-interface CandidateRunRow {
-  id: string;
-  finished_at: string | null;
-  run_number: number;
-}
-
 export async function up(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA foreign_keys = OFF;');
   try {
@@ -96,31 +85,11 @@ export async function up(db: SQLiteDatabase): Promise<void> {
     await db.execAsync('PRAGMA foreign_keys = ON;');
   }
 
-  const legacyReflections = await db.getAllAsync<LegacyDnfReflectionRow>(
-    `SELECT id, user_book_id, created_at FROM dnf_reflection WHERE reading_run_id IS NULL`,
-  );
-  if (legacyReflections.length === 0) return;
-
+  // ЧАСТИНА 2 (backfill) винесена в `src/data/db/legacyRunBackfill.ts`
+  // (`backfillDnfReflectionRunLinks`, POLYTSIA V1.6.1, Фаза 27) — дослівно той самий алгоритм,
+  // що й тут був раніше, лише перевикористовується ще й `BackupRepository`-відновленням старих
+  // бекапів.
   await db.withTransactionAsync(async () => {
-    for (const reflection of legacyReflections) {
-      const candidates = await db.getAllAsync<CandidateRunRow>(
-        `SELECT id, finished_at, run_number FROM reading_run
-         WHERE user_book_id = ? AND deleted_at IS NULL AND status = 'did_not_finish'
-         ORDER BY run_number DESC`,
-        [reflection.user_book_id],
-      );
-      if (candidates.length === 0) continue;
-
-      const nearestBelow = candidates
-        .filter((run) => run.finished_at != null && run.finished_at <= reflection.created_at)
-        .sort((a, b) => (a.finished_at! < b.finished_at! ? 1 : -1))[0];
-      const chosenRun = nearestBelow ?? candidates[0];
-      if (!chosenRun) continue;
-
-      await db.runAsync(`UPDATE dnf_reflection SET reading_run_id = ? WHERE id = ?`, [
-        chosenRun.id,
-        reflection.id,
-      ]);
-    }
+    await backfillDnfReflectionRunLinks(db);
   });
 }
