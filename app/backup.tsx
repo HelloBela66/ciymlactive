@@ -29,6 +29,13 @@ const DATE_LABEL_FORMAT = 'd MMMM yyyy, HH:mm';
  * мутацію, що й сам restore (обидві лише читають/парсять файл, нічого не пишуть у БД), але з
  * власним `onSuccess`, який ЗАВЖДИ зупиняється на результаті перевірки й ніколи не веде до
  * діалогу підтвердження заміни даних.
+ *
+ * ОФЛАЙН/PRIVACY УВАГА ПЕРЕД EXPORT (POLYTSIA V1.6.1, Фаза 21, `docs/BACKUP_PRIVACY_UX.md`) —
+ * `handleExport` тепер показує `Alert.alert`-попередження ПЕРЕД тим, як `writeAndShareBackupFile`
+ * відкриє системне "Поділитися" (audit V1.6.1, розділ 59, P1: JSON-бекап — plaintext, з усіма
+ * приватними нотатками/цитатами/DNF-причинами/pre-reading рефлексіями, `expo-sharing` дозволяє
+ * відправити будь-яким каналом без жодного попередження про вміст). Без шифрування/пароля в
+ * цьому milestone (ТЗ прямо це обмежує) — попередження, а не технічний захист файлу.
  */
 export default function BackupScreen() {
   const theme = useTheme();
@@ -41,7 +48,7 @@ export default function BackupScreen() {
   const backupHealth = useBackupHealth();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const handleExport = () => {
+  const runExport = () => {
     setStatusMessage(null);
     exportBackup.mutate(undefined, {
       onSuccess: (result) => {
@@ -53,6 +60,26 @@ export default function BackupScreen() {
       },
       onError: () => setStatusMessage('Не вдалося створити резервну копію.'),
     });
+  };
+
+  /**
+   * Фаза 21 — попередження про вміст файлу ПЕРЕД тим, як відкриється системне "Поділитися"
+   * (не лише перед самим записом файлу — сам файл на диску пристрою нешкідливий, ризик саме в
+   * тому, куди його далі понесе користувач). Той самий стиль `Alert.alert` "точка неповернення",
+   * що й підтвердження restore нижче — тут "точка неповернення" не перезапис даних, а те, що
+   * файл покине застосунок каналом, який сам користувач не контролює постфактум.
+   */
+  const handleExport = () => {
+    Alert.alert(
+      'Резервна копія містить приватні записи',
+      'Файл включає всі нотатки, цитати, причини «покинуто», нотатки «до читання» та інші ' +
+        'особисті записи — у звичайному, НЕ зашифрованому JSON. Будь-хто, хто отримає цей файл, ' +
+        'зможе їх прочитати.\n\nОбери канал "Поділитися" обережно.',
+      [
+        { text: 'Скасувати', style: 'cancel' },
+        { text: 'Створити й поділитися', onPress: runExport },
+      ],
+    );
   };
 
   const handleExportCsv = () => {
