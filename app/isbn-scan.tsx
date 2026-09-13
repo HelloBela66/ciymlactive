@@ -8,6 +8,7 @@ import { useTheme } from '@/design/ThemeProvider';
 import { getDatabase } from '@/data/db';
 import { EditionRepository } from '@/data/repositories/EditionRepository';
 import { isValidIsbn } from '@/lib/isbn';
+import { triggerLightHapticFeedback } from '@/lib/haptics';
 import { useIsOffline } from '@/lib/useIsOffline';
 import {
   GoogleBooksProvider,
@@ -95,9 +96,19 @@ export default function IsbnScanScreen() {
       return;
     }
 
+    // HAPTICS (POLYTSIA V1.6.1, Фаза 23, `docs/HAPTICS_CLEANUP.md`) — ТЗ Фази 19 V1.6 (`docs/
+    // DESIGN_SYSTEM_EXTENSION.md`, §HAPTICS) називав "successful scan" одним з 4 прикладів, але
+    // помилково вважав, що фічі сканування камерою в застосунку немає (вона існує з Milestone 7,
+    // за 5 днів до написання того запису) — тож виклик і не додали. Рівно ОДИН виклик саме тут:
+    // "успішний скан" = камера прочитала штрихкод, що пройшов перевірку контрольної цифри (не
+    // "книгу зрештою знайдено" — локальна база/каталог/провайдери нижче можуть і не знайти
+    // видання, це вже інша дія користувача, не сам скан). `processingRef` вище гарантує, що цей
+    // блок виконується не більше одного разу на скан-сесію, навіть якщо камера встигла віддати
+    // кілька `onBarcodeScanned`-подій поспіль для того самого штрихкоду в кадрі.
     processingRef.current = true;
     setScannedIsbn(isbn);
     setStatus('looking_up');
+    triggerLightHapticFeedback();
 
     try {
       const db = await getDatabase();
