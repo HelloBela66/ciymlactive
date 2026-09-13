@@ -11,6 +11,14 @@
 # і `eslint.config.js` дійсно існують, `package.json`), Jest (домен + repository-тести з Фази
 # 3, щойно з'являться — той самий `npm test`, окремого кроку не треба), і Expo health check.
 #
+# POLYTSIA V1.6.1, Фаза 25 (EDGE FUNCTION CI + NPM AUDIT, `docs/EDGE_FUNCTION_CI.md`) додала:
+# (1) окремий job `edge-functions` — `tsconfig.json`/`eslint.config.js` СВІДОМО виключають
+# `supabase/functions/**` (Deno-рантайм, інший синтаксис — `docs/TESTING.md`), тож до цієї фази
+# ці 6 файлів не перевірялись жодним автоматичним інструментом на жодному push/PR узагалі
+# (CODE VERIFIED знахідка `docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 32); (2) крок `npm audit` у
+# job `ci` нижче (advisory, той самий `continue-on-error: true` підхід, що й `expo-doctor`) —
+# розділ 34 того самого аудиту.
+#
 # "Branches: [main]" нижче — припущення (репозиторію-то ще немає, і default-гілку GitHub
 # сьогодні створює як `main`) — зміни просто, якщо власник продукту ініціалізує репозиторій з
 # інакшою назвою гілки (`master` тощо).
@@ -67,3 +75,54 @@ jobs:
         # усе одно видно в логах кожного запуску.
         run: npx expo-doctor
         continue-on-error: true
+
+      - name: npm audit (advisory)
+        # POLYTSIA V1.6.1, Фаза 25 (docs/EDGE_FUNCTION_CI.md) — `V1_6_FULL_AUDIT_REPORT.md`,
+        # розділ 34, п.3: жодного кроку npm audit у CI не було, і саму перевірку жодного разу
+        # не запускали в середовищі з мережевим доступом до npm registry (агент аудиту й
+        # окремо агент цієї фази — обидва без доступу до registry.npmjs.org). GitHub Actions
+        # runner має звичайний мережевий доступ, тож саме тут ця перевірка вперше реально
+        # виконується. `--audit-level=high` — той самий компроміс, що обрав сам аудит:
+        # low/moderate в транзитивних dev-залежностях (типовий шум для будь-якого Expo/RN
+        # проєкту) не повинні валити щоденний pipeline, high/critical — повинні бути видні.
+        # `continue-on-error: true` — той самий advisory-підхід, що й `expo-doctor` вище: поки
+        # власник продукту сам не вирішив політику (падати pipeline чи лише сигналізувати),
+        # безпечніший дефолт — не блокувати роботу через щось, що вимагає ручного рішення
+        # (`npm audit fix` може бути breaking-зміною).
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  edge-functions:
+    name: Edge Functions (Deno)
+    runs-on: ubuntu-latest
+    # POLYTSIA V1.6.1, Фаза 25 (docs/EDGE_FUNCTION_CI.md) — ОКРЕМИЙ job, не крок усередині `ci`
+    # вище: `supabase/functions/**` виконується в Deno-рантайм (глобал `Deno`, імпорти з явним
+    # `.ts`) — інший тулчейн (Deno CLI, не Node/tsc/ESLint), тож окремий job з власним
+    # `runs-on`-раннером — найчистіший спосіб уникнути будь-якого перетину з Node CI job вище
+    # (жодного спільного кроку встановлення, жодного ризику, що інструмент одного рантайму
+    # випадково зачепить файли іншого). `V1_6_FULL_AUDIT_REPORT.md`, розділ 32, дослівно
+    # рекомендує саме цей підхід (`denoland/setup-deno` action).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          # v2.x — та сама "остання стабільна в мажорній лінії" філософія, що й Node 22 вище
+          # (без фіксації конкретного патчу, якого власник продукту потім мусив би вручну
+          # оновлювати) — Supabase Edge Functions рантайм сумісний із Deno 2.x.
+          deno-version: v2.x
+
+      - name: Deno check (typecheck)
+        # Перевіряє усі *.ts у supabase/functions/** — і три entry point (`isbndb-proxy`/
+        # `google-books-proxy`/`cover-upload`, кожен зі своїм Deno.serve), і `_shared/*.ts`
+        # (`cors.ts`/`rateLimit.ts`) — ці два файли не мають власного entry point, але кожен
+        # реально імпортується мінімум одним із трьох index.ts (перевірено grep — жодного
+        # "мертвого" імпорту), тож транзитивно вже покриті; передача директорії, а не лише
+        # трьох index.ts, — явна, а не лише транзитивна перевірка на випадок майбутнього
+        # shared-модуля без жодного поточного імпортера.
+        run: deno check supabase/functions
+
+      - name: Deno lint
+        run: deno lint supabase/functions

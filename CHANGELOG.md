@@ -1,5 +1,36 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 25 — Edge Function CI + npm audit
+
+**Дата:** 2026-09-13
+
+Дві незалежні частини. Повне обґрунтування — `docs/EDGE_FUNCTION_CI.md`.
+
+**Додано:**
+- `.github/workflows/ci.yml` — новий окремий job `edge-functions` (`denoland/setup-deno@v2`,
+  `deno-version: v2.x`): `deno check supabase/functions` + `deno lint supabase/functions`.
+  До цієї фази 6 файлів `supabase/functions/**` (`_shared/cors.ts`, `_shared/rateLimit.ts`,
+  `isbndb-proxy/index.ts`, `isbndb-proxy/isbn.ts`, `google-books-proxy/index.ts`,
+  `cover-upload/index.ts`) не перевірялись жодним автоматичним інструментом на жодному push/PR
+  (CODE VERIFIED знахідка `docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 32 — `tsconfig.json`/
+  `eslint.config.js` обидва свідомо виключають цю теку, бо Deno-рантайм).
+- `.github/workflows/ci.yml` — новий крок `npm audit --audit-level=high` у job `ci`, advisory
+  (`continue-on-error: true`, той самий підхід, що й `expo-doctor`) — розділ 34 того самого
+  аудиту.
+- `docs/EDGE_FUNCTION_CI.md` (нове).
+
+**Виправлено (документація, не код):**
+- `docs/TESTING.md` — секція CI оновлена під новий 2-job workflow.
+- `docs/SECURITY.md` — розділи 3/4 оновлені: `npm audit` тепер запускається реально в CI (не
+  лише "не запускався в цьому середовищі"), точний список CVE з'явиться в логах першого
+  прогону.
+- 0 нових тестів (774 без змін) — виключно CI-конфігурація й документація, жодного production
+  TypeScript/JS-коду не змінено.
+
+**Свідомо НЕ зроблено:** `deno test` крок (жодного тестового файлу для Edge Functions ще не
+існує, ТЗ фази цього й не вимагає), увімкнення GitHub Dependabot alerts (зміна налаштувань
+самого GitHub-репозиторію, не файл у git — OWNER ACTION REQUIRED, `docs/EDGE_FUNCTION_CI.md`).
+
 ## POLYTSIA V1.6.1, Фаза 24 — Performance / index audit
 
 **Дата:** 2026-09-13

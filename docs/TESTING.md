@@ -94,7 +94,7 @@ SQL-діалект і PRAGMA-інтерфейс, тож жоден рядок п
    `tsconfig.json` явно виключає `supabase/functions` (`exclude`) — ці файли виконуються в
    Deno runtime (Supabase Edge Functions), не в Node/React Native застосунку, і мають інший
    синтаксис (глобал `Deno`, імпорти з явним `.ts`), невалідний для звичайного tsc-проєкту
-   застосунку; перевіряються (за потреби) окремо через Supabase CLI/`deno check`, не тут.
+   застосунку; перевіряються ОКРЕМИМ job (п. "Edge Functions (Deno)" нижче), не тут.
 3. **`npm run lint`** (`eslint . --max-warnings=0`) — `eslint.config.js` виключає
    `supabase/functions/**` (`ignores`) з тієї ж причини, що й `tsconfig.json` вище (Deno
    runtime, не Node/React Native застосунок).
@@ -107,6 +107,22 @@ SQL-діалект і PRAGMA-інтерфейс, тож жоден рядок п
    пайплайн): `expo-doctor` частково звертається в мережу, і нестабільність мережі
    GitHub-раннера — не те саме, що реальна помилка в коді репозиторію. Результат усе одно
    видно в кожному запуску.
+6. **`npm audit --audit-level=high`** (POLYTSIA V1.6.1, Фаза 25, `docs/EDGE_FUNCTION_CI.md`) —
+   `continue-on-error: true`, той самий advisory-підхід, що й `expo-doctor`. До цієї фази
+   такого кроку не було, і саму перевірку жодного разу не запускали в середовищі з мережевим
+   доступом до npm registry — `V1_6_FULL_AUDIT_REPORT.md`, розділ 34.
+
+**Edge Functions (Deno)** — POLYTSIA V1.6.1, Фаза 25 (`docs/EDGE_FUNCTION_CI.md`) додала
+ОКРЕМИЙ job `edge-functions` у тому самому `.github/workflows/ci.yml`, паралельний до `ci`
+вище (інший рантайм — `denoland/setup-deno`, не Node): `deno check supabase/functions` +
+`deno lint supabase/functions`. До цієї фази 5 файлів `supabase/functions/**` не перевірялись
+ЖОДНИМ автоматичним інструментом на жодному push/PR узагалі (CODE VERIFIED знахідка
+`V1_6_FULL_AUDIT_REPORT.md`, розділ 32 — і `tsconfig.json`, і `eslint.config.js` свідомо
+виключають цю теку, п.2/3 вище) — тепер перевіряються обидва: типи (`deno check`) і лінт
+(`deno lint`), блокуючим (не advisory) кроком, той самий рівень суворості, що й для
+Node-частини застосунку. `deno test` СВІДОМО не додано — жодного `*.test.ts` у
+`supabase/functions/**` ще не існує (написання таких тестів — поза межами цієї фази ТЗ, яке
+називає лише "typecheck, lint, shared modules").
 
 **⚠️ OWNER ACTION REQUIRED.** Сам `git init` і перший `push` на GitHub — з цієї (хмарної)
 сесії неможливо виконати: немає shell-доступу до машини власника продукту (пов'язаний
