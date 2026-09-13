@@ -181,6 +181,19 @@ export const UserBookRepository = {
    * Оновлення статусу. `started_at`/`finished_at` виставляються автоматично при першому
    * переході в 'reading'/'rereading' чи 'finished' (і не перезаписуються, якщо вже стоять) —
    * щоб дата початку/завершення читання не "стрибала" при випадкових перемиканнях статусу.
+   *
+   * P0 FIX (POLYTSIA V1.6.1, Фаза 1 — підтверджений дефект з `docs/V1_6_FULL_AUDIT_REPORT.md`,
+   * розділ 13): перехід у `did_not_finish` ЗАВЖДИ скидає `finished_at`, навіть якщо книга вже
+   * мала дату завершення (наприклад: "Прочитано" → "Не дочитав", чи перечитування, яке
+   * покинули, коли `finished_at` лишався від першого прочитання). Без цього Activity
+   * History/On This Day (обидва читають саме `user_book.finished_at`) продовжували показувати
+   * хибну подію "книгу завершено" для книги, яку користувач щойно позначив як НЕ дочитану.
+   * Це навмисно мінімальний, локальний фікс на рівні єдиного поля `user_book.finished_at`, а
+   * НЕ повноцінна модель історії читання — user_book лишається "поточним станом полиці", не
+   * записом кожного окремого прочитання. Правильне, run-aware джерело правди (кожен цикл
+   * читання матиме власні `finishedAt`/`abandonedAt`, і "було завершено вперше, потім покинуто
+   * при перечитуванні" стане виразним без цього спеціального випадку) з'явиться разом із
+   * ReadingRun (POLYTSIA V1.6.1, Фаза 6+) — до того моменту цей рядок лишається необхідним.
    */
   async updateStatus(db: SQLiteDatabase, id: string, status: UserBookStatus): Promise<void> {
     const current = await UserBookRepository.getById(db, id);
@@ -189,7 +202,8 @@ export const UserBookRepository = {
     const now = nowIso();
     const startedAt =
       current.startedAt ?? ((status === 'reading' || status === 'rereading') ? now : null);
-    const finishedAt = current.finishedAt ?? (status === 'finished' ? now : null);
+    const finishedAt =
+      status === 'did_not_finish' ? null : current.finishedAt ?? (status === 'finished' ? now : null);
 
     await db.runAsync(
       `UPDATE user_book SET status = ?, started_at = ?, finished_at = ?, updated_at = ? WHERE id = ?`,

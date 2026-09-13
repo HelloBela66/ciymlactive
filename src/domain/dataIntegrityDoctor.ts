@@ -255,6 +255,21 @@ export function runDataIntegrityCheck(snapshot: DataIntegritySnapshot): DataInte
         link: workLink(userBook.id),
       });
     }
+    // POLYTSIA V1.6.1, Фаза 1 — успадкована неузгодженість, можлива в даних, створених ДО
+    // фіксу `UserBookRepository.updateStatus` (див. коментар там): якщо книга зараз "Не
+    // дочитав", але `finished_at` досі стоїть з попереднього переходу в "Прочитано" — Activity
+    // History/On This Day показуватимуть хибну подію "книгу завершено" для цієї книги. Новий
+    // код більше не створює такий стан, але записи, збережені до фіксу, могли лишитись саме
+    // такими — ця перевірка лише знаходить їх (без destructive auto-fix, той самий принцип, що
+    // й решта цього модуля).
+    if (userBook.status === 'did_not_finish' && userBook.finishedAt) {
+      issues.push({
+        category: 'books',
+        code: 'dnf_with_finished_at',
+        message: `Книга ${userBook.id} має статус "Не дочитав", але досі позначена датою завершення — історія читання може хибно показувати "завершено".`,
+        link: workLink(userBook.id),
+      });
+    }
 
     const edition = editionById.get(userBook.editionId);
     if (edition?.deletedAt) {

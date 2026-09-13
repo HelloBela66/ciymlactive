@@ -120,6 +120,22 @@ describe('runDataIntegrityCheck', () => {
       expect(report.byCategory.books.map((i) => i.code)).toContain('finished_before_started');
     });
 
+    // POLYTSIA V1.6.1, Фаза 1 — Data Doctor check для P0-дефекту з
+    // `docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 13 (успадкований стан з ДО фіксу
+    // `UserBookRepository.updateStatus`).
+    it('статус "Не дочитав" з досі встановленим finishedAt — успадкована неузгодженість', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'did_not_finish', finishedAt: '2026-08-01T00:00:00.000Z' })];
+      const report = runDataIntegrityCheck(snapshot);
+      expect(report.byCategory.books.map((i) => i.code)).toContain('dnf_with_finished_at');
+    });
+
+    it('статус "Не дочитав" БЕЗ finishedAt (звичайний, коректний шлях після фіксу) — без проблем', () => {
+      const snapshot = emptySnapshot();
+      snapshot.userBooks = [userBook({ status: 'did_not_finish', finishedAt: null })];
+      expect(runDataIntegrityCheck(snapshot).byCategory.books).toEqual([]);
+    });
+
     it('книга посилається на видалене видання', () => {
       const snapshot = emptySnapshot();
       snapshot.userBooks = [userBook({ editionId: 'ed1' })];

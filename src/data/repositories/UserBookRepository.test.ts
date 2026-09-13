@@ -187,6 +187,33 @@ describe('UserBookRepository.updateStatus — started_at/finished_at виста�
     expect(rereading?.finishedAt).toBe(finishedAt); // стара дата завершення НЕ зникає
   });
 
+  // POLYTSIA V1.6.1, Фаза 1 — regression test для P0-дефекту з
+  // `docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 13.
+  it('finished → did_not_finish СКИДАЄ finished_at (на відміну від переходу назад у reading)', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db);
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+
+    await UserBookRepository.updateStatus(db, created.id, 'finished');
+    const finished = await UserBookRepository.getById(db, created.id);
+    expect(finished?.finishedAt).not.toBeNull();
+
+    await UserBookRepository.updateStatus(db, created.id, 'did_not_finish');
+    const dnf = await UserBookRepository.getById(db, created.id);
+    expect(dnf?.status).toBe('did_not_finish');
+    expect(dnf?.finishedAt).toBeNull();
+  });
+
+  it('did_not_finish без попереднього finished_at — і далі лишається null (немає регресії для звичайного шляху)', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db);
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+
+    await UserBookRepository.updateStatus(db, created.id, 'did_not_finish');
+    const dnf = await UserBookRepository.getById(db, created.id);
+    expect(dnf?.finishedAt).toBeNull();
+  });
+
   it('updateStatus на неіснуючий id — no-op, не кидає виняток', async () => {
     const db = await openMigratedTestDb();
     await expect(UserBookRepository.updateStatus(db, 'nonexistent', 'reading')).resolves.toBeUndefined();

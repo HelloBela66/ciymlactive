@@ -15,8 +15,10 @@ import type { LoreEntity, LoreEntityType } from '@/types/loreEntity';
 
 const log = createLogger('features/lore');
 
-/** Усі персонажі (і, з Фази 10 UI, решта лору) твору — `app/characters/[workId].tsx` та
- * компактні секції на Book Details/Memory. */
+/** Усі персонажі (і, з Фази 10 UI, решта лору) твору — `app/lore/[workId].tsx` (у Фазі 9 це
+ * був `app/characters/[workId].tsx`; той файл видалено разом із рештою legacy `app/characters/*`
+ * маршрутів у V1.6.1, Фаза 2 — докладніше `CHANGELOG.md`) та компактні секції на Book
+ * Details/Memory. */
 export function useLoreEntities(workId: string | undefined) {
   return useQuery<LoreEntity[]>({
     queryKey: queryKeys.loreEntities.byWork(workId ?? ''),

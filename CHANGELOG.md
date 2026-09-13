@@ -1,5 +1,50 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 1 — P0 fix: "Не дочитав" більше не лишає хибну дату завершення
+
+**Дата:** 2026-09-13
+
+Підтверджений дефект з повного аудиту (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 13): перехід
+`фінished → did_not_finish` (наприклад "Прочитано" → "Не дочитав", чи перечитування, яке
+покинули) не скидав `user_book.finished_at` — `Activity History`/`On This Day` (обидва читають
+саме цю колонку) продовжували показувати хибну подію "книгу завершено" для книги, яку
+користувач щойно позначив як НЕ дочитану.
+
+- **`UserBookRepository.updateStatus`** — перехід у `did_not_finish` тепер ЗАВЖДИ явно скидає
+  `finished_at` у `null`, незалежно від того, чи він уже був встановлений раніше. Це навмисно
+  мінімальний, точковий фікс на рівні єдиного поля — повноцінна модель історії читання (кожен
+  цикл читання з власним `finishedAt`/`abandonedAt`) з'явиться разом із ReadingRun, наступні
+  фази цього ж milestone.
+- **Data Doctor** (`src/domain/dataIntegrityDoctor.ts`) — новий check `dnf_with_finished_at`:
+  знаходить успадковані записи, створені ДО цього фіксу, де книга вже "Не дочитав", але
+  `finished_at` досі стоїть з попереднього "Прочитано" (без destructive auto-fix, той самий
+  принцип, що й решта Data Doctor).
+- Regression-тести: `UserBookRepository.test.ts` (2 нових тести — finished→did_not_finish
+  скидає finishedAt; did_not_finish без попереднього finishedAt і далі лишається null) і
+  `dataIntegrityDoctor.test.ts` (2 нових тести на новий check).
+
+## POLYTSIA V1.6.1, Фаза 2 — legacy `app/characters/*` маршрути: підтверджено видалені
+
+**Дата:** 2026-09-13
+
+`docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 3-4) фіксував `app/characters/[workId].tsx` і
+`app/characters/[workId]/[entityId].tsx` як мертві, але фізично присутні й досяжні прямим
+deep-link'ом маршрути (Expo Router реєструє кожен файл під `app/` автоматично) — дублікат
+`app/lore/[workId].tsx`/`app/lore/[workId]/[entityId].tsx` з Фази 10, без spoiler-safe
+фільтрації лору. Перевірено напряму на пристрої (`device_list_dir`): **обох файлів більше не
+існує** — `app/characters/` відсутній повністю. Жодних `router.push`/`Link` на `/characters/...`
+у решті коду не було й раніше (це й підтверджував аудит), тож видалення не могло нічого зламати.
+
+- Виправлено єдиний застарілий коментар, що досі посилався на `app/characters/[workId].tsx` як
+  на актуальний шлях (`src/features/lore/useLoreEntities.ts`) — тепер вказує на `app/lore/[workId].tsx`
+  з приміткою про перейменування.
+- `docs/ARCHITECTURE.md` (route map) і `docs/PERSONAL_LORE.md` вже коректно не згадують
+  `app/characters/*` як діючий маршрут (перевірено, змін не знадобилось).
+- Тестів, що посилались на видалені файли, не знайдено.
+
+Перше з фаз milestone V1.6.1 (Foundation, Reading Runs, UX Consolidation & Calendar Evolution) —
+детальний план і повний перелік 28 фаз ще попереду.
+
 ## Фікс: скасовані пошукові запити хибно логувались як помилки (iOS/Expo Go)
 
 **Дата:** 2026-09-12
