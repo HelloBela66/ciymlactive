@@ -4,6 +4,14 @@ POLYTSIA V1.6, Фаза 18 (HOME REDESIGN). Той самий "фіксує рі
 пояснювати заново" документ, що й `docs/ONE_BOOK_PICKER.md`/`docs/TBR_PERSONALITY.md`/
 `docs/STALE_READING_RECAP.md`.
 
+**Оновлено POLYTSIA V1.6.1, Фазою 17 (HOME REFINEMENT, `docs/HOME_REFINEMENT.md`)** —
+"Compact shortcuts"-рядок і рекомендаційний вхід (§HOME SHORTCUTS нижче й §"Чому рекомендаційні
+картки лишились") тепер progressive disclosure: ховаються повністю для справді порожньої
+бібліотеки (`isLibraryEmpty`, `app/(tabs)/index.tsx`), а не рендеряться безумовно — аудит
+V1.6.1 (Розділ 46, FTUE) зафіксував це як реальну проблему для нового користувача. Для будь-якої
+непорожньої бібліотеки — жодних змін. Склад/порядок/маршрути самих shortcuts, описані нижче в
+цьому документі, лишаються чинними без змін.
+
 ## Мета
 
 ТЗ Фази 18: "Після реалізації memory/discovery features перевір Home. Home НЕ повинен стати

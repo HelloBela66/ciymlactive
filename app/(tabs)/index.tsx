@@ -14,7 +14,7 @@ import { useTheme } from '@/design/ThemeProvider';
 import { getTimeOfDayGreeting } from '@/lib/greeting';
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
 import { useReadingContinuity } from '@/features/reading-session/useReadingContinuity';
-import { useLibraryByStatus } from '@/features/library/useLibrary';
+import { useLibraryAll, useLibraryByStatus } from '@/features/library/useLibrary';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
 import { HomeContextCard } from '@/components/home/HomeContextCard';
 import { pluralizeUk } from '@/lib/pluralizeUk';
@@ -249,7 +249,20 @@ interface ShortcutItem {
  * Home+Профіль як прийнятний (не 🔴), тож прибирання одного з двох — звуження, не втрата
  * функціоналу. `/journal`/`/memory`/`/statistics` — `as unknown as Href` там, де локальний кеш
  * typed routes (`.expo/types/router.d.ts`, не в git) не завжди встигає побачити маршрут до
- * `tsc` (той самий клас питання, що й усюди в цьому файлі). */
+ * `tsc` (той самий клас питання, що й усюди в цьому файлі).
+ *
+ * **Оновлено Фазою 17** (HOME REFINEMENT, `docs/HOME_REFINEMENT.md`) — СКЛАД цього масиву НЕ
+ * змінено. Завдання Фази 17 називає "Progressive disclosure shortcuts (Journal/Memory/On This
+ * Day/Fingerprint)" — прочитано як приклад КАТЕГОРІЇ фіч (глибокі, не для першого відкриття), а
+ * не буквальну вимогу замінити "Статистика" на "On This Day"/"Fingerprint": обидва вже мають
+ * свій продуманий, задокументований вхід (`/memory` §"Цей день у твоєму читанні", Фаза 16;
+ * `/my-reading` → Fingerprint tile, Фаза 15) — заміна "Статистика" тут на будь-який з них тихо
+ * скасувала б те рішення без окремого продуктового запиту саме на це ("DO NOT SILENTLY CHANGE
+ * PRODUCT BEHAVIOR"). Натомість Фаза 17 реалізує "progressive disclosure" буквально —
+ * прогресивне РОЗКРИТТЯ (коли показувати), не переставляння пунктів (що показувати): весь цей
+ * рядок ховається для справді порожньої бібліотеки (`isLibraryEmpty`, `HomeScreen` нижче), а не
+ * рендериться безумовно для щойно встановленого застосунку — саме це аудит (Розділ 46, FTUE)
+ * і фіксує як реальну проблему. */
 const HOME_SHORTCUTS: ShortcutItem[] = [
   { icon: 'book-outline', label: 'Мій щоденник', onPress: () => router.push('/journal' as unknown as Href) },
   { icon: 'cube-outline', label: 'Моя пам\'ять', onPress: () => router.push('/memory' as unknown as Href) },
@@ -305,13 +318,30 @@ function NextReadEntryPointCard() {
  * "повернутись до читання" видима з будь-якої вкладки одразу над нижньою навігацією
  * (`ReadingSessionMiniBar`, `app/(tabs)/_layout.tsx`), тож дублювати її ще раз саме на Головній
  * означало б показувати ту саму інформацію двічі різними візуальними мовами.
+ *
+ * **Оновлено Фазою 17** (HOME REFINEMENT, не redesign, `docs/HOME_REFINEMENT.md`) — "core Home"
+ * вище (Current Reading/Today summary/контекстна картка/порядок розділів) лишається БЕЗ ЗМІН.
+ * Ця фаза додає лише progressive disclosure: `HomeShortcuts`/`NextReadEntryPointCard` тепер
+ * ховаються для справді порожньої бібліотеки (`isLibraryEmpty` нижче), а не рендеряться
+ * безумовно завжди — аудит V1.6.1 (Розділ 46, FTUE) зафіксував, що новий користувач бачив 7+
+ * інтерактивних елементів із незнайомою термінологією ("Капсула книги", "TBR reality check")
+ * ДО єдиного релевантного для нього CTA внизу екрана. Повне обґрунтування —
+ * `docs/HOME_REFINEMENT.md`.
  */
 export default function HomeScreen() {
   const theme = useTheme();
   const { data: activeSession } = useActiveSession();
   const { data: reading } = useLibraryByStatus('reading');
+  const { data: allBooks } = useLibraryAll();
 
-  const showEmptyState = !activeSession && (!reading || reading.length === 0);
+  // Фаза 17 (HOME REFINEMENT) — "справді порожня бібліотека" (жодної книги в жодному статусі),
+  // а не просто "зараз нічого не читаю" (`showEmptyState` нижче — той самий стан, що й до цієї
+  // фази, для користувача з непорожньою бібліотекою). Доки `allBooks` ще не завантажився,
+  // `isLibraryEmpty` — `false` (той самий "не показуй нового стану, доки не підтверджено"
+  // принцип, що й усюди в застосунку): звичайний Home рендериться як і до цієї фази, і лише
+  // коли запит підтвердить 0 книг, екран згортається до фокусованого стану нижче.
+  const isLibraryEmpty = allBooks != null && allBooks.length === 0;
+  const showEmptyState = !isLibraryEmpty && !activeSession && (!reading || reading.length === 0);
 
   return (
     <ScreenContainer topInset>
@@ -327,28 +357,50 @@ export default function HomeScreen() {
       {/* #4 Одна контекстна картка (ТЗ: "У конкретний момент показуй максимум ОДНУ context
           card... Не показуй 5 одночасно") — уся логіка вибору "яку саме" в
           `useHomeContextCard`/`selectHomeContextCard` (`src/lib/homeContext.ts`), тут лише
-          рендер обраного результату чи нічого (`HomeContextCard` сама повертає `null`). */}
+          рендер обраного результату чи нічого (`HomeContextCard` сама повертає `null`). Не
+          загорнута в `isLibraryEmpty` нижче навмисно — для справді порожньої бібліотеки жоден
+          із п'яти кандидатів (`selectHomeContextCard`) і так не спрацює (немає ні активного
+          читання, ні капсул, ні цілей, ні TBR), тож картка вже сама повертає `null`. */}
       <View style={{ marginTop: theme.spacing.lg }}>
         <HomeContextCard />
       </View>
 
       {/* #5 Secondary shortcuts (ТЗ: "Compact shortcuts: Мій щоденник, Моя історія, Моя
-          пам'ять, Статистика. Не роби великі cards для кожного.") */}
-      <View style={{ marginTop: theme.spacing.xl }}>
-        <HomeShortcuts />
-      </View>
+          пам'ять, Статистика. Не роби великі cards для кожного.") + рекомендаційний вхід
+          (Фаза 14 — RECOMMENDATION CONSOLIDATION, `docs/NEXT_READ.md`). Фаза 17 (HOME
+          REFINEMENT) — обидва тепер progressive disclosure: ховаються для справді порожньої
+          бібліотеки (`isLibraryEmpty`), де вони вели б лише на порожні/нерелевантні екрани з
+          незнайомою користувачу термінологією (аудит §Розділ 46 FTUE) — детально в
+          `docs/HOME_REFINEMENT.md`. Для будь-якої НЕпорожньої бібліотеки (навіть якщо зараз
+          нічого не читається — TBR-only користувач теж отримує користь із shortcuts/
+          рекомендацій) поведінка НЕ змінилась. */}
+      {!isLibraryEmpty ? (
+        <>
+          <View style={{ marginTop: theme.spacing.xl }}>
+            <HomeShortcuts />
+          </View>
 
-      {/* Рекомендаційний вхід поза чотирма ТЗ-шорткатами вище (Milestone 11/Фаза 16 —
-          «Що почитати завтра?»/«Обери мені книгу»/«Тренди», Фаза 14 — TBR reality check) —
-          навмисно ЗБЕРЕЖЕНИЙ (не входить у заборону "Не роби великі cards" — вона стосується
-          лише чотирьох названих у ТЗ пунктів HOME SHORTCUTS вище), лише тепер ОДНА картка
-          замість трьох (Фаза 14 — RECOMMENDATION CONSOLIDATION, `docs/NEXT_READ.md`): усі
-          чотири рекомендаційні екрани лишаються доступні, згруповані на `/next-read`. */}
-      <View style={{ marginTop: theme.spacing.xl }}>
-        <NextReadEntryPointCard />
-      </View>
+          <View style={{ marginTop: theme.spacing.xl }}>
+            <NextReadEntryPointCard />
+          </View>
+        </>
+      ) : null}
 
-      {showEmptyState ? (
+      {isLibraryEmpty ? (
+        // Фаза 17 (HOME REFINEMENT) — "Empty state для нової бібліотеки з сильним CTA": той
+        // самий, уже перевірений сильний CTA, що й порожня Бібліотека
+        // (`app/(tabs)/library/index.tsx`, `FILTER_EMPTY_TEXT.all`/"До пошуку" → `/search`),
+        // буквально скопійований сюди, а не винайдений заново — тепер новий користувач бачить
+        // його одразу на Home, без зайвого проміжного переходу через Бібліотеку лише щоб
+        // побачити той самий порожній стан ще раз (аудит §Розділ 46: "CTA не перший елемент на
+        // екрані").
+        <EmptyState
+          title="Бібліотека поки порожня."
+          description="Знайди книгу через пошук і додай її сюди з Book Details."
+          actionLabel="До пошуку"
+          onAction={() => router.push('/search')}
+        />
+      ) : showEmptyState ? (
         <EmptyState
           title="Зараз ти нічого не читаєш."
           description="Обери книгу з бібліотеки, щоб почати сесію читання."
