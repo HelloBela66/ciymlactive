@@ -43,7 +43,8 @@ async function markDirty(table: string, id: string) {
 
 ## Offline-індикатор
 
-Мережа потрібна лише для (M7) пошуку метаданих. `NetInfo`-подібний стан (через
-`expo-network`, за потреби) показує делікатний inline-banner лише на екрані пошуку/сканера,
+Мережа потрібна лише для (M7) пошуку метаданих. Реалізовано (POLYTSIA V1.6.1, Фаза 20,
+`docs/OFFLINE_UX.md`): `useIsOffline` (`src/lib/useIsOffline.ts`, через `expo-network`) і
+спільний `OfflineNotice` показують делікатний inline-banner лише на екрані пошуку/сканера,
 ніколи глобальний блокуючий overlay — offline не повинен відчуватись як "застосунок
 зламаний" (п.40).

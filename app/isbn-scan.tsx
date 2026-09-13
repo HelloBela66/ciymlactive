@@ -8,6 +8,7 @@ import { useTheme } from '@/design/ThemeProvider';
 import { getDatabase } from '@/data/db';
 import { EditionRepository } from '@/data/repositories/EditionRepository';
 import { isValidIsbn } from '@/lib/isbn';
+import { useIsOffline } from '@/lib/useIsOffline';
 import {
   GoogleBooksProvider,
   ISBNdbProvider,
@@ -17,7 +18,7 @@ import {
 import type { BookMetadataProvider, RawProviderBook } from '@/data/providers';
 import { useImportDraftStore } from '@/stores/importDraftStore';
 
-type ScanStatus = 'scanning' | 'looking_up' | 'not_found' | 'invalid';
+type ScanStatus = 'scanning' | 'looking_up' | 'not_found' | 'invalid' | 'offline';
 
 /**
  * Провайдери в порядку спроби (Milestone 10 fix6 — Open Library прибрано з пошуку зовсім,
@@ -72,6 +73,8 @@ export default function IsbnScanScreen() {
   const [status, setStatus] = useState<ScanStatus>('scanning');
   const [scannedIsbn, setScannedIsbn] = useState<string | null>(null);
   const processingRef = useRef(false);
+  // OFFLINE UX (Фаза 20, `docs/OFFLINE_UX.md`) — той самий hook, що й `app/(tabs)/search.tsx`.
+  const isOffline = useIsOffline();
 
   const handleBarcodeScanned = useCallback(async (result: BarcodeScanningResult) => {
     if (processingRef.current) return;
@@ -104,6 +107,15 @@ export default function IsbnScanScreen() {
         return;
       }
 
+      // OFFLINE UX (Фаза 20) — локальна база (щойно вище) лишається доступною повністю офлайн;
+      // усе, що йде ДАЛІ (спільний каталог, Google Books, ISBNdb) — мережеве. Перевірка тут, а
+      // не раніше (до локального пошуку), щоб офлайн-користувач і далі одразу знаходив книгу,
+      // яка вже є в його власній бібліотеці, без зайвого "офлайн"-повідомлення.
+      if (isOffline) {
+        setStatus('offline');
+        return;
+      }
+
       const catalogBook = await SharedCatalogProvider.lookupByISBN(isbn);
       if (catalogBook) {
         useImportDraftStore.getState().setPending(SharedCatalogProvider.id, catalogBook);
@@ -126,7 +138,7 @@ export default function IsbnScanScreen() {
       // сюди потрапляємо лише за неочікуваного винятку (наприклад, локальна БД недоступна).
       setStatus('not_found');
     }
-  }, []);
+  }, [isOffline]);
 
   const handleRetry = () => {
     processingRef.current = false;
@@ -258,6 +270,23 @@ export default function IsbnScanScreen() {
             <Button label="Шукати в Google" onPress={handleSearchOnWeb} />
             <Button label="Додати вручну" variant="secondary" onPress={handleManualFallback} />
             <Button label="Спробувати сканувати ще раз" variant="secondary" onPress={handleRetry} />
+          </View>
+        ) : null}
+
+        {/* OFFLINE UX (Фаза 20, `docs/OFFLINE_UX.md`) — окремий стан від `not_found`: раніше
+            офлайн і "справді не знайдено" виглядали однаково ("Наші джерела не мають цієї
+            книги" — оманливо, коли причина насправді в мережі, а не в джерелах). Без кнопки
+            "Шукати в Google" — вона сама так само потребує мережі, пропонувати її тут було б
+            оманливо. */}
+        {status === 'offline' ? (
+          <View style={[styles.center, { padding: theme.spacing.xl, gap: theme.spacing.md }]}>
+            <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
+              Немає з&apos;єднання з інтернетом — пошук за ISBN {scannedIsbn} у спільній базі
+              застосунку, Google Books{ISBNdbProvider.isEnabled ? ' та ISBNdb' : ''} зараз
+              недоступний. Спробуй ще раз, коли з&apos;явиться мережа, або додай книгу вручну.
+            </AppText>
+            <Button label="Спробувати сканувати ще раз" onPress={handleRetry} />
+            <Button label="Додати вручну" variant="secondary" onPress={handleManualFallback} />
           </View>
         ) : null}
       </View>

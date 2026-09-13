@@ -7,6 +7,7 @@ import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { OfflineNotice } from '@/components/ui/OfflineNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { journalEntryTypeLabels } from '@/design/i18n-labels';
 import { useRecentWorks } from '@/features/search/useBookSearch';
@@ -20,6 +21,7 @@ import type { Series } from '@/types/series';
 import type { ShelfWithCount } from '@/types/shelf';
 import type { JournalFeedEntry } from '@/types/journalEntry';
 import { pluralizeUk } from '@/lib/pluralizeUk';
+import { useIsOffline } from '@/lib/useIsOffline';
 
 function WorkResultRow({ work }: { work: WorkSearchResult }) {
   const theme = useTheme();
@@ -381,10 +383,16 @@ function PersonalSearchSections({
  *
  * «Каталог» — раніше існуючий пошук ДЛЯ ДОДАВАННЯ нової книги (Milestone 1/7/8.2): спільний
  * каталог, власна добірка «Полиці», Google Books, і лише останньою — платний ISBNdb, від 3
- * символів, кожен у своїй секції. Ця гілка НЕ змінена — той самий порядок/дедуплікація/gate
- * для ISBNdb, що й раніше (докладніше — коментарі при `dedupeAgainst`/`isbndbEnabled` нижче).
- * Тап на зовнішній результат веде на екран підтвердження (`/import/review`) — ніколи не зберігає
- * без перегляду користувачем.
+ * символів, кожен у своїй секції. Порядок/дедуплікація/gate для ISBNdb — той самий, що й раніше
+ * (докладніше — коментарі при `dedupeAgainst`/`isbndbEnabled` нижче). Тап на зовнішній результат
+ * веде на екран підтвердження (`/import/review`) — ніколи не зберігає без перегляду користувачем.
+ *
+ * OFFLINE UX (POLYTSIA V1.6.1, Фаза 20, `docs/OFFLINE_UX.md`) — реалізує намір, який
+ * `docs/LOCAL_FIRST.md` документував ще з Milestone 0, але код ніколи не підключав (аудит,
+ * §39.1): доки `useIsOffline()` каже "немає мережі", жодна з чотирьох секцій «Каталогу» не
+ * запускає запит, і сам режим показує один делікатний inline-banner замість чотирьох мовчазно
+ * порожніх "Шукаю…"/нічого-не-знайдено секцій. «Особисте» цього НЕ стосується — воно й так
+ * завжди було чисто локальним (SQLite), просто раніше про це ніде явно не було сказано в UI.
  */
 export default function SearchScreen() {
   const theme = useTheme();
@@ -394,10 +402,18 @@ export default function SearchScreen() {
   const recentResult = useRecentWorks();
   const personalSearch = usePersonalSearch(query);
 
-  const catalogResult = useProviderSearch(SharedCatalogProvider, query);
-  const curatedResult = useProviderSearch(CuratedCatalogProvider, query);
-  const googleBooksResult = useProviderSearch(GoogleBooksProvider, query);
-  const isbndbEnabled = isSettledEmpty(catalogResult) && isSettledEmpty(curatedResult) && isSettledEmpty(googleBooksResult);
+  // OFFLINE UX (Фаза 20, `docs/OFFLINE_UX.md`) — «Особисте» лишається повністю локальним
+  // (`usePersonalSearch`/`useRecentWorks` — SQLite, ніколи не мережа), тож `isOffline` тут
+  // впливає ЛИШЕ на «Каталог»-гілку нижче: жодна з чотирьох мережевих секцій не запускає запит,
+  // доки офлайн (`enabled: !isOffline`), і сам режим показує один делікатний inline-banner
+  // замість чотирьох "Шукаю…"/порожніх секцій, які раніше виглядали б як "нічого не знайдено".
+  const isOffline = useIsOffline();
+
+  const catalogResult = useProviderSearch(SharedCatalogProvider, query, { enabled: !isOffline });
+  const curatedResult = useProviderSearch(CuratedCatalogProvider, query, { enabled: !isOffline });
+  const googleBooksResult = useProviderSearch(GoogleBooksProvider, query, { enabled: !isOffline });
+  const isbndbEnabled =
+    !isOffline && isSettledEmpty(catalogResult) && isSettledEmpty(curatedResult) && isSettledEmpty(googleBooksResult);
   const isbndbResult = useProviderSearch(ISBNdbProvider, query, { enabled: isbndbEnabled });
 
   // Каталог показується як є (нема кого дедуплікувати проти НЬОГО, він завжди перший) — потім
@@ -505,37 +521,44 @@ export default function SearchScreen() {
             </>
           )
         ) : isSearching ? (
-          <>
-            {/* Спільний каталог першим (Milestone 8.2): дешевий і швидкий запит до власного
-                Supabase, книги, додані іншими користувачами, — зверху списку. Далі Google
-                Books. ISBNdb — платна, останньою, і додатково чекає (`isbndbEnabled`), доки
-                перші дві не "осядуть" порожніми. Кожна наступна секція вже не показує книги,
-                чий ISBN показала попередня (`dedupeAgainst` вище, Milestone 10 fix6, п. 3.2). */}
-            <ProviderResultsSection
-              provider={SharedCatalogProvider}
-              data={catalogBooks}
-              isLoading={catalogResult.isLoading}
-              show={showProviderSections}
-            />
-            <ProviderResultsSection
-              provider={CuratedCatalogProvider}
-              data={curatedBooks}
-              isLoading={curatedResult.isLoading}
-              show={showProviderSections}
-            />
-            <ProviderResultsSection
-              provider={GoogleBooksProvider}
-              data={googleBooks}
-              isLoading={googleBooksResult.isLoading}
-              show={showProviderSections}
-            />
-            <ProviderResultsSection
-              provider={ISBNdbProvider}
-              data={isbndbBooks}
-              isLoading={isbndbResult.isLoading}
-              show={showProviderSections}
-            />
-          </>
+          isOffline ? (
+            // OFFLINE UX (Фаза 20) — один делікатний inline-banner замість чотирьох мовчазно
+            // порожніх секцій (`docs/LOCAL_FIRST.md`'s "ніколи глобальний блокуючий overlay",
+            // тут аналог — і ніколи одразу чотири окремі копії того самого повідомлення).
+            <OfflineNotice message="Немає з'єднання з інтернетом. Спільний каталог, Google Books та ISBNdb зараз недоступні — спробуй ще раз, коли з'явиться мережа." />
+          ) : (
+            <>
+              {/* Спільний каталог першим (Milestone 8.2): дешевий і швидкий запит до власного
+                  Supabase, книги, додані іншими користувачами, — зверху списку. Далі Google
+                  Books. ISBNdb — платна, останньою, і додатково чекає (`isbndbEnabled`), доки
+                  перші дві не "осядуть" порожніми. Кожна наступна секція вже не показує книги,
+                  чий ISBN показала попередня (`dedupeAgainst` вище, Milestone 10 fix6, п. 3.2). */}
+              <ProviderResultsSection
+                provider={SharedCatalogProvider}
+                data={catalogBooks}
+                isLoading={catalogResult.isLoading}
+                show={showProviderSections}
+              />
+              <ProviderResultsSection
+                provider={CuratedCatalogProvider}
+                data={curatedBooks}
+                isLoading={curatedResult.isLoading}
+                show={showProviderSections}
+              />
+              <ProviderResultsSection
+                provider={GoogleBooksProvider}
+                data={googleBooks}
+                isLoading={googleBooksResult.isLoading}
+                show={showProviderSections}
+              />
+              <ProviderResultsSection
+                provider={ISBNdbProvider}
+                data={isbndbBooks}
+                isLoading={isbndbResult.isLoading}
+                show={showProviderSections}
+              />
+            </>
+          )
         ) : (
           <AppText variant="body" color="tertiary" style={{ textAlign: 'center', marginTop: theme.spacing.xxl }}>
             Введи назву або автора, щоб знайти книгу для додавання — у спільній базі застосунку чи
