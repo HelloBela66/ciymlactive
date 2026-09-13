@@ -10,15 +10,20 @@ import type { PreReadingReflection } from '@/types/preReadingReflection';
 const log = createLogger('features/memory/preReadingReflection');
 
 /** «До/Після» (POLYTSIA V1.6, Фаза 6) — нотатка "До читання" ЦІЄЇ книги, якщо вона вже
- * збережена. Доступна з Book Details (`app/work/[workId].tsx`, поки книга "Читаю") і з
- * Book Memory (`app/memory/[workId].tsx`, для порівняння До/Після). */
+ * збережена. Доступна з Book Details (`app/work/[workId].tsx`, поки книга "Читаю"/"Перечитую" —
+ * REREADING MODEL, Фаза 9) і з Book Memory (`app/memory/[workId].tsx`, для порівняння До/Після).
+ *
+ * REREADING MODEL, Фаза 9 (`docs/READING_RUN.md`) — `getCurrent` сама визначає "поточний"
+ * (найновіший) run книги: після перечитування тут з'явиться НОВА, порожня нотатка "До" для
+ * нового run, а не стара нотатка першого прочитання. Форма виклику з UI НЕ змінюється —
+ * навмисно, той самий `userBookId`. */
 export function usePreReadingReflection(userBookId: string | undefined) {
   return useQuery<PreReadingReflection | null>({
     queryKey: queryKeys.preReadingReflection.byUserBook(userBookId ?? ''),
     queryFn: async () => {
       if (!userBookId) return null;
       const db = await getDatabase();
-      return PreReadingReflectionRepository.getByUserBookId(db, userBookId);
+      return PreReadingReflectionRepository.getCurrent(db, userBookId);
     },
     enabled: !!userBookId,
   });
@@ -51,7 +56,7 @@ export function useSavePreReadingReflection() {
       }
 
       const db = await getDatabase();
-      return PreReadingReflectionRepository.upsert(db, {
+      return PreReadingReflectionRepository.upsertCurrent(db, {
         userBookId: input.userBookId,
         reasonText,
         expectationText,

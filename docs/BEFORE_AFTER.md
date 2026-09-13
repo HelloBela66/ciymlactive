@@ -1,7 +1,9 @@
 # BEFORE_AFTER.md — «До / Після»
 
-POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну поведінку фічі, щоб вона не змінювалась
-випадково в майбутніх фазах (той самий підхід, що й `docs/BOOK_CAPSULES.md`/`docs/RECALL.md`).
+POLYTSIA V1.6, Фаза 6; REREADING MODEL, Фаза 9 (POLYTSIA V1.6.1, `docs/READING_RUN.md`
+§"Фаза 9") додає окрему нотатку "До" на кожне перечитування. Цей документ фіксує точну поведінку
+фічі, щоб вона не змінювалась випадково в майбутніх фазах (той самий підхід, що й
+`docs/BOOK_CAPSULES.md`/`docs/RECALL.md`).
 «До/Після» будується на двох ОКРЕМИХ моментах взаємодії з книгою — на самому старті читання
 (нове, ця фаза) і після фінішу (уже наявне з Фаз 6-7 попереднього циклу — рефлексія спогаду й
 оцінка) — і лише ПОРІВНЮЄ їх, нічого нового "після" не збирає.
@@ -15,8 +17,9 @@ POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну по�
 ## Точка входу
 
 Рівно одна для запису: секція «До читання» на `app/work/[workId].tsx` (Book Details), видима
-лише поки `user_book.status === 'reading'` (`canEditPreReadingReflection`,
-`src/lib/beforeAfter.ts`). Розташована одразу під перемикачем статусу читання (`LibrarySection`)
+поки книга РЕАЛЬНО читається — `status === 'reading'` або `'rereading'` (REREADING MODEL, Фаза 9:
+з `'rereading'` — з Фази 9, `canEditPreReadingReflection`, `src/lib/beforeAfter.ts`). Розташована
+одразу під перемикачем статусу читання (`LibrarySection`)
 — найближче логічне місце до самого моменту "щойно почав читати", без окремого маршруту чи
 навігації: інлайн "розгорнути форму" патерн, той самий, що й `BookMemorySection`
 (`app/completion/[workId].tsx`).
@@ -27,11 +30,11 @@ POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну по�
 ## Чому форма ховається після фінішу
 
 Форма «До читання» НЕ доступна для редагування, щойно `user_book.status` перестає бути
-`'reading'` (`canEditPreReadingReflection`). Це навмисне обмеження, не недогляд: дозволити
-писати "чого я чекав" уже ПІСЛЯ того, як книгу дочитано (і фінал відомий), перетворило б
-порівняння До/Після на ретроспективну фантазію, а не чесний знімок очікувань "до". Уже
-збережена нотатка (якщо була створена, поки статус ще був `'reading'`) лишається видимою у
-режимі "лише читання" незалежно від подальшого статусу книги.
+`'reading'`/`'rereading'` (`canEditPreReadingReflection`). Це навмисне обмеження, не недогляд:
+дозволити писати "чого я чекав" уже ПІСЛЯ того, як книгу дочитано (і фінал відомий), перетворило
+б порівняння До/Після на ретроспективну фантазію, а не чесний знімок очікувань "до". Уже
+збережена нотатка (якщо була створена, поки книга ще читалась) лишається видимою у режимі "лише
+читання" незалежно від подальшого статусу книги.
 
 ## Немає окремого поля "Після"
 
@@ -47,10 +50,12 @@ POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну по�
 просто показує "До" без відповідної половини "Після" (з ввічливим порожнім текстом), а не
 блокується чи ховається повністю.
 
-## Дані (`pre_reading_reflection`, `014_pre_reading_reflection.ts`)
+## Дані (`pre_reading_reflection`, `014_pre_reading_reflection.ts`; REREADING MODEL Фаза 9, `022_pre_reading_reflection_run.ts`)
 
-Один рядок на книгу (`UNIQUE(user_book_id)`, той самий сенс, що й `rating`/`book_memory`) —
-це не накопичувана історія (на відміну від `capsule_recall`), а один живий стан:
+З Фази 9 — щонайбільше один рядок НА RUN (`UNIQUE(reading_run_id)`, той самий сенс, що й
+`book_memory` з Фази 8), а не один рядок на книгу — це й досі не накопичувана довільна історія
+(на відміну від `capsule_recall`): у межах ОДНОГО проходження книги («До» цього читання) це й
+далі один живий стан, upsert, просто окремий для кожного `reading_run`:
 
 - `reason_text` — «Чому хочеш прочитати цю книгу?»;
 - `expectation_text` — «Чого очікуєш? Який настрій/очікування?» (ТЗ дає два рядки питання про
@@ -60,12 +65,13 @@ POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну по�
   "Expected rating optional", на відміну від фактичної оцінки).
 
 `created_at` НЕ оновлюється при повторному збереженні — лишається "миттю ДО читання", навіть
-якщо користувач кілька разів підправив текст, доки книга ще "Читаю".
+якщо користувач кілька разів підправив текст, доки книга ще читається.
 
-**Відоме обмеження**: `rereading` НЕ отримує нову "before"-нотатку — повторне проходження
-`canEditPreReadingReflection` (`status === 'reading'`) перезаписало б стару нотатку через
-`upsert`, а не завело нову. Той самий клас компромісу, що вже задокументовано для
-`book_capsule` при перечитуванні (`docs/BOOK_CAPSULES.md` §Архітектура) — прийнятно для V1.6.
+`PreReadingReflectionRepository.getCurrent`/`upsertCurrent` резолвлять "поточний" run через
+`ReadingRunRepository.getLatestByUserBookId` (НЕ `getActiveByUserBookId`) — той самий вибір, що
+й `BookMemoryRepository`, і з тієї самої причини: `getCurrent` читає і Book Details (під час
+читання), і саме порівняння До/Після на Book Memory (уже ПІСЛЯ завершення run) — повне
+обґрунтування, докладніше — `docs/READING_RUN.md` §"Фаза 9".
 
 ## Бекап
 
@@ -94,7 +100,9 @@ POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну по�
 
 ## Відомі обмеження (V1.6)
 
-- `rereading` не отримує другу "before"-нотатку (див. §Дані вище).
+- ~~`rereading` не отримує другу "before"-нотатку~~ — вирішено REREADING MODEL, Фаза 9
+  (POLYTSIA V1.6.1, `docs/READING_RUN.md` §"Фаза 9"): кожен `reading_run` тепер має власну
+  нотатку "До", перечитування більше не перезаписує попередню.
 - Порівняння «До/Після» доступне лише на `app/memory/[workId].tsx` — Completion screen
   (`app/completion/[workId].tsx`) його НЕ показує (там і без того вже щільно: статистика,
   «Спогад про книгу», Капсула, оцінка) — Book Memory лишається єдиним місцем "озирнутися назад"
@@ -106,13 +114,19 @@ POLYTSIA V1.6, Фаза 6. Цей документ фіксує точну по�
 
 - `src/data/db/migrations/014_pre_reading_reflection.ts` — таблиця `pre_reading_reflection`,
   повне архітектурне обґрунтування прямо в коментарях міграції.
-- `src/types/preReadingReflection.ts` — тип `PreReadingReflection`.
+- `src/data/db/migrations/022_pre_reading_reflection_run.ts` — REREADING MODEL Фаза 9: rebuild
+  `UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)` + JS-backfill наявних рядків.
+- `src/types/preReadingReflection.ts` — тип `PreReadingReflection` (з Фази 9 — `readingRunId`).
 - `src/lib/beforeAfter.ts` — чисті доменні функції: `normalizeReflectionText`,
-  `validatePreReadingReflectionContent`, `canEditPreReadingReflection`, `pickBeforeCardText`.
-- `src/data/repositories/PreReadingReflectionRepository.ts` — SQL (`getByUserBookId`, `upsert`,
-  `remove`).
+  `validatePreReadingReflectionContent`, `canEditPreReadingReflection` (з Фази 9 — дозволяє й
+  `'rereading'`), `pickBeforeCardText`.
+- `src/data/repositories/PreReadingReflectionRepository.ts` — SQL (`getCurrent`/`upsertCurrent` —
+  перейменовано з `getByUserBookId`/`upsert` у Фазі 9, резолвлять run через
+  `ReadingRunRepository.getLatestByUserBookId`; `getByReadingRunId`/`listByUserBookId` — Фаза 9,
+  майбутня історія; `remove`).
 - `src/features/memory/usePreReadingReflection.ts` — `usePreReadingReflection` (query),
-  `useSavePreReadingReflection`/`useRemovePreReadingReflection` (mutations).
+  `useSavePreReadingReflection`/`useRemovePreReadingReflection` (mutations) — форма виклику з UI
+  не змінюється Фазою 9.
 - `app/work/[workId].tsx` — `PreReadingReflectionSection` (форма створення/редагування/перегляду).
 - `app/memory/[workId].tsx` — `BeforeAfterSection` (порівняння) + `beforeText`-пропс
   `MemoryCardPreview` (шаблон картки).

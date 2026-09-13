@@ -1,5 +1,49 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 9 — Before/After прив'язане до reading_run (REREADING MODEL)
+
+**Дата:** 2026-09-13
+
+П'ята частина REREADING MODEL, дзеркалить Фазу 8 майже один-в-один — та сама проблема, те саме
+рішення, інша таблиця. Проблема (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 23, п.6, CODE
+VERIFIED): `pre_reading_reflection` мала `UNIQUE(user_book_id)` — щонайбільше одна нотатка "До"
+на книгу; перечитування не мало власної нотатки "До", а форма її запису була взагалі недоступна
+повторно. Повне обґрунтування — `docs/READING_RUN.md` §"Фаза 9".
+
+**Додано:**
+- `022_pre_reading_reflection_run.ts` — rebuild `pre_reading_reflection`: обмеження міняється з
+  `UNIQUE(user_book_id)` на `UNIQUE(reading_run_id)`, той самий `_new`+`DROP`+`RENAME` ідіом, що
+  й `021_book_memory_run.ts`. Нова колонка `reading_run_id` — nullable, свідомо без SQL
+  `REFERENCES` (той самий урок). JS-backfill наявних рядків: найновіший `finished`/
+  `did_not_finish` run книги, інакше найновіший run узагалі, інакше `reading_run_id` лишається
+  `NULL` (книга без жодного run) — той самий пріоритет, що й у Фазі 8 (не "найстаріший run", як
+  можна було б спершу очікувати від нотатки, що пишеться рано — обґрунтування нижче).
+- `PreReadingReflectionRepository.getByReadingRunId`/`listByUserBookId` — прямий доступ до
+  нотатки конкретного run і повної історії нотаток книги (заготовка для екрана історії, Фаза 12).
+- 11 нових тестів (668 → 679): `PreReadingReflectionRepository.test.ts` (перебудований під
+  `getCurrent`/`upsertCurrent`, 7 → 10 — перечитування створює ОКРЕМУ нотатку для нового run,
+  стара не затирається й лишається доступною через `getCurrent` навіть ПІСЛЯ завершення свого
+  run; книга без жодного run фолбечить на "книжкову" нотатку), `migrationRunner.test.ts`
+  (+7 — усі гілки вибору run при backfill, зняття старого UNIQUE, дія нового UNIQUE),
+  `beforeAfter.test.ts` (+1 — `canEditPreReadingReflection('rereading')` тепер `true`).
+
+**Змінено:**
+- `PreReadingReflectionRepository.getByUserBookId`/`.upsert` → `.getCurrent`/`.upsertCurrent` —
+  самі визначають "поточний" run книги через `ReadingRunRepository.getLatestByUserBookId` (НЕ
+  `getActiveByUserBookId`, хоч нотатка "До" й пишеться рано, поки run ще `in_progress`): той
+  самий метод читає і Book Details (під час читання — там найновіший run і є активний) і екран
+  порівняння До/Після на Book Memory (уже ПІСЛЯ завершення run — там `getActiveByUserBookId`
+  повернув би `null`, і "До" зникло б із порівняння). Форма виклику з UI
+  (`usePreReadingReflection.ts`) НЕ змінюється — той самий `userBookId`. Перечитування книги
+  тепер природно починає НОВУ, порожню нотатку "До" для нового run замість затирання старої.
+- `canEditPreReadingReflection` (`src/lib/beforeAfter.ts`) — розширено з `status === 'reading'`
+  на `status === 'reading' || status === 'rereading'`: кожен run тепер має власну нотатку "До"
+  (`UNIQUE(reading_run_id)`), тож більше немає підстави блокувати форму при перечитуванні — саме
+  це закриває задокументоване обмеження "перечитування мають окремі До/Після".
+- `docs/READING_RUN.md`/`docs/DATABASE.md`/`docs/BEFORE_AFTER.md` — нова секція "Фаза 9", схема
+  `pre_reading_reflection`, історія міграцій і задокументоване обмеження оновлені (позначене
+  вирішеним).
+
 ## POLYTSIA V1.6.1, Фаза 8 — Book Memory прив'язана до reading_run (REREADING MODEL)
 
 **Дата:** 2026-09-13

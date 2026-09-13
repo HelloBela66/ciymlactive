@@ -223,6 +223,19 @@ sync/catalog backend, але жодна читацька дія (старт се
     `finished`/`did_not_finish` run цієї книги, інакше найновіший run узагалі, інакше
     `reading_run_id` лишається `NULL` (книга без жодного run). Кожне завершене прочитання відтепер
     може мати власний спогад, що не перезаписує попередні.
+22. **022_pre_reading_reflection_run** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 9) —
+    `docs/READING_RUN.md` §"Фаза 9". Дзеркалить `021_book_memory_run` один-в-один, інша таблиця:
+    rebuild `pre_reading_reflection`, обмеження з `UNIQUE(user_book_id)` на
+    `UNIQUE(reading_run_id)`, той самий `_new`+`DROP`+`RENAME` ідіом. `reading_run_id` — nullable,
+    СВІДОМО без `REFERENCES` (той самий урок). JS-backfill — ТОЙ САМИЙ пріоритет, що й у `021`
+    (найновіший `finished`/`did_not_finish`, інакше найновіший run узагалі, інакше `NULL`) —
+    не "найстаріший run", хоч нотатка "До" й пишеться рано: `PreReadingReflectionRepository
+    .getCurrent` резолвить через `getLatestByUserBookId` (так само, як і `BookMemoryRepository`),
+    бо цей самий метод читає і Book Details (під час читання), і екран порівняння До/Після на
+    Book Memory (уже ПІСЛЯ завершення run) — backfill мусить лінкувати нотатку саме туди, де її
+    знайде `getCurrent`. Разом зі схемою — `canEditPreReadingReflection` (`src/lib/beforeAfter.ts`)
+    розширено на `status === 'rereading'`: кожен run тепер має власну нотатку "До", тож більше
+    немає підстави блокувати форму при перечитуванні.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -579,12 +592,18 @@ CREATE TABLE rating (
   updated_at TEXT NOT NULL
 );
 
--- «До/Після» (`014_pre_reading_reflection.ts`, POLYTSIA V1.6 Фаза 6) — той самий
--- UNIQUE(user_book_id)-патерн, що й rating вище (один живий стан, upsert, не історія).
--- expected_rating — той самий CHECK/крок 0.5, що й rating.value, але IS NULL-able.
+-- «До/Після» (`014_pre_reading_reflection.ts`, POLYTSIA V1.6 Фаза 6; REREADING MODEL Фаза 9,
+-- `022_pre_reading_reflection_run.ts`, `docs/READING_RUN.md`) — щонайбільше ОДНА НА RUN
+-- (UNIQUE(reading_run_id), НЕ user_book_id — до Фази 9 було навпаки: одна на книгу, і форма
+-- запису була недоступна повторно при перечитуванні, `docs/V1_6_FULL_AUDIT_REPORT.md` розділ 23
+-- п.6). reading_run_id — СВІДОМО БЕЗ SQL REFERENCES (той самий задокументований урок) — nullable,
+-- книга без жодного reading_run (Фаза 7 addToLibrary, свідомо не підключена) і далі має
+-- "книжкову" нотатку без прив'язки до run. expected_rating — той самий CHECK/крок 0.5, що й
+-- rating.value, але IS NULL-able.
 CREATE TABLE pre_reading_reflection (
   id TEXT PRIMARY KEY,
-  user_book_id TEXT NOT NULL UNIQUE REFERENCES user_book(id) ON DELETE CASCADE,
+  user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
+  reading_run_id TEXT UNIQUE,
   reason_text TEXT,
   expectation_text TEXT,
   expected_rating REAL CHECK (
@@ -594,6 +613,8 @@ CREATE TABLE pre_reading_reflection (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE INDEX idx_pre_reading_reflection_user_book ON pre_reading_reflection(user_book_id);
 
 -- «Спогад про книгу» (`004_book_memory.ts` + `005_book_memory_template.ts`, Milestone 11
 -- Фаза 7-8; REREADING MODEL Фаза 8, `021_book_memory_run.ts`, `docs/READING_RUN.md`) —

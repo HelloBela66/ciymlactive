@@ -57,6 +57,10 @@ describe('canEditPreReadingReflection', () => {
     expect(canEditPreReadingReflection('reading')).toBe(true);
   });
 
+  it('"rereading" — можна (REREADING MODEL Фаза 9: власна нотатка "До" для нового run, не затирає стару)', () => {
+    expect(canEditPreReadingReflection('rereading')).toBe(true);
+  });
+
   it('"finished" — не можна (писати "до" заднім числом підважує сенс порівняння)', () => {
     expect(canEditPreReadingReflection('finished')).toBe(false);
   });
@@ -65,9 +69,8 @@ describe('canEditPreReadingReflection', () => {
     expect(canEditPreReadingReflection('want_to_read')).toBe(false);
   });
 
-  it('"paused"/"rereading"/"did_not_finish" — не можна', () => {
+  it('"paused"/"did_not_finish" — не можна', () => {
     expect(canEditPreReadingReflection('paused')).toBe(false);
-    expect(canEditPreReadingReflection('rereading')).toBe(false);
     expect(canEditPreReadingReflection('did_not_finish')).toBe(false);
   });
 });

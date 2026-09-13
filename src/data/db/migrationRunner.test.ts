@@ -601,3 +601,191 @@ describe('migrateDbIfNeeded — 021_book_memory_run (Фаза 8)', () => {
     expect(memory?.user_book_id).toBe('ub-p');
   });
 });
+
+/**
+ * `022_pre_reading_reflection_run.ts` (POLYTSIA V1.6.1, Фаза 9, `docs/READING_RUN.md`
+ * §"Фаза 9") — rebuild `pre_reading_reflection` (`UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`)
+ * + JS-backfill. Той самий сценарій і той самий пріоритет backfill, що й у тестах 021 вище
+ * (найновіший FINISHED/DID_NOT_FINISH, інакше найновіший узагалі) — з тієї самої причини:
+ * `PreReadingReflectionRepository.getCurrent` читає через `getLatestByUserBookId`, тож backfill
+ * мусить лінкувати наявну нотатку на run, який ця функція справді знайде.
+ */
+const MIGRATION_022_NOW = '2026-09-13T00:00:00.000Z';
+
+async function seedBookForReflectionMigration(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+    `${id}-work`,
+    `Книга ${id}`,
+    MIGRATION_022_NOW,
+    MIGRATION_022_NOW,
+  ]);
+  await db.runAsync(
+    `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    [`${id}-edition`, `${id}-work`, `Книга ${id}`, 'uk', 'paperback', MIGRATION_022_NOW, MIGRATION_022_NOW],
+  );
+  await db.runAsync(
+    `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'finished',0,?,?)`,
+    [id, `${id}-edition`, MIGRATION_022_NOW, MIGRATION_022_NOW],
+  );
+}
+
+async function seedRunForReflectionMigration(
+  db: SQLiteDatabase,
+  params: { id: string; userBookId: string; runNumber: number; status: string },
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO reading_run (
+       id, user_book_id, run_number, status, started_at, finished_at, is_legacy_backfill, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,0,?,?)`,
+    [
+      params.id,
+      params.userBookId,
+      params.runNumber,
+      params.status,
+      MIGRATION_022_NOW,
+      params.status === 'in_progress' ? null : MIGRATION_022_NOW,
+      MIGRATION_022_NOW,
+      MIGRATION_022_NOW,
+    ],
+  );
+}
+
+/** Нотатка "До" у СТАРІЙ схемі `pre_reading_reflection` (версія 21 — ще без `reading_run_id`). */
+async function seedLegacyReflection(db: SQLiteDatabase, id: string, userBookId: string): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO pre_reading_reflection (id, user_book_id, reason_text, expectation_text, expected_rating, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?)`,
+    [id, userBookId, `Причина ${id}`, null, null, MIGRATION_022_NOW, MIGRATION_022_NOW],
+  );
+}
+
+interface LegacyReflectionRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+}
+
+async function getReflection(db: SQLiteDatabase, id: string): Promise<LegacyReflectionRow | null> {
+  return db.getFirstAsync<LegacyReflectionRow>(`SELECT * FROM pre_reading_reflection WHERE id = ?`, [id]);
+}
+
+describe('migrateDbIfNeeded — 022_pre_reading_reflection_run (Фаза 9)', () => {
+  it('книга з finished і in_progress run — нотатка лінкується на FINISHED, не на новіший in_progress', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-q');
+    await seedRunForReflectionMigration(db, { id: 'run-q1', userBookId: 'ub-q', runNumber: 1, status: 'finished' });
+    await seedRunForReflectionMigration(db, { id: 'run-q2', userBookId: 'ub-q', runNumber: 2, status: 'in_progress' });
+    await seedLegacyReflection(db, 'reflection-q', 'ub-q');
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const reflection = await getReflection(db, 'reflection-q');
+    expect(reflection?.reading_run_id).toBe('run-q1');
+  });
+
+  it('кілька FINISHED run — обирається найновіший (найвищий run_number), не перший знайдений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-r');
+    await seedRunForReflectionMigration(db, { id: 'run-r1', userBookId: 'ub-r', runNumber: 1, status: 'finished' });
+    await seedRunForReflectionMigration(db, { id: 'run-r2', userBookId: 'ub-r', runNumber: 2, status: 'finished' });
+    await seedLegacyReflection(db, 'reflection-r', 'ub-r');
+
+    await migrateDbIfNeeded(db);
+
+    const reflection = await getReflection(db, 'reflection-r');
+    expect(reflection?.reading_run_id).toBe('run-r2');
+  });
+
+  it('лише in_progress run (без жодного finished) — фолбек на найновіший run узагалі', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-s');
+    await seedRunForReflectionMigration(db, { id: 'run-s1', userBookId: 'ub-s', runNumber: 1, status: 'in_progress' });
+    await seedLegacyReflection(db, 'reflection-s', 'ub-s');
+
+    await migrateDbIfNeeded(db);
+
+    const reflection = await getReflection(db, 'reflection-s');
+    expect(reflection?.reading_run_id).toBe('run-s1');
+  });
+
+  it('книга без жодного reading_run — reading_run_id лишається NULL, нічого не вигадується', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-t');
+    await seedLegacyReflection(db, 'reflection-t', 'ub-t');
+
+    await migrateDbIfNeeded(db);
+
+    const reflection = await getReflection(db, 'reflection-t');
+    expect(reflection?.reading_run_id).toBeNull();
+  });
+
+  it('стара UNIQUE(user_book_id) знята: дві нотатки на одну книгу (різні reading_run_id) — без конфлікту', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-u');
+    await seedRunForReflectionMigration(db, { id: 'run-u1', userBookId: 'ub-u', runNumber: 1, status: 'finished' });
+    await seedRunForReflectionMigration(db, { id: 'run-u2', userBookId: 'ub-u', runNumber: 2, status: 'finished' });
+    await seedLegacyReflection(db, 'reflection-u1', 'ub-u');
+
+    await migrateDbIfNeeded(db);
+
+    // Backfill лінкує reflection-u1 на run-u2 (найновіший FINISHED, п. вище) — другу нотатку
+    // навмисно на РЕШТУ run цієї самої книги (run-u1), яка ще без нотатки: після rebuild це
+    // більше не конфлікт (стара UNIQUE(user_book_id) заборонила б будь-який другий рядок для
+    // ub-u взагалі, незалежно від run).
+    const linkedRun = await getReflection(db, 'reflection-u1');
+    expect(linkedRun?.reading_run_id).toBe('run-u2');
+
+    await db.runAsync(
+      `INSERT INTO pre_reading_reflection (id, user_book_id, reading_run_id, reason_text, expectation_text, expected_rating, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      ['reflection-u2', 'ub-u', 'run-u1', 'Друга нотатка', null, null, MIGRATION_022_NOW, MIGRATION_022_NOW],
+    );
+
+    const rows = await db.getAllAsync<LegacyReflectionRow>(
+      `SELECT * FROM pre_reading_reflection WHERE user_book_id = ?`,
+      ['ub-u'],
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  it('нова UNIQUE(reading_run_id) ДІЄ: друга нотатка на ТОЙ САМИЙ run кидає виняток', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-v');
+    await seedRunForReflectionMigration(db, { id: 'run-v1', userBookId: 'ub-v', runNumber: 1, status: 'finished' });
+    await seedLegacyReflection(db, 'reflection-v1', 'ub-v');
+    await migrateDbIfNeeded(db);
+
+    await expect(
+      db.runAsync(
+        `INSERT INTO pre_reading_reflection (id, user_book_id, reading_run_id, reason_text, expectation_text, expected_rating, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        ['reflection-v2', 'ub-v', 'run-v1', 'Дубль', null, null, MIGRATION_022_NOW, MIGRATION_022_NOW],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('pre_reading_reflection.reading_run_id — нова колонка, індекс idx_pre_reading_reflection_user_book справді створений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 21);
+    await seedBookForReflectionMigration(db, 'ub-w');
+    await seedLegacyReflection(db, 'reflection-w', 'ub-w');
+
+    await migrateDbIfNeeded(db);
+
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_pre_reading_reflection_user_book'`,
+    );
+    expect(index?.name).toBe('idx_pre_reading_reflection_user_book');
+
+    // Поле досі читається без винятку — sanity-check, що rebuild не втратив жодної колонки.
+    const reflection = await getReflection(db, 'reflection-w');
+    expect(reflection?.user_book_id).toBe('ub-w');
+  });
+});

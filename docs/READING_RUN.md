@@ -225,14 +225,63 @@ run — `reading_run_id` лишається `NULL` (той самий принц
 вже готові для майбутньої історії спогадів), просто ще не мають власного екрана перегляду —
 свідомо поза межами цієї фази, той самий UI, що й Фаза 12 нижче.
 
-## Свідомо ПОЗА межами Фази 8
+## Фаза 9 — Before/After (`022_pre_reading_reflection_run.ts`, `PreReadingReflectionRepository`)
 
-Підключення інших сутностей до `reading_run` (Before/After, Capsule, DNF, порівняння прочитань)
-лишається окремими наступними фазами:
+П'ята частина REREADING MODEL, дзеркалить Фазу 8 майже один-в-один — та сама проблема, те саме
+рішення, інша таблиця. Проблема (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 23, п.6, CODE
+VERIFIED): `pre_reading_reflection` мала `UNIQUE(user_book_id)` — щонайбільше одна нотатка "До"
+на книгу; перечитування не мало власної нотатки "До", а форма її запису була взагалі недоступна
+повторно (`canEditPreReadingReflection` дозволяла лише `status === 'reading'`).
+
+### Схема — rebuild, `UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`
+
+Той самий rebuild-ідіом, що й Фаза 8. `reading_run_id` — нова колонка, nullable, СВІДОМО БЕЗ
+`REFERENCES reading_run(id)` (той самий задокументований урок). `user_book_id` лишається
+(більше не `UNIQUE`).
+
+### Backfill наявних рядків
+
+JS-цикл, ТОЙ САМИЙ пріоритет, що й у Фазі 8 (не "найстаріший run", як можна було б очікувати від
+нотатки, що пишеться рано): для кожної наявної нотатки — найновіший `finished`/`did_not_finish`
+run цієї книги; якщо такого немає — найновіший run узагалі; якщо книга взагалі не має жодного
+run — `reading_run_id` лишається `NULL`. Причина того самого пріоритету, що й для Book Memory —
+дивись нижче, чому `getCurrent` читає саме через `getLatestByUserBookId`, а не
+`getActiveByUserBookId`: backfill мусить лінкувати нотатку на run, який ця функція справді
+знайде, інакше вона "зникне" з порівняння До/Після.
+
+### `PreReadingReflectionRepository.getCurrent`/`upsertCurrent` — `getLatestByUserBookId`, НЕ `getActiveByUserBookId`
+
+Важливе уточнення, що відрізняється від початкового припущення: хоча нотатка "До" пишеться РАНО
+(поки книга ще читається, run `in_progress`), резолвиться вона через
+`ReadingRunRepository.getLatestByUserBookId` — той самий вибір, що й `BookMemoryRepository`
+(Фаза 8), а НЕ `getActiveByUserBookId` (лише `in_progress`). Причина: `getCurrent` читає і Book
+Details (`app/work/[workId].tsx`, ПІД ЧАС читання — там найновіший run і є активний, той самий
+run) і екран порівняння До/Після на Book Memory (`app/memory/[workId].tsx`, ПІСЛЯ завершення
+читання — там run уже `finished`, і `getActiveByUserBookId` повернув би `null`, а разом з ним і
+"До" зникло б із порівняння). `getLatestByUserBookId` коректний в обох випадках.
+
+Виклики з UI (`usePreReadingReflection.ts`) лишаються НЕЗМІННИМИ за формою — той самий
+`userBookId`. Перечитування книги тепер природно починає НОВУ, порожню нотатку "До" для нового
+run замість затирання старої; нотатка(и) попередніх run НЕ видаляються (`listByUserBookId`/
+`getByReadingRunId`), просто ще не мають власного екрана перегляду — той самий "поза межами
+фази" UI, що й Фаза 8/12.
+
+### `canEditPreReadingReflection` — розширено на `'rereading'`
+
+Єдина зміна поведінки UI цієї фази (`src/lib/beforeAfter.ts`): ДО Фази 9 форма була доступна
+лише за `status === 'reading'` — дозволити її й при `'rereading'` до цієї фази означало б
+затерти нотатку "До" першого прочитання (стара `UNIQUE(user_book_id)`). Тепер, коли кожен run
+має власну нотатку (`UNIQUE(reading_run_id)`), блокувати `'rereading'` більше немає підстави —
+саме це й закриває задокументоване обмеження "перечитування мають окремі До/Після"
+(`docs/BEFORE_AFTER.md` §"Відоме обмеження").
+
+## Свідомо ПОЗА межами Фази 9
+
+Підключення інших сутностей до `reading_run` (Capsule, DNF, порівняння прочитань) лишається
+окремими наступними фазами:
 
 | Фаза | Що підключається |
 | --- | --- |
-| 9 | Before/After — те саме для `pre_reading_reflection` |
 | 10 | Capsule/Recall — `canCreateCapsule` більше не блокує `rereading`, кожен run може мати власну капсулу |
 | 11 | DNF — `dnf_reflection` прив'язується до конкретного run, що не дочитали |
-| 12 | Rereading UX + порівняння прочитань — агрегований показ "як читалося цього разу vs минулого разу", використовуючи `run_number`; тут з'явиться екран історії спогадів по всіх run книги |
+| 12 | Rereading UX + порівняння прочитань — агрегований показ "як читалося цього разу vs минулого разу", використовуючи `run_number`; тут з'явиться екран історії спогадів/нотаток "До" по всіх run книги |
