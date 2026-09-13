@@ -54,8 +54,11 @@ async function scheduleIfNeeded(
   return { notificationIdentifier, notificationSkipped: false };
 }
 
-/** «Поточна» (найновіша) капсула книги, якщо вона вже створена — Book Memory/Completion
- * screens (Фаза 4 ТЗ). */
+/** Найновіша капсула КНИГИ ЗАГАЛОМ, незалежно від run, якщо вона вже створена — Book Memory/
+ * Completion screens (Фаза 4 ТЗ); `app/capsule/[workId].tsx`/`app/recall/[workId].tsx`
+ * (перегляд/recall — навмисно доступні "у будь-який момент", не лише для поточного run,
+ * `docs/READING_RUN.md` §"Фаза 10"). Для капсули САМЕ поточного run — `useCurrentBookCapsule`
+ * нижче. */
 export function useBookCapsule(userBookId: string | undefined) {
   return useQuery<BookCapsule | null>({
     queryKey: queryKeys.bookCapsule.byUserBook(userBookId ?? ''),
@@ -63,6 +66,23 @@ export function useBookCapsule(userBookId: string | undefined) {
       if (!userBookId) return null;
       const db = await getDatabase();
       return BookCapsuleRepository.getByUserBookId(db, userBookId);
+    },
+    enabled: !!userBookId,
+  });
+}
+
+/** REREADING MODEL, Фаза 10 (`docs/READING_RUN.md` §"Фаза 10") — капсула САМЕ поточного
+ * (найновішого) run книги; `null`, якщо для поточного run капсули ще нема, навіть коли старіші
+ * капсули (попередніх прочитань) існують. `BookCapsuleSection` (`app/completion/[workId].tsx`/
+ * `app/memory/[workId].tsx`) звіряє це з `useBookCapsule` вище, щоб запропонувати НОВУ капсулу
+ * для щойно завершеного перечитування, не ховаючи стару. */
+export function useCurrentBookCapsule(userBookId: string | undefined) {
+  return useQuery<BookCapsule | null>({
+    queryKey: queryKeys.bookCapsule.currentByUserBook(userBookId ?? ''),
+    queryFn: async () => {
+      if (!userBookId) return null;
+      const db = await getDatabase();
+      return BookCapsuleRepository.getCurrent(db, userBookId);
     },
     enabled: !!userBookId,
   });
@@ -133,6 +153,11 @@ export function useCreateBookCapsule() {
     },
     onSuccess: ({ capsule }) => {
       queryClient.setQueryData(queryKeys.bookCapsule.byUserBook(capsule.userBookId), capsule);
+      // REREADING MODEL, Фаза 10 — щойно створена капсула вже стамплена репозиторієм тим run,
+      // який на момент `create` був найновішим (`BookCapsuleRepository.getLatestByUserBookId`),
+      // тож вона одночасно і найновіша ЗАГАЛОМ, і капсула ПОТОЧНОГО run — обидва кеші коректно
+      // оновлюються тим самим об'єктом.
+      queryClient.setQueryData(queryKeys.bookCapsule.currentByUserBook(capsule.userBookId), capsule);
     },
     onError,
   });
@@ -221,6 +246,11 @@ export function useUpdateBookCapsule() {
     },
     onSuccess: ({ capsule }) => {
       queryClient.setQueryData(queryKeys.bookCapsule.byUserBook(capsule.userBookId), capsule);
+      // Редагування не чіпає `readingRunId` (капсула не міняє свою прив'язку до run після
+      // створення — див. коментар над модулем-репозиторієм) — якщо ця капсула вже була
+      // "поточною", інвалідуємо, а не вгадуємо `setQueryData`, щоб не ризикнути записати той
+      // самий об'єкт у кеш для run, якому ця капсула НЕ належить.
+      queryClient.invalidateQueries({ queryKey: queryKeys.bookCapsule.currentByUserBook(capsule.userBookId) });
     },
     onError,
   });
@@ -245,6 +275,7 @@ export function useRemoveBookCapsule() {
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bookCapsule.byUserBook(variables.userBookId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bookCapsule.currentByUserBook(variables.userBookId) });
     },
     onError,
   });
@@ -263,9 +294,12 @@ export function useMarkCapsuleOpened() {
       await BookCapsuleRepository.markOpened(db, id, nowIso());
     },
     onSuccess: (_data, variables) => {
+      const patch = (current: BookCapsule | null | undefined) =>
+        current && current.id === variables.id ? { ...current, openedAt: nowIso() } : current;
+      queryClient.setQueryData<BookCapsule | null>(queryKeys.bookCapsule.byUserBook(variables.userBookId), patch);
       queryClient.setQueryData<BookCapsule | null>(
-        queryKeys.bookCapsule.byUserBook(variables.userBookId),
-        (current) => (current && current.id === variables.id ? { ...current, openedAt: nowIso() } : current),
+        queryKeys.bookCapsule.currentByUserBook(variables.userBookId),
+        patch,
       );
     },
     // Тиха, необов'язкова фонова дія (не форма/явна дія користувача) — без `useMutationErrorHandler`

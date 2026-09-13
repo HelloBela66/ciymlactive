@@ -236,6 +236,24 @@ sync/catalog backend, але жодна читацька дія (старт се
     знайде `getCurrent`. Разом зі схемою — `canEditPreReadingReflection` (`src/lib/beforeAfter.ts`)
     розширено на `status === 'rereading'`: кожен run тепер має власну нотатку "До", тож більше
     немає підстави блокувати форму при перечитуванні.
+23. **023_book_capsule_run** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 10) —
+    `docs/READING_RUN.md` §"Фаза 10". На відміну від `021`/`022`, НЕ rebuild: `book_capsule`
+    ніколи не мала `UNIQUE(user_book_id)` (друга капсула після перечитування вже толерувалась
+    схемою), тож проста `ALTER TABLE book_capsule ADD COLUMN reading_run_id TEXT` — без
+    `manualTransaction`, без `_new`+`DROP`+`RENAME`. `reading_run_id` — nullable, СВІДОМО без
+    `REFERENCES` (той самий урок, що й у `020`/`021`/`022`). JS-backfill — АЛЕ інший алгоритм,
+    ніж `021`/`022`: книга могла вже мати КІЛЬКА legacy-капсул (на відміну від book_memory/
+    pre_reading_reflection, де було щонайбільше по одній), тож кожна капсула бекфілиться
+    ОКРЕМО — найновіший `finished`/`did_not_finish` run, чий `finished_at <= capsule.created_at`
+    (найближчий "знизу" за часом, не просто "найновіший run книги" — інакше дві старі капсули
+    двох різних прочитань помилково зчепились би з одним і тим самим останнім run). Разом зі
+    схемою — `BookCapsuleRepository.create()` тепер резолвить `reading_run_id` ОДИН РАЗ у мить
+    створення (не динамічно при кожному читанні, на відміну від `021`/`022`) і назавжди його
+    зберігає; нові read-методи `getByReadingRunId`/`getCurrent` співіснують поруч зі старим
+    `getByUserBookId` (не замінюють його). UI (`BookCapsuleSection`,
+    `app/memory/[workId].tsx` + `app/completion/[workId].tsx`) — адитивна зміна: новий блок
+    "залишити капсулу для цього прочитання" зʼявляється ПОРЯД зі старим переглядом капсули, коли
+    вона є, але не для поточного run — стару капсулу як і раніше можна переглянути/recall'нути.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -278,7 +296,8 @@ UserBook 1---* Note
 UserBook 1---* Quote
 UserBook 1---0..1 Rating
 UserBook 1---0..1 BookMemory        (Milestone 11 Фаза 7 — рефлексія + посилання на записи щоденника)
-UserBook 1---* BookCapsule           (POLYTSIA V1.6 Фаза 4 — БЕЗ UNIQUE, перечитування може мати кілька)
+UserBook 1---* BookCapsule           (POLYTSIA V1.6 Фаза 4 — БЕЗ UNIQUE, перечитування може мати кілька;
+                                       Фаза 10 — кожна капсула фіксує свій ReadingRun при створенні)
 UserBook *---* Shelf (через ShelfBook)
 
 OwnedBook 1---1 Edition
@@ -641,14 +660,25 @@ CREATE TABLE book_memory (
 );
 CREATE INDEX idx_book_memory_user_book ON book_memory(user_book_id);
 
--- «Капсула книги» (`012_book_capsule.ts`, POLYTSIA V1.6 Фаза 4) — на відміну від book_memory
--- вище, БЕЗ UNIQUE(user_book_id): немає надійного способу прив'язати капсулу до конкретного
--- прочитання (user_book.finished_at не оновлюється при перечитуванні), тож "поточна" капсула —
--- найновіша за created_at (BookCapsuleRepository.getByUserBookId). journal_entry_kind/
--- journal_entry_id — м'яке посилання на note/quote, той самий патерн, що й entry_refs вище.
+-- «Капсула книги» (`012_book_capsule.ts`, POLYTSIA V1.6 Фаза 4; REREADING MODEL Фаза 10,
+-- `023_book_capsule_run.ts`, `docs/READING_RUN.md`) — на відміну від book_memory/
+-- pre_reading_reflection вище, БЕЗ UNIQUE(reading_run_id): book_capsule НІКОЛИ не мала
+-- UNIQUE(user_book_id) (навіть до Фази 10 друга капсула після перечитування вже толерувалась,
+-- просто без зв'язку з конкретним прочитанням) — тож 023 це простий ALTER TABLE ADD COLUMN,
+-- НЕ rebuild-ідіом 021/022. reading_run_id — СВІДОМО БЕЗ SQL REFERENCES (той самий урок, що
+-- й у 020/021/022), nullable. РЕЗОЛЮЦІЯ ОДИН РАЗ, не динамічно: BookCapsuleRepository.create()
+-- резолвить getLatestByUserBookId РІВНО ОДИН РАЗ у момент створення і назавжди проставляє
+-- результат — на відміну від book_memory/pre_reading_reflection, де getCurrent/upsertCurrent
+-- РЕ-резолвлюють getLatestByUserBookId щоразу (bookCapsule.readingRunId, `src/types/bookCapsule.ts`,
+-- пояснює чому: капсула — НЕ upsert-сутність, один і той самий рядок ніколи не редагується
+-- під іншим run). getByUserBookId (найновіша капсула книги загалом, для "переглянути"/recall)
+-- і getCurrent (капсула САМЕ цього run, щоб вирішити — пропонувати нову чи ні) — два окремі
+-- read-методи, що співіснують назавжди. journal_entry_kind/journal_entry_id — м'яке посилання
+-- на note/quote, той самий патерн, що й entry_refs вище.
 CREATE TABLE book_capsule (
   id TEXT PRIMARY KEY,
   user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
+  reading_run_id TEXT,
   lasting_thought TEXT,
   one_sentence_memory TEXT,
   favorite_character_text TEXT,
@@ -666,6 +696,7 @@ CREATE TABLE book_capsule (
 
 CREATE INDEX idx_book_capsule_user_book ON book_capsule(user_book_id);
 CREATE INDEX idx_book_capsule_reopen_at ON book_capsule(reopen_at);
+CREATE INDEX idx_book_capsule_reading_run ON book_capsule(reading_run_id);
 
 -- «Книга через час» (`013_capsule_recall.ts`, POLYTSIA V1.6 Фаза 5) — історія "спроб згадати"
 -- капсулу вище; book_capsule_id — РЕАЛЬНИЙ FK (на відміну від м'яких journal_entry_kind/id у

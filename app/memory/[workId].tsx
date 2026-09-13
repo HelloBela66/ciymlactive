@@ -25,7 +25,7 @@ import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
-import { useBookCapsule } from '@/features/memory/useBookCapsule';
+import { useBookCapsule, useCurrentBookCapsule } from '@/features/memory/useBookCapsule';
 import { useLoreEntities } from '@/features/lore/useLoreEntities';
 import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { usePreReadingReflection } from '@/features/memory/usePreReadingReflection';
@@ -169,9 +169,17 @@ function BookCapsuleSection({
 }) {
   const theme = useTheme();
   const { data: capsule, isLoading } = useBookCapsule(userBookId);
+  const { data: currentCapsule, isLoading: isCurrentLoading } = useCurrentBookCapsule(userBookId);
 
-  if (isLoading) return null;
+  if (isLoading || isCurrentLoading) return null;
   if (!capsule && !canCreateCapsule(status)) return null;
+
+  // REREADING MODEL, Фаза 10 (`docs/READING_RUN.md` §"Фаза 10") — `capsule` (найновіша ЗАГАЛОМ)
+  // і `currentCapsule` (капсула САМЕ поточного run) можуть розходитись: після завершення
+  // перечитування без ще жодної нової капсули `capsule` і далі показує стару (з попереднього
+  // прочитання), а `currentCapsule` — null. `canOfferNewCapsule` ловить саме цей розрив і додає
+  // запрошення завести окрему капсулу для щойно завершеного прочитання, НЕ ховаючи стару.
+  const canOfferNewCapsule = canCreateCapsule(status) && !currentCapsule;
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
@@ -197,6 +205,30 @@ function BookCapsuleSection({
           variant="ghost"
           onPress={() => router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)}
         />
+      ) : null}
+      {capsule && canOfferNewCapsule ? (
+        <View
+          style={{
+            gap: theme.spacing.xs,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border,
+            paddingTop: theme.spacing.sm,
+          }}
+        >
+          <AppText variant="caption" color="secondary">
+            Це прочитання ще без власної капсули.
+          </AppText>
+          <Button
+            label="Залишити капсулу для цього прочитання"
+            variant="ghost"
+            onPress={() =>
+              router.push({
+                pathname: '/capsule/[workId]/edit',
+                params: { workId, newRun: '1' },
+              } as unknown as Href)
+            }
+          />
+        </View>
       ) : null}
     </Card>
   );

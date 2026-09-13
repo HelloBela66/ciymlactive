@@ -789,3 +789,220 @@ describe('migrateDbIfNeeded — 022_pre_reading_reflection_run (Фаза 9)', ()
     expect(reflection?.user_book_id).toBe('ub-w');
   });
 });
+
+/**
+ * `023_book_capsule_run.ts` (POLYTSIA V1.6.1, Фаза 10, `docs/READING_RUN.md` §"Фаза 10") —
+ * ПРОСТА `ADD COLUMN` (на відміну від rebuild-міграцій 021/022: `book_capsule` ніколи не мала
+ * `UNIQUE(user_book_id)`, тож нічого знімати) + JS-backfill за НАЙБЛИЖЧИМ у часі завершеним run
+ * (а не "найновіший finished узагалі", як у 021/022) — саме тому, що капсул на книгу вже могло
+ * бути КІЛЬКА ще ДО цієї міграції, і кожна мусить прив'язатись до СВОГО run, а не всі до одного.
+ */
+const MIGRATION_023_NOW = '2026-09-13T00:00:00.000Z';
+
+async function seedBookForCapsuleMigration(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+    `${id}-work`,
+    `Книга ${id}`,
+    MIGRATION_023_NOW,
+    MIGRATION_023_NOW,
+  ]);
+  await db.runAsync(
+    `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    [`${id}-edition`, `${id}-work`, `Книга ${id}`, 'uk', 'paperback', MIGRATION_023_NOW, MIGRATION_023_NOW],
+  );
+  await db.runAsync(
+    `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'finished',0,?,?)`,
+    [id, `${id}-edition`, MIGRATION_023_NOW, MIGRATION_023_NOW],
+  );
+}
+
+async function seedRunForCapsuleMigration(
+  db: SQLiteDatabase,
+  params: { id: string; userBookId: string; runNumber: number; status: string; startedAt: string; finishedAt: string | null },
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO reading_run (
+       id, user_book_id, run_number, status, started_at, finished_at, is_legacy_backfill, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,0,?,?)`,
+    [
+      params.id,
+      params.userBookId,
+      params.runNumber,
+      params.status,
+      params.startedAt,
+      params.finishedAt,
+      params.startedAt,
+      params.finishedAt ?? params.startedAt,
+    ],
+  );
+}
+
+/** Капсула у СТАРІЙ схемі `book_capsule` (версія 22 — ще без `reading_run_id`), з явним `created_at`
+ * для контролю "найближчого в часі" backfill-збігу. */
+async function seedLegacyCapsule(db: SQLiteDatabase, id: string, userBookId: string, createdAt: string): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO book_capsule (id, user_book_id, lasting_thought, reopen_option, created_at, updated_at)
+     VALUES (?,?,?,?,?,?)`,
+    [id, userBookId, `Капсула ${id}`, 'none', createdAt, createdAt],
+  );
+}
+
+interface LegacyCapsuleRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+}
+
+async function getCapsule(db: SQLiteDatabase, id: string): Promise<LegacyCapsuleRow | null> {
+  return db.getFirstAsync<LegacyCapsuleRow>(`SELECT * FROM book_capsule WHERE id = ?`, [id]);
+}
+
+describe('migrateDbIfNeeded — 023_book_capsule_run (Фаза 10)', () => {
+  it('одна капсула, один finished run — лінкується на нього', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-x');
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-x1',
+      userBookId: 'ub-x',
+      runNumber: 1,
+      status: 'finished',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    await seedLegacyCapsule(db, 'capsule-x', 'ub-x', '2026-01-11T00:00:00.000Z');
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const capsule = await getCapsule(db, 'capsule-x');
+    expect(capsule?.reading_run_id).toBe('run-x1');
+  });
+
+  it('перечитування: капсула створена ПІСЛЯ другого фінішу — лінкується на найближчий (другий) run, не на перший', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-y');
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-y1',
+      userBookId: 'ub-y',
+      runNumber: 1,
+      status: 'finished',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-y2',
+      userBookId: 'ub-y',
+      runNumber: 2,
+      status: 'finished',
+      startedAt: '2026-03-01T00:00:00.000Z',
+      finishedAt: '2026-03-10T00:00:00.000Z',
+    });
+    // Одна легасі-капсула, створена невдовзі ПІСЛЯ другого фінішу.
+    await seedLegacyCapsule(db, 'capsule-y', 'ub-y', '2026-03-11T00:00:00.000Z');
+
+    await migrateDbIfNeeded(db);
+
+    const capsule = await getCapsule(db, 'capsule-y');
+    expect(capsule?.reading_run_id).toBe('run-y2');
+  });
+
+  it('дві легасі-капсули тієї самої книги — КОЖНА лінкується на СВІЙ найближчий run, не обидві на останній', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-z');
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-z1',
+      userBookId: 'ub-z',
+      runNumber: 1,
+      status: 'finished',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-z2',
+      userBookId: 'ub-z',
+      runNumber: 2,
+      status: 'finished',
+      startedAt: '2026-03-01T00:00:00.000Z',
+      finishedAt: '2026-03-10T00:00:00.000Z',
+    });
+    // Перша капсула — невдовзі після ПЕРШОГО фінішу; друга — невдовзі після ДРУГОГО.
+    await seedLegacyCapsule(db, 'capsule-z1', 'ub-z', '2026-01-12T00:00:00.000Z');
+    await seedLegacyCapsule(db, 'capsule-z2', 'ub-z', '2026-03-12T00:00:00.000Z');
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getCapsule(db, 'capsule-z1'))?.reading_run_id).toBe('run-z1');
+    expect((await getCapsule(db, 'capsule-z2'))?.reading_run_id).toBe('run-z2');
+  });
+
+  it('капсула СТАРІША за будь-який finished run (немає жодного run із finished_at ≤ created_at) — reading_run_id лишається NULL', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-aa');
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-aa1',
+      userBookId: 'ub-aa',
+      runNumber: 1,
+      status: 'finished',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    // Аномалія легасі-даних: капсула "старша" за єдиний finished run цієї книги.
+    await seedLegacyCapsule(db, 'capsule-aa', 'ub-aa', '2025-01-01T00:00:00.000Z');
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getCapsule(db, 'capsule-aa'))?.reading_run_id).toBeNull();
+  });
+
+  it('книга без жодного reading_run — reading_run_id лишається NULL, нічого не вигадується', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-bb');
+    await seedLegacyCapsule(db, 'capsule-bb', 'ub-bb', MIGRATION_023_NOW);
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getCapsule(db, 'capsule-bb'))?.reading_run_id).toBeNull();
+  });
+
+  it('лише in_progress run (не finished/did_not_finish) — НЕ рахується кандидатом, reading_run_id лишається NULL', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-cc');
+    await seedRunForCapsuleMigration(db, {
+      id: 'run-cc1',
+      userBookId: 'ub-cc',
+      runNumber: 1,
+      status: 'in_progress',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    });
+    await seedLegacyCapsule(db, 'capsule-cc', 'ub-cc', '2026-01-05T00:00:00.000Z');
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getCapsule(db, 'capsule-cc'))?.reading_run_id).toBeNull();
+  });
+
+  it('book_capsule.reading_run_id — нова колонка, індекс idx_book_capsule_reading_run справді створений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 22);
+    await seedBookForCapsuleMigration(db, 'ub-dd');
+    await seedLegacyCapsule(db, 'capsule-dd', 'ub-dd', MIGRATION_023_NOW);
+
+    await migrateDbIfNeeded(db);
+
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_book_capsule_reading_run'`,
+    );
+    expect(index?.name).toBe('idx_book_capsule_reading_run');
+
+    // Поле досі читається без винятку — sanity-check, що ADD COLUMN не зламав решту колонок.
+    const capsule = await getCapsule(db, 'capsule-dd');
+    expect(capsule?.user_book_id).toBe('ub-dd');
+  });
+});

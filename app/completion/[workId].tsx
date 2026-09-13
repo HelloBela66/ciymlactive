@@ -21,7 +21,7 @@ import { useRating, useSetRating } from '@/features/book-details/useRating';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
 import { useJournalCount, useJournalEntries, useJournalFavorites, useJournalRevisitLater } from '@/features/journal/useJournal';
 import { useBookMemory, useRemoveBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
-import { useBookCapsule } from '@/features/memory/useBookCapsule';
+import { useBookCapsule, useCurrentBookCapsule } from '@/features/memory/useBookCapsule';
 import { canCreateCapsule } from '@/lib/bookCapsule';
 import { formatDuration } from '@/lib/sessionTiming';
 import { pluralizeUk } from '@/lib/pluralizeUk';
@@ -365,9 +365,16 @@ function BookCapsuleSection({
 }) {
   const theme = useTheme();
   const { data: capsule, isLoading } = useBookCapsule(userBookId);
+  const { data: currentCapsule, isLoading: isCurrentLoading } = useCurrentBookCapsule(userBookId);
 
-  if (isLoading) return null;
+  if (isLoading || isCurrentLoading) return null;
   if (!capsule && !canCreateCapsule(status)) return null;
+
+  // REREADING MODEL, Фаза 10 (`docs/READING_RUN.md` §"Фаза 10") — той самий розрив, що й на
+  // `app/memory/[workId].tsx`: `capsule` (найновіша ЗАГАЛОМ) може лишатись капсулою
+  // ПОПЕРЕДНЬОГО прочитання, поки `currentCapsule` (САМЕ поточного run) ще `null` — саме тоді
+  // пропонуємо завести окрему капсулу для щойно завершеного прочитання, не ховаючи стару.
+  const canOfferNewCapsule = canCreateCapsule(status) && !currentCapsule;
 
   return (
     <View style={{ gap: theme.spacing.sm }}>
@@ -392,6 +399,33 @@ function BookCapsuleSection({
               router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)
             }
           />
+          {canOfferNewCapsule ? (
+            <View
+              style={{
+                gap: theme.spacing.xs,
+                alignItems: 'center',
+                borderTopWidth: 1,
+                borderTopColor: theme.colors.border,
+                paddingTop: theme.spacing.sm,
+                marginTop: theme.spacing.xs,
+                width: '100%',
+              }}
+            >
+              <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+                Це прочитання ще без власної капсули.
+              </AppText>
+              <Button
+                label="Залишити капсулу для цього прочитання"
+                variant="ghost"
+                onPress={() =>
+                  router.push({
+                    pathname: '/capsule/[workId]/edit',
+                    params: { workId, newRun: '1' },
+                  } as unknown as Href)
+                }
+              />
+            </View>
+          ) : null}
         </Card>
       ) : (
         <Card style={{ gap: theme.spacing.sm, alignItems: 'center' }}>

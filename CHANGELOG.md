@@ -1,5 +1,58 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 10 — Capsule/Recall прив'язані до reading_run (REREADING MODEL)
+
+**Дата:** 2026-09-13
+
+Шоста частина REREADING MODEL, перша, де недостатньо лише БД+репозиторію: реальний user-facing
+баг живе в UI-шарі. Проблема (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 23; задокументоване
+обмеження `docs/BOOK_CAPSULES.md` §Перечитування): `book_capsule` ніколи не мала
+`UNIQUE(user_book_id)` — друга капсула після перечитування вже толерувалась схемою — але
+капсула ПЕРШОГО прочитання назавжди блокувала пропозицію залишити нову капсулу після
+перечитування (`BookCapsuleSection`: `!capsule` — і стара капсула зробила цю умову вічно
+хибною). На відміну від Фаз 8-9, тут капсула НЕ "найновіша = поточна" (капсула фіксує СВОЄ
+прочитання назавжди, не ре-резолвиться щоразу) — повне архітектурне обґрунтування відмінності
+від Фаз 8-9 — `docs/READING_RUN.md` §"Фаза 10".
+
+**Додано:**
+- `023_book_capsule_run.ts` — на відміну від `021`/`022`, НЕ rebuild: `book_capsule` ніколи не
+  мала `UNIQUE(user_book_id)`, тож проста `ALTER TABLE ADD COLUMN reading_run_id TEXT` (без
+  `manualTransaction`). JS-backfill — інший алгоритм, ніж Фази 8-9: книга могла вже мати КІЛЬКА
+  legacy-капсул, тож кожна бекфіляться ОКРЕМО — найновіший `finished`/`did_not_finish` run, чий
+  `finished_at <= capsule.created_at` (найближчий "знизу" за часом, не просто "найновіший run
+  книги" — інакше дві старі капсули різних прочитань помилково зчепились би з одним run).
+- `BookCapsuleRepository.getByReadingRunId`/`getCurrent` — нові read-методи, співіснують поруч
+  зі старим `getByUserBookId` (не замінюють). `getCurrent` резолвить поточний run і шукає
+  капсулу саме для нього (з фолбеком на легасі-капсули без `reading_run_id`, якщо run не
+  знайдено); `getByUserBookId` лишається "найновіша капсула книги загалом" для екранів
+  перегляду/Recall, де стара капсула має лишатись доступною завжди.
+- `useCurrentBookCapsule` (`src/features/memory/useBookCapsule.ts`) — хук над `getCurrent`,
+  усі чотири мутації (`useCreateBookCapsule`/`useUpdateBookCapsule`/`useRemoveBookCapsule`/
+  `useMarkCapsuleOpened`) тепер синхронізують і кеш `currentByUserBook`, не лише `byUserBook`.
+- `app/memory/[workId].tsx` + `app/completion/[workId].tsx` (`BookCapsuleSection`) — коли є
+  стара капсула, але не для поточного run, з'являється ДОДАТКОВИЙ блок «Це прочитання ще без
+  власної капсули» з кнопкою «Залишити капсулу для цього прочитання» — АДИТИВНА зміна поряд з
+  існуючим переглядом, нічого не приховано й не замінено.
+- `newRun` search-параметр (`app/capsule/[workId]/edit.tsx`) — розрізняє "редагувати капсулу, що
+  переглядали" від "створити нову капсулу для поточного run" на одному спільному екрані.
+- 12 нових тестів (679 → 691): `BookCapsuleRepository.test.ts` (+5 — створення проставляє run,
+  розбіжність `getCurrent`/`getByUserBookId`, повний сценарій перечитування: окремі рядки, стара
+  капсула не зникає, `getCurrent` оновлюється лише коли з'явилась нова; книга без run;
+  `getByReadingRunId` без збігу), `migrationRunner.test.ts` (+7 — одна капсула/один run,
+  перечитування обирає найближчий а не перший run, ДВІ legacy-капсули кожна обирає СВІЙ run,
+  капсула старіша за будь-який run лишається `NULL`, книга без жодного run, `in_progress` run не
+  кандидат, індекс+колонка sanity-check).
+
+**Змінено:**
+- `BookCapsuleRepository.create()` — тепер резолвить `ReadingRunRepository.getLatestByUserBookId`
+  РІВНО ОДИН РАЗ у мить створення і назавжди проставляє `reading_run_id` (на відміну від
+  `getCurrent`/`upsertCurrent` у Фазах 8-9, де резолюція динамічна при КОЖНОМУ читанні/записі) —
+  капсула не є upsert-сутністю, той самий рядок ніколи не редагується під іншим run.
+- `docs/READING_RUN.md`/`docs/DATABASE.md`/`docs/BOOK_CAPSULES.md`/`docs/RECALL.md` — нова
+  секція "Фаза 10", схема `book_capsule`, історія міграцій і задокументоване обмеження
+  оновлені (позначене вирішеним); `RECALL.md` — лише підтвердження, що Recall транзитивно
+  run-aware через `book_capsule_id`, без власної зміни схеми/поведінки.
+
 ## POLYTSIA V1.6.1, Фаза 9 — Before/After прив'язане до reading_run (REREADING MODEL)
 
 **Дата:** 2026-09-13

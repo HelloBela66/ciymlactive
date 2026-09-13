@@ -20,6 +20,14 @@ export type CapsuleReopenOption = 'none' | '3_months' | '6_months' | '1_year';
 export interface BookCapsule {
   id: string;
   userBookId: string;
+  /** REREADING MODEL, Фаза 10 (`docs/READING_RUN.md`) — до якого `reading_run` (конкретного
+   * завершеного прочитання) належить ця капсула. Резолвиться РІВНО ОДИН РАЗ у момент `create`
+   * (через `ReadingRunRepository.getLatestByUserBookId`) і більше НІКОЛИ не переобчислюється —
+   * на відміну від `BookMemory`/`PreReadingReflection`, капсула не `upsert`-иться, тож не
+   * потребує "поточний run" наново при кожному читанні, лише зберігає той, що був актуальним
+   * на момент створення. `null` — книга взагалі не має жодного `reading_run` (Фаза 7
+   * `addToLibrary`, свідомо не підключена) — той самий "книжковий" фолбек, що й у Фазах 8/9. */
+  readingRunId: string | null;
   /** «Що залишиться з тобою після цієї книги?» — п.4 ТЗ. */
   lastingThought: string | null;
   /** «Одним реченням: про що ця книга була для тебе?» — п.5 ТЗ, НЕ переказ сюжету. */

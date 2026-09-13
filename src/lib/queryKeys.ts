@@ -102,11 +102,16 @@ export const queryKeys = {
     byUserBook: (userBookId: string) => ['bookMemory', 'byUserBook', userBookId] as const,
   },
   bookCapsule: {
-    // POLYTSIA V1.6, Фаза 4 («Капсула книги») — "поточна" (найновіша) капсула книги, той
-    // самий "малий запит по одній книзі" сенс, що й `bookMemory.byUserBook` вище, навіть
-    // попри те, що `book_capsule.user_book_id` НЕ унікальний (`012_book_capsule.ts`) —
+    // POLYTSIA V1.6, Фаза 4 («Капсула книги») — найновіша капсула КНИГИ ЗАГАЛОМ, той самий
+    // "малий запит по одній книзі" сенс, що й `bookMemory.byUserBook` вище, навіть попри те,
+    // що `book_capsule.user_book_id` НЕ унікальний (`012_book_capsule.ts`) —
     // `BookCapsuleRepository.getByUserBookId` сама бере найновішу.
     byUserBook: (userBookId: string) => ['bookCapsule', 'byUserBook', userBookId] as const,
+    // REREADING MODEL, Фаза 10 (`docs/READING_RUN.md`) — капсула САМЕ поточного (найновішого)
+    // run книги, окремий ключ від `byUserBook` вище: вони можуть розходитись (стара капсула
+    // попереднього прочитання ще існує, а поточний run своєї ще не має) —
+    // `BookCapsuleRepository.getCurrent`.
+    currentByUserBook: (userBookId: string) => ['bookCapsule', 'currentByUserBook', userBookId] as const,
   },
   preReadingReflection: {
     // POLYTSIA V1.6, Фаза 6 («До/Після») — той самий "малий запит по одній книзі" сенс, що й

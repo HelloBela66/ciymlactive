@@ -14,7 +14,12 @@ import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useJournalEntries, useJournalFavorites } from '@/features/journal/useJournal';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
-import { useBookCapsule, useCreateBookCapsule, useUpdateBookCapsule } from '@/features/memory/useBookCapsule';
+import {
+  useBookCapsule,
+  useCurrentBookCapsule,
+  useCreateBookCapsule,
+  useUpdateBookCapsule,
+} from '@/features/memory/useBookCapsule';
 import { validateCapsuleContent, canCreateCapsule } from '@/lib/bookCapsule';
 import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries } from '@/lib/spoilerSafe';
 import type { CapsuleReopenOption } from '@/types/bookCapsule';
@@ -57,8 +62,18 @@ function formsEqual(a: CapsuleFormState, b: CapsuleFormState): boolean {
  * «Капсула книги» — Create/Edit screen (POLYTSIA V1.6, Фаза 4, п.4-9/14/16-17 ТЗ). Один
  * прокручуваний екран, без багатокрокового візарда (п.4 ТЗ — "мінімум тертя"): усі поля відразу
  * видно, збереження — одна кнопка внизу. Режим (створення/редагування) визначається наявністю
- * вже створеної капсули (`useBookCapsule`), не окремим параметром маршруту — та сама форма для
- * обох випадків (редагування пізніше не повинно виглядати як інший інструмент).
+ * вже створеної капсули, не окремим кроком у формі — та сама форма для обох випадків
+ * (редагування пізніше не повинно виглядати як інший інструмент).
+ *
+ * REREADING MODEL, Фаза 10 (`docs/READING_RUN.md` §"Фаза 10") — ЯКА САМЕ капсула лежить в
+ * основі "режиму" тепер залежить від того, ЗВІДКИ прийшли: з View screen
+ * (`app/capsule/[workId].tsx`, "Редагувати" — без параметра `newRun`) мається на увазі
+ * РІВНО ТА капсула, яку щойно переглядали, тобто найновіша ЗАГАЛОМ (`useBookCapsule`, як і
+ * раніше, без жодної зміни поведінки); з `BookCapsuleSection` (`app/completion/[workId].tsx`/
+ * `app/memory/[workId].tsx`, кнопка "Залишити капсулу для цього прочитання" — з `newRun=1`)
+ * мається на увазі капсула САМЕ поточного run (`useCurrentBookCapsule`) — якщо її ще нема,
+ * форма відкривається в режимі СТВОРЕННЯ нової, а не редагування старої капсули з попереднього
+ * прочитання, яку `useBookCapsule` міг би помилково підставити замість неї.
  *
  * SPOILER-SAFE MODE (ТЗ Фази 3 V1.6.1, аудит V1.6 §42) — той самий випадок, що й View screen
  * (`app/capsule/[workId].tsx`): СТВОРЕННЯ можливе лише для `finished` (`canCreateCapsule`), але
@@ -72,11 +87,17 @@ function formsEqual(a: CapsuleFormState, b: CapsuleFormState): boolean {
  */
 export default function BookCapsuleEditScreen() {
   const theme = useTheme();
-  const { workId } = useLocalSearchParams<{ workId: string }>();
+  const { workId, newRun } = useLocalSearchParams<{ workId: string; newRun?: string }>();
   const { data, isLoading, isError, refetch } = useBookDetails(workId);
   const userBookId = data?.userBook?.id;
 
-  const { data: capsule, isLoading: isCapsuleLoading } = useBookCapsule(userBookId);
+  // REREADING MODEL, Фаза 10 — обидва запити викликаються завжди (правило хуків), обирається
+  // лише РЕЗУЛЬТАТ потрібного залежно від того, звідки прийшли (див. коментар над екраном).
+  const { data: latestCapsule, isLoading: isLatestCapsuleLoading } = useBookCapsule(userBookId);
+  const { data: currentRunCapsule, isLoading: isCurrentCapsuleLoading } = useCurrentBookCapsule(userBookId);
+  const forCurrentRun = newRun === '1';
+  const capsule = forCurrentRun ? currentRunCapsule : latestCapsule;
+  const isCapsuleLoading = forCurrentRun ? isCurrentCapsuleLoading : isLatestCapsuleLoading;
   const { data: favorites } = useJournalFavorites(userBookId);
   const { data: allEntries } = useJournalEntries(userBookId);
   const { data: categories } = useAllNoteCategories(userBookId);

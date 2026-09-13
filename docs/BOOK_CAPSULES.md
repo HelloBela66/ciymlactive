@@ -85,26 +85,37 @@ POLYTSIA V1.6, Фаза 4 (доповнено Фазою 5 — «Книга че
 високосного року) і на 29 лютого (+1 рік → 28 лютого наступного невисокосного року). Покрито
 тестами на обидва граничні випадки (`src/lib/bookCapsule.test.ts`).
 
-## Перечитування — задокументоване обмеження
+## Перечитування — вирішено REREADING MODEL, Фаза 10
 
-Застосунок не має окремої сутності "прочитання"/"reading run": `user_book.finished_at` — це
+~~Застосунок не має окремої сутності "прочитання"/"reading run": `user_book.finished_at` — це
 дата ПЕРШОГО завершення й ніколи не оновлюється при повторному переведенні книги в `finished`
 (`UserBookRepository.updateStatus`). Тому капсулу неможливо надійно прив'язати до конкретного
-прочитання.
+прочитання.~~ — вирішено REREADING MODEL, Фаза 10 (POLYTSIA V1.6.1, `docs/READING_RUN.md`
+§"Фаза 10"): тепер є `reading_run` (Фаза 6), і `book_capsule.reading_run_id`
+(`023_book_capsule_run.ts`) фіксує, до якого саме прочитання належить капсула.
 
-Рішення: `book_capsule.user_book_id` — **навмисно БЕЗ `UNIQUE`** (на відміну від
-`book_memory.user_book_id`). "Поточна" капсула книги — найновіша за `created_at`
-(`BookCapsuleRepository.getByUserBookId`, `ORDER BY created_at DESC LIMIT 1`). Стара капсула
-першого прочитання НЕ видаляється й не перезаписується другою капсулою після перечитування —
-`listByUserBookId` повертає всі капсули книги, найновіша перша; UI цієї фази показує лише
-найновішу, метод для списку вже готовий для майбутнього UI (наприклад, Recall-фази, яка захоче
-показати капсули всіх прочитань).
+`book_capsule.user_book_id` лишається **БЕЗ `UNIQUE`** (на відміну від `book_memory.user_book_id`)
+— це не змінилось: книга й далі може мати кілька капсул. Що змінилось — кожна капсула тепер
+знає СВІЙ `reading_run_id`. `BookCapsuleRepository.create()` резолвить
+`ReadingRunRepository.getLatestByUserBookId` РІВНО ОДИН РАЗ у мить створення і назавжди
+проставляє результат (капсула — НЕ upsert-сутність на кшталт `book_memory`/
+`pre_reading_reflection`, тому тут немає динамічної ре-резолюції при кожному читанні —
+докладне обґрунтування цієї відмінності: `docs/READING_RUN.md` §"Фаза 10").
 
-Це тимчасове, явно прийняте обмеження: коли з'явиться надійний спосіб розрізняти прочитання
-(наприклад, власна сутність "reading run"), капсули можна буде прив'язати до неї точніше. До
-того часу нова капсула під час активного `rereading` не пропонується (`canCreateCapsule`), щоб
-не плодити капсули без чіткого зв'язку з конкретним прочитанням — але вже створені капсули
-лишаються доступними.
+Два окремих read-методи тепер співіснують: `getByUserBookId` — найновіша капсула книги
+загалом (не змінилось, як і раніше `ORDER BY created_at DESC LIMIT 1`, використовується
+екраном перегляду/Recall, де стара капсула лишається доступною завжди), і новий `getCurrent` —
+капсула САМЕ поточного (найновішого) `reading_run`, який визначає, чи пропонувати нову капсулу.
+`listByUserBookId` і далі повертає всі капсули книги, найновіша перша.
+
+UI (`app/memory/[workId].tsx` + `app/completion/[workId].tsx`, `BookCapsuleSection`) — коли
+є стара капсула, але не для поточного run, поруч із нею тепер з'являється додатковий блок
+«Залишити капсулу для цього прочитання» (`app/capsule/[workId]/edit.tsx?newRun=1`). Це
+АДИТИВНА зміна — стара капсула як і раніше повністю доступна для перегляду й Recall, нічого
+не приховано й не замінено. `canCreateCapsule` (`src/lib/bookCapsule.ts`) не змінювалась цією
+фазою — доступність капсули для СТАТУСУ книги (`reading`/`rereading`/`finished`) залишається
+тим самим питанням, що й раніше; Фаза 10 лише додає можливість мати капсулу для кожного
+конкретного прочитання, а не для книги загалом.
 
 ## Нагадування (сповіщення)
 
@@ -212,8 +223,9 @@ navigation, без деструктивного авто-ремонту.
 
 ## Відомі обмеження (V1.6)
 
-- **Перечитування** — див. §Перечитування вище: без `UNIQUE`, "поточна" капсула визначається
-  найновішою за `created_at`, не за явним зв'язком із конкретним прочитанням.
+- ~~**Перечитування** — без `UNIQUE`, "поточна" капсула визначається найновішою за `created_at`,
+  не за явним зв'язком із конкретним прочитанням.~~ — вирішено REREADING MODEL, Фаза 10
+  (POLYTSIA V1.6.1, `docs/READING_RUN.md` §"Фаза 10"), див. §Перечитування вище.
 - **Улюблений персонаж** — вільний текст, не структурована сутність; `favoriteLoreEntityId`
   зарезервовано, але не використовується до Personal Lore (Фази 9-10).
 - **Довільна дата нагадування** не підтримується — лише 4 пресети (`none`/`3_months`/
@@ -233,15 +245,21 @@ navigation, без деструктивного авто-ремонту.
 
 - `src/data/db/migrations/012_book_capsule.ts` — таблиця `book_capsule`, повне архітектурне
   обґрунтування прямо в коментарях міграції.
-- `src/types/bookCapsule.ts` — типи (`BookCapsule`, `CapsuleReopenOption`,
-  `CreateBookCapsuleInput`, `UpdateBookCapsuleInput`).
+- `src/data/db/migrations/023_book_capsule_run.ts` — REREADING MODEL Фаза 10: `ALTER TABLE ADD
+  COLUMN reading_run_id` (НЕ rebuild, на відміну від `021`/`022`) + JS-backfill "найближчий за
+  часом run на кожну капсулу окремо".
+- `src/types/bookCapsule.ts` — типи (`BookCapsule` — з Фази 10 має `readingRunId`,
+  `CapsuleReopenOption`, `CreateBookCapsuleInput`, `UpdateBookCapsuleInput`).
 - `src/lib/bookCapsule.ts` — чисті доменні функції: валідація, обчислення дати нагадування,
-  прийнятність книги, "due"-перевірка.
+  прийнятність книги, "due"-перевірка. Не змінювалась Фазою 10.
 - `src/data/repositories/BookCapsuleRepository.ts` — SQL, жодної дати/сповіщення тут не
-  рахується — усе вже обчислене доменним шаром на вході.
+  рахується — усе вже обчислене доменним шаром на вході. Фаза 10: `create()` резолвить і
+  проставляє `reading_run_id` (один раз), нові `getByReadingRunId`/`getCurrent` — поруч зі
+  старим `getByUserBookId`.
 - `src/features/memory/useBookCapsule.ts` — React Query хуки (`useBookCapsule`,
   `useCreateBookCapsule`, `useUpdateBookCapsule`, `useRemoveBookCapsule`,
-  `useMarkCapsuleOpened`) + `rebuildCapsuleRemindersAsync` для restore.
+  `useMarkCapsuleOpened`) + `rebuildCapsuleRemindersAsync` для restore. Фаза 10: новий
+  `useCurrentBookCapsule`, усі мутації тепер синхронізують і кеш `currentByUserBook`.
 - `app/capsule/[workId].tsx` — перегляд капсули.
 - `app/capsule/[workId]/edit.tsx` — створення/редагування, один екран.
 - `BookCapsuleSection` — локальна секція-запрошення/посилання на `app/completion/[workId].tsx`

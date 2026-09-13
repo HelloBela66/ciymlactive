@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { migrateDbIfNeeded } from '@/data/db/migrationRunner';
 import { openTestDatabase } from '@/data/db/testDb';
 import { BookCapsuleRepository } from './BookCapsuleRepository';
+import { ReadingRunRepository } from './ReadingRunRepository';
 
 /**
  * Repository-інтеграційний тест для `BookCapsuleRepository` (POLYTSIA V1.6, Фаза 4 — «Капсула
@@ -406,5 +407,109 @@ describe('BookCapsuleRepository', () => {
     expect(after?.openedAt).toBe('2026-09-11T00:00:00.000Z');
     expect(after?.notificationIdentifier).toBe('notif-xyz');
     expect(after?.lastingThought).toBe('Думка');
+  });
+});
+
+/**
+ * REREADING MODEL, Фаза 10 (`docs/READING_RUN.md` §"Фаза 10") — `reading_run_id` резолвиться
+ * РІВНО ОДИН РАЗ усередині `create` (не `upsert`-репозиторій, на відміну від `BookMemoryRepository`/
+ * `PreReadingReflectionRepository`, Фази 8/9) і більше ніколи не переобчислюється. Головний
+ * предмет тестів: `getCurrent` — капсула САМЕ поточного run, а НЕ "найновіша = поточна"
+ * (`getByUserBookId`, незмінна), тож стара капсула попереднього прочитання лишається доступною,
+ * але `getCurrent` для нового run коректно бачить `null`, доки для нього не з'явиться власна.
+ */
+function minimalCreateParams(userBookId: string, lastingThought: string) {
+  return {
+    userBookId,
+    lastingThought,
+    oneSentenceMemory: null,
+    favoriteCharacterText: null,
+    favoriteLoreEntityId: null,
+    journalEntryKind: null,
+    journalEntryId: null,
+    reopenOption: 'none' as const,
+    reopenAt: null,
+    notificationIdentifier: null,
+    completedAt: null,
+  };
+}
+
+describe('BookCapsuleRepository — REREADING MODEL, Фаза 10 (reading_run_id)', () => {
+  it('create прив’язує капсулу до активного run (ReadingRunRepository.getLatestByUserBookId)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-1');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-1' });
+    await ReadingRunRepository.finish(db, run.id, { status: 'finished' });
+
+    const capsule = await BookCapsuleRepository.create(db, minimalCreateParams('ub-1', 'Перше прочитання'));
+
+    expect(capsule.readingRunId).toBe(run.id);
+  });
+
+  it('getCurrent — капсула ПОТОЧНОГО run; getByUserBookId — найновіша ЗАГАЛОМ; можуть розходитись', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-2');
+    const firstRun = await ReadingRunRepository.start(db, { userBookId: 'ub-2' });
+    await ReadingRunRepository.finish(db, firstRun.id, { status: 'finished' });
+    const firstCapsule = await BookCapsuleRepository.create(db, minimalCreateParams('ub-2', 'Перше прочитання'));
+
+    // Перечитування завершується, але НОВОЇ капсули для нього ще нема.
+    const secondRun = await ReadingRunRepository.start(db, { userBookId: 'ub-2' });
+    await ReadingRunRepository.finish(db, secondRun.id, { status: 'finished' });
+
+    const latest = await BookCapsuleRepository.getByUserBookId(db, 'ub-2');
+    expect(latest?.id).toBe(firstCapsule.id); // єдина наявна капсула — досі "найновіша загалом".
+
+    const current = await BookCapsuleRepository.getCurrent(db, 'ub-2');
+    expect(current).toBeNull(); // для secondRun капсули ще немає — НЕ підставляється стара.
+  });
+
+  it('перечитування: нова капсула для нового run — окремий рядок; стара не зникає, лишається за getByReadingRunId', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-3');
+    const firstRun = await ReadingRunRepository.start(db, { userBookId: 'ub-3' });
+    await ReadingRunRepository.finish(db, firstRun.id, { status: 'finished' });
+    const firstCapsule = await BookCapsuleRepository.create(db, minimalCreateParams('ub-3', 'Перше прочитання'));
+
+    const secondRun = await ReadingRunRepository.start(db, { userBookId: 'ub-3' });
+    await ReadingRunRepository.finish(db, secondRun.id, { status: 'finished' });
+    const secondCapsule = await BookCapsuleRepository.create(db, minimalCreateParams('ub-3', 'Перечитання'));
+
+    expect(secondCapsule.readingRunId).toBe(secondRun.id);
+
+    // Обидві капсули лишаються в базі, кожна доступна за своїм run.
+    const all = await BookCapsuleRepository.listByUserBookId(db, 'ub-3');
+    expect(all).toHaveLength(2);
+
+    const byFirstRun = await BookCapsuleRepository.getByReadingRunId(db, firstRun.id);
+    expect(byFirstRun?.id).toBe(firstCapsule.id);
+    expect(byFirstRun?.lastingThought).toBe('Перше прочитання'); // не перезаписана.
+
+    const bySecondRun = await BookCapsuleRepository.getByReadingRunId(db, secondRun.id);
+    expect(bySecondRun?.id).toBe(secondCapsule.id);
+
+    // Тепер, коли друга капсула існує, getCurrent її й бачить.
+    const current = await BookCapsuleRepository.getCurrent(db, 'ub-3');
+    expect(current?.id).toBe(secondCapsule.id);
+  });
+
+  it('книга без жодного reading_run — create/getCurrent фолбечать на "книжкову" капсулу без прив’язки', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-4'); // без жодного ReadingRunRepository.start
+
+    const capsule = await BookCapsuleRepository.create(db, minimalCreateParams('ub-4', 'Без run'));
+    expect(capsule.readingRunId).toBeNull();
+
+    const current = await BookCapsuleRepository.getCurrent(db, 'ub-4');
+    expect(current?.id).toBe(capsule.id);
+  });
+
+  it('getByReadingRunId — null, якщо для цього run капсули нема', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-5');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-5' });
+    await ReadingRunRepository.finish(db, run.id, { status: 'finished' });
+
+    expect(await BookCapsuleRepository.getByReadingRunId(db, run.id)).toBeNull();
   });
 });
