@@ -10,22 +10,27 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { MemorySection } from '@/components/ui/MemorySection';
+import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
+import { BookHero } from '@/components/ui/BookHero';
 import { MemoryCardPreview } from '@/components/memory/MemoryCardPreview';
 import { JournalTimeline } from '@/components/memory/JournalTimeline';
 import { ReadingExperienceTimeline } from '@/components/memory/ReadingExperienceTimeline';
+import { ReadingRunsHistorySection } from '@/components/reading-runs/ReadingRunsHistorySection';
 import { useTheme } from '@/design/ThemeProvider';
 import { memoryCardTemplateLabels, memoryCardTemplateDescriptions } from '@/design/i18n-labels';
 import { REACTION_META, isReactionId } from '@/design/reactions';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useRating } from '@/features/book-details/useRating';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
+import { useReadingRunsDetail } from '@/features/reading-runs/useReadingRunsDetail';
 import { useJournalEntries, useJournalRevisitLater } from '@/features/journal/useJournal';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { useBookCapsule, useCurrentBookCapsule } from '@/features/memory/useBookCapsule';
+import { useCapsuleRecallHistory } from '@/features/memory/useCapsuleRecall';
 import { useLoreEntities } from '@/features/lore/useLoreEntities';
 import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { usePreReadingReflection } from '@/features/memory/usePreReadingReflection';
@@ -40,6 +45,7 @@ import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
 import type { UserBook, UserBookStatus } from '@/types/userBook';
 import type { PreReadingReflection } from '@/types/preReadingReflection';
+import type { BookCapsule } from '@/types/bookCapsule';
 
 const log = createLogger('app/memory');
 
@@ -152,11 +158,13 @@ function RevisitLaterSection({
  * вище: маленький презентаційний блок без спільного стану, зайва крос-екранна залежність тут
  * не виправдана.
  *
- * POLYTSIA V1.6, Фаза 5 («Книга через час») — коли капсула вже існує, основна дія тепер
- * «Згадати книгу» (`app/recall/[workId].tsx`, п.2 ТЗ Фази 5: "відкрити вручну у будь-який
- * момент"), а не прямий перегляд: сам recall-флоу вже показує весь вміст капсули на кроці
- * reveal, тож окремий перегляд лишається другорядною дією ("Переглянути деталі" — той самий
- * View screen, що й раніше, для швидкого редагування/видалення без гри в згадування).
+ * Фаза 13 (Book Memory ungating + consolidation, mental model: "Capsule = тип reflection,
+ * Recall = дія над Capsule") — ця секція тепер відповідає ЛИШЕ за сам вміст капсули
+ * (створити/переглянути); кнопка «Згадати книгу» переїхала в окрему секцію "Пригадування"
+ * (`RecallSection` нижче) одразу під цією — та сама дія, тепер під власною назвою, а не
+ * підмінює собою основну кнопку капсули. На `app/completion/[workId].tsx` лишається власна,
+ * незалежна копія цієї секції зі своєю кнопкою «Згадати книгу» — той екран поза межами цієї
+ * фази (окрема точка входу одразу після фінішу книги, не частина хаба Book Memory).
  */
 function BookCapsuleSection({
   userBookId,
@@ -190,22 +198,15 @@ function BookCapsuleSection({
         </AppText>
       </View>
       <Button
-        label={capsule ? 'Згадати книгу' : 'Створити капсулу'}
+        label={capsule ? 'Переглянути деталі' : 'Створити капсулу'}
         variant="secondary"
         onPress={() =>
           router.push({
-            pathname: capsule ? '/recall/[workId]' : '/capsule/[workId]/edit',
+            pathname: capsule ? '/capsule/[workId]' : '/capsule/[workId]/edit',
             params: { workId },
           } as unknown as Href)
         }
       />
-      {capsule ? (
-        <Button
-          label="Переглянути деталі"
-          variant="ghost"
-          onPress={() => router.push({ pathname: '/capsule/[workId]', params: { workId } } as unknown as Href)}
-        />
-      ) : null}
       {capsule && canOfferNewCapsule ? (
         <View
           style={{
@@ -228,6 +229,65 @@ function BookCapsuleSection({
               } as unknown as Href)
             }
           />
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * «Пригадування» — Фаза 13 (Book Memory ungating + consolidation): "Recall = дія над Capsule",
+ * тепер власна секція одразу під капсулою, а не кнопка, схована всередині `BookCapsuleSection`
+ * (до цієї фази). Рендерить `null`, коли капсули ще нема — recall концептуально можливий лише
+ * НАД уже наявною капсулою (той самий інваріант, що діяв і раніше: кнопка з'являлась лише коли
+ * `capsule` існує).
+ *
+ * Показує історію попередніх спроб (`useCapsuleRecallHistory`, `CapsuleRecallRepository.
+ * listByBookCapsuleId` — репозиторій-метод існував із самої Фази 5 як "заготовка для
+ * майбутнього UI", `docs/RECALL.md`, і саме тут вперше отримує читача) — найновіша перша,
+ * дата спроби + короткий текст "що пам'ятав тоді" (чи "без нотатки", якщо поле лишили
+ * порожнім).
+ */
+function RecallSection({ workId, capsule }: { workId: string; capsule: BookCapsule | null | undefined }) {
+  const theme = useTheme();
+  const { data: history } = useCapsuleRecallHistory(capsule?.id);
+
+  if (!capsule) return null;
+
+  return (
+    <Card style={{ gap: theme.spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+        <Ionicons name="hourglass-outline" size={18} color={theme.colors.accent} />
+        <AppText variant="body" color="secondary" style={{ flex: 1 }}>
+          {history && history.length > 0
+            ? `Ти згадував(ла) цю книгу ${history.length} раз(и).`
+            : 'Повернись до капсули через якийсь час і згадай книгу знову.'}
+        </AppText>
+      </View>
+      <Button
+        label="Згадати книгу"
+        variant="secondary"
+        onPress={() => router.push({ pathname: '/recall/[workId]', params: { workId } } as unknown as Href)}
+      />
+      {history && history.length > 0 ? (
+        <View
+          style={{
+            gap: theme.spacing.sm,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border,
+            paddingTop: theme.spacing.sm,
+          }}
+        >
+          {history.map((attempt) => (
+            <View key={attempt.id} style={{ gap: 2 }}>
+              <AppText variant="micro" color="tertiary">
+                {new Date(attempt.recalledAt).toLocaleDateString('uk-UA')}
+              </AppText>
+              <AppText variant="caption" color="secondary" style={{ fontStyle: 'italic' }}>
+                {attempt.currentMemoryText ? `«${attempt.currentMemoryText}»` : 'Без нотатки.'}
+              </AppText>
+            </View>
+          ))}
         </View>
       ) : null}
     </Card>
@@ -350,12 +410,19 @@ function BeforeAfterSection({
 }
 
 /**
- * Картка-спогад (Milestone 11, Фаза 8-9) — вибір шаблону, живий preview `MemoryCardPreview`,
- * і тепер (Фаза 9) — "Поділитися"/"Зберегти в галерею" повноцінним зображенням. Дані для
- * картки вже зібрані Фазою 7 (`book_memory.reflection`/`entry_refs`) — тут лише "яким
- * шаблоном показати" й "куди віддати результат", тому доступний лише коли спогад уже існує
- * (єдина точка входу — "Переглянути картку" на `app/completion/[workId].tsx`, видима тільки
- * коли є що показати).
+ * Book Memory — «хаб пам'яті» про книгу (Milestone 11, Фаза 7-9; REREADING MODEL Фази 8, 12;
+ * Фаза 13 — ungating + consolidation, `docs/READING_RUN.md` §"Фаза 13"). ДО Фази 13 весь екран
+ * (усі секції нижче, не лише картка-спогад) був заблокований одним вузьким, необов'язковим
+ * записом `book_memory` — читач, який регулярно позначав «Як читалося?», писав у щоденник,
+ * лишив капсулу чи нотатку "До", але жодного разу не заповнив саме "Спогад про книгу" на
+ * екрані підсумку, НІКОЛИ не бачив жодної зі своїх реальних даних тут (аудит V1.6.1, §10.4-10.5,
+ * §"Пара 3"). Фаза 13 замінює той gate на `hasAnyMemoryData` нижче — екран доступний, щойно
+ * ХОЧ ОДНЕ джерело пам'яті про книгу існує, і кожна секція показує/ховає себе НЕЗАЛЕЖНО від
+ * решти, а не всі одразу за одним записом.
+ *
+ * Mental model consolidation (та сама аудиторська "Пара 3"): Book Memory — це ХАБ, Капсула —
+ * ОДИН із типів рефлексії всередині нього (`BookCapsuleSection`), Пригадування — ДІЯ НАД
+ * капсулою (`RecallSection`, більше не схована кнопка всередині капсули).
  */
 export default function MemoryCardScreen() {
   const theme = useTheme();
@@ -364,15 +431,48 @@ export default function MemoryCardScreen() {
   const userBookId = data?.userBook?.id;
 
   const { data: memory, isLoading: isMemoryLoading } = useBookMemory(userBookId);
-  const { data: allEntries } = useJournalEntries(userBookId);
-  const { data: sessions } = useReadingHistory(userBookId);
+  const { data: allEntries, isLoading: isEntriesLoading } = useJournalEntries(userBookId);
+  const { data: sessions, isLoading: isSessionsLoading } = useReadingHistory(userBookId);
   const { data: rating } = useRating(userBookId);
-  const { data: preReadingReflection } = usePreReadingReflection(userBookId);
+  const { data: preReadingReflection, isLoading: isBeforeAfterLoading } = usePreReadingReflection(userBookId);
+  // Фаза 13 — той самий `useBookCapsule`, що й `BookCapsuleSection`/`RecallSection` нижче
+  // (React Query дедуплікує однаковий ключ, нуль зайвих запитів до БД) — тут потрібен ЩЕ РАЗ,
+  // на рівні екрана, для `hasAnyMemoryData` і щоб передати `capsule` у `RecallSection` як
+  // проп (recall прив'язаний до КОНКРЕТНОЇ капсули, не резолвить її сам).
+  const { data: capsule, isLoading: isCapsuleLoading } = useBookCapsule(userBookId);
+  // Той самий "спільний хук, спільний кеш" принцип, що й на Book Details (Фаза 12) —
+  // `ReadingRunsHistorySection` (тепер спільний компонент, `src/components/reading-runs/`)
+  // рендерить результат напряму, без власного запиту.
+  const { data: readingRuns, isLoading: isReadingRunsLoading } = useReadingRunsDetail(userBookId);
+  const { data: loreEntities, isLoading: isLoreLoading } = useLoreEntities(workId);
   // Лише для "вайбу" водяного знаку картки (`MemoryCardPreview`) — порожній масив за
   // замовчуванням (доки завантажується/якщо жанрів нема) коректний сам по собі: тоді вайб
   // просто детермінований за `workId`, а не за жанром (`pickCardMood`).
   const { data: genres } = useGenresForWork(workId);
   const setMemory = useSetBookMemory();
+
+  // Фаза 13 — замінює старий `!memory` gate (docs у коментарі над компонентом вище). Свідомо
+  // НЕ включає `rating`/`genres` — вони не входять до 9 секцій цільової IA (рейтинг живе на
+  // Book Details, тут лише як допоміжне поле всередині картки-спогаду/До-Після). Порожня Lore
+  // секція нижче (`LoreSection`) рендериться ЗАВЖДИ, коли є `userBook` (легке запрошення
+  // завести персонажів, той самий підхід, що діяв і до Фази 13) — тому саме наявність СТВОРЕНИХ
+  // `loreEntities`, а не сам факт існування секції, бере участь тут.
+  const isMemoryDataLoading =
+    isMemoryLoading ||
+    isEntriesLoading ||
+    isBeforeAfterLoading ||
+    isCapsuleLoading ||
+    isReadingRunsLoading ||
+    isLoreLoading ||
+    isSessionsLoading;
+  const hasAnyMemoryData =
+    !!memory ||
+    !!preReadingReflection ||
+    !!capsule ||
+    (allEntries?.length ?? 0) > 0 ||
+    (loreEntities?.length ?? 0) > 0 ||
+    (readingRuns?.length ?? 0) > 0 ||
+    (sessions?.length ?? 0) > 0;
 
   // Той самий "dirty override" патерн, що й `RatingSection.displayedReview`
   // (`app/work/[workId].tsx`) — щойно обраний шаблон видно одразу, без миготіння між
@@ -487,14 +587,18 @@ export default function MemoryCardScreen() {
     finishedAt: data?.userBook?.finishedAt,
   });
 
+  // Фаза 13 — раніше вимагала `!memory` (шаблон можна було міняти лише для вже наявного
+  // спогаду); тепер, коли секція "Підсумковий спогад" видна й БЕЗ жодного попереднього запису
+  // (ungating, коментар над компонентом), вибір шаблону сам створює порожній спогад цього run
+  // (`upsertCurrent` — та сама мутація, що вже вміла і insert, і update).
   const handleTemplateChange = (templateId: MemoryCardTemplateId) => {
-    if (!userBookId || !memory) return;
+    if (!userBookId) return;
     setTemplateOverride(templateId);
     setMemory.mutate(
       {
         userBookId,
-        reflection: memory.reflection,
-        entryRefs: memory.entryRefs,
+        reflection: memory?.reflection ?? null,
+        entryRefs: memory?.entryRefs ?? [],
         templateId,
       },
       {
@@ -514,7 +618,7 @@ export default function MemoryCardScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          title: 'Картка-спогад',
+          title: "Пам'ять про книгу",
           headerStyle: { backgroundColor: theme.colors.bg },
           headerTintColor: theme.colors.textPrimary,
           headerShadowVisible: false,
@@ -523,16 +627,65 @@ export default function MemoryCardScreen() {
       <ScreenContainer>
         {isError ? (
           <QueryErrorState onRetry={() => refetch()} />
-        ) : isLoading || !data || isMemoryLoading ? (
+        ) : isLoading || !data || isMemoryDataLoading ? (
           <AppText variant="body" color="secondary">
             Завантаження…
           </AppText>
-        ) : !data.userBook || !memory ? (
+        ) : !data.userBook ? (
           <AppText variant="body" color="secondary">
-            Спершу створи спогад про цю книгу на екрані підсумку читання.
+            Ця книга ще не в твоїй бібліотеці.
           </AppText>
+        ) : !hasAnyMemoryData ? (
+          // Фаза 13 — новий, змістовний порожній стан замість старого "Спершу створи спогад..."
+          // без жодного виходу (аудит §10.5: "єдиний обхідний шлях... про що ніщо на самому
+          // екрані не підказує"). Тепер — Hero (щоб було зрозуміло, про яку книгу мова) + одне
+          // речення, що саме сюди потрапить, + кнопка назад до книги, де все це й починається
+          // (сесія читання, нотатка "До", капсула...).
+          <View style={{ gap: theme.spacing.lg }}>
+            <BookHero
+              title={data.work.title}
+              authors={authorNames}
+              coverUrl={data.primaryEdition?.coverUrl}
+              coverFallbackColor={data.work.coverFallbackColor}
+            />
+            <Card style={{ gap: theme.spacing.sm }}>
+              <AppText variant="body" color="secondary">
+                Тут з&apos;явиться все, що ти збереш про цю книгу: спогад, порівняння
+                &quot;До/Після&quot;, капсула, світ персонажів, історія прочитань — щойно
+                з&apos;явиться хоч щось одне.
+              </AppText>
+              <Button
+                label="До книги"
+                variant="secondary"
+                onPress={() => router.push({ pathname: '/work/[workId]', params: { workId } } as unknown as Href)}
+              />
+            </Card>
+          </View>
         ) : (
           <View style={{ gap: theme.spacing.lg }}>
+            <BookHero
+              title={data.work.title}
+              authors={authorNames}
+              coverUrl={data.primaryEdition?.coverUrl}
+              coverFallbackColor={data.work.coverFallbackColor}
+            />
+
+            {/* Фаза 13 — "Історія прочитань", той самий спільний компонент, що й Book Details
+             * (Фаза 12). Показується лише коли книга має хоч один `reading_run` — легасі-книги
+             * без жодного (Фаза 7 `addToLibrary`, ніколи не читана) просто не мають секції. */}
+            {readingRuns && readingRuns.length > 0 ? (
+              <CollapsibleSection title="Історія прочитань">
+                <ReadingRunsHistorySection workId={data.work.id} details={readingRuns} />
+              </CollapsibleSection>
+            ) : null}
+
+            {/* «Підсумковий спогад» — картка-спогад (Milestone 11, Фаза 8-9): шаблон, живий
+             * preview, "Поділитися"/"Зберегти в галерею". Фаза 13 — доступна ТЕПЕР і без
+             * жодного попереднього запису `book_memory` (`reflection`/`entryRefs` фолбечать на
+             * `null`/`[]` через `memory?.` нижче й у `handleTemplateChange` вище) — вибір
+             * шаблону сам створює перший, порожній спогад цього прочитання. */}
+            <AppText variant="heading">Підсумковий спогад</AppText>
+
             <View ref={cardRef} collapsable={false}>
               <MemoryCardPreview
                 template={displayedTemplate}
@@ -542,7 +695,7 @@ export default function MemoryCardScreen() {
                   coverUrl: data.primaryEdition?.coverUrl,
                   coverFallbackColor: data.work.coverFallbackColor,
                 }}
-                reflection={memory.reflection}
+                reflection={memory?.reflection ?? null}
                 entries={visibleSelectedEntries}
                 rating={rating?.value ?? null}
                 stats={stats}
@@ -564,52 +717,6 @@ export default function MemoryCardScreen() {
                 {memoryCardTemplateDescriptions[displayedTemplate]}
               </AppText>
             </Card>
-
-            {/* POLYTSIA V1.6, Фаза 7 («ЯК ЧИТАЛАСЯ КНИГА») — шкала за станами "Як читалося?"
-             * (`reading_experience`, наявне поле сесії) кожної завершеної сесії, окремо від
-             * шкали записів щоденника нижче: тут кожна позначка — це ОДНА сесія читання, там —
-             * ОДИН (чи кілька) запис щоденника; обидві шкали використовують ту саму позицію
-             * 0-100% книги, тож навмисно стоять поруч. Рендерить `null` сама, коли сесій замало
-             * (`ReadingExperienceTimeline.tsx`), тому умовного враппера тут не потрібно. */}
-            <ReadingExperienceTimeline sessions={sessions} pageCount={data.primaryEdition?.pageCount ?? null} />
-
-            {/* Фаза 10 (JOURNAL MEMORY TIMELINE) — шкала записів щоденника 0-100% книги,
-             * окремо від вибору шаблону картки й вище кнопок поділитись/зберегти: це
-             * самостійна допоміжна візуалізація ("Timeline є supplementary visualization"),
-             * не частина самої картки-спогаду (`selectedEntries`/`memory.entryRefs` — лише
-             * записи, ОБРАНІ для картки; шкала ж показує ВСІ записи щоденника книги,
-             * `allEntries`). Рендерить `null` сама, коли позиціонувати нічого — тому
-             * умовного `{allEntries?.length ? ... : null}` тут не потрібно. */}
-            <JournalTimeline
-              entries={visibleAllEntries}
-              pageCount={data.primaryEdition?.pageCount ?? null}
-              userBookId={userBookId}
-            />
-
-            {preReadingReflection ? (
-              <BeforeAfterSection
-                reflection={preReadingReflection}
-                afterText={memory.reflection}
-                actualRating={rating?.value ?? null}
-              />
-            ) : null}
-
-            <RevisitLaterSection
-              userBookId={userBookId}
-              spoilerContext={{ active: spoilerSafeActive, currentPage, pageCount }}
-            />
-
-            <LoreSection
-              workId={data.work.id}
-              userBook={data.userBook}
-              pageCount={data.primaryEdition?.pageCount ?? null}
-            />
-
-            <BookCapsuleSection
-              userBookId={data.userBook.id}
-              workId={data.work.id}
-              status={data.userBook.status}
-            />
 
             <View style={{ gap: theme.spacing.sm }}>
               <Button
@@ -641,6 +748,54 @@ export default function MemoryCardScreen() {
                 />
               ) : null}
             </View>
+
+            {preReadingReflection ? (
+              <BeforeAfterSection
+                reflection={preReadingReflection}
+                afterText={memory?.reflection ?? null}
+                actualRating={rating?.value ?? null}
+              />
+            ) : null}
+
+            <BookCapsuleSection
+              userBookId={data.userBook.id}
+              workId={data.work.id}
+              status={data.userBook.status}
+            />
+
+            <RecallSection workId={data.work.id} capsule={capsule} />
+
+            {/* POLYTSIA V1.6, Фаза 7 («ЯК ЧИТАЛАСЯ КНИГА») — шкала за станами "Як читалося?"
+             * (`reading_experience`, наявне поле сесії) кожної завершеної сесії, окремо від
+             * шкали записів щоденника нижче: тут кожна позначка — це ОДНА сесія читання, там —
+             * ОДИН (чи кілька) запис щоденника; обидві шкали використовують ту саму позицію
+             * 0-100% книги, тож навмисно стоять поруч. Рендерить `null` сама, коли сесій замало
+             * (`ReadingExperienceTimeline.tsx`), тому умовного враппера тут не потрібно. */}
+            <ReadingExperienceTimeline sessions={sessions} pageCount={data.primaryEdition?.pageCount ?? null} />
+
+            {/* Фаза 10 (JOURNAL MEMORY TIMELINE) — шкала записів щоденника 0-100% книги,
+             * окремо від вибору шаблону картки й вище кнопок поділитись/зберегти: це
+             * самостійна допоміжна візуалізація ("Timeline є supplementary visualization"),
+             * не частина самої картки-спогаду (`selectedEntries`/`memory.entryRefs` — лише
+             * записи, ОБРАНІ для картки; шкала ж показує ВСІ записи щоденника книги,
+             * `allEntries`). Рендерить `null` сама, коли позиціонувати нічого — тому
+             * умовного `{allEntries?.length ? ... : null}` тут не потрібно. */}
+            <JournalTimeline
+              entries={visibleAllEntries}
+              pageCount={data.primaryEdition?.pageCount ?? null}
+              userBookId={userBookId}
+            />
+
+            <RevisitLaterSection
+              userBookId={userBookId}
+              spoilerContext={{ active: spoilerSafeActive, currentPage, pageCount }}
+            />
+
+            <LoreSection
+              workId={data.work.id}
+              userBook={data.userBook}
+              pageCount={data.primaryEdition?.pageCount ?? null}
+            />
           </View>
         )}
       </ScreenContainer>

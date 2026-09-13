@@ -45,6 +45,16 @@ function MemoryIndexRow({ item }: { item: MemoryIndexItem }) {
  * §Моя пам'ять) — повний перелік книг, для яких збережено Капсулу (Фаза 4), компактний вхід із
  * Home. Tap на рядок → `/memory/[workId]` (Book Memory), те саме призначення, що й per-book вхід
  * із Book Details.
+ *
+ * REREADING MODEL, Фаза 13 (Book Memory ungating + consolidation, `docs/READING_RUN.md`
+ * §"Фаза 13") — свідома межа scope: сам екран Book Memory (`app/memory/[workId].tsx`) після
+ * Фази 13 доступний для будь-якої книги з ХОЧ ОДНИМ джерелом пам'яті (спогад/До-Після/капсула/
+ * записи щоденника/lore/reading run/сесії), а НЕ лише з капсулою. Цей список свідомо лишається
+ * "лише книги з капсулою" — ТЗ Фази 13 про сам екран-хаб, а не про точку входу до нього; книга
+ * без капсули, але з іншими даними пам'яті, просто не потрапляє в ЦЕЙ список (хоча її власний
+ * `/memory/[workId]` уже показує дані) — потрапляє туди через Book Details замість цього списку.
+ * Не виправлено в межах цієї фази навмисно, той самий підхід, що й окрема, незмінена копія
+ * `BookCapsuleSection` на `app/completion/[workId].tsx`.
  */
 export default function MemoryIndexScreen() {
   const theme = useTheme();

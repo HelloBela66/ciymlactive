@@ -480,3 +480,22 @@ run (книгу можна оцінити навіть не дочитавши).
 Фази 6-12 (POLYTSIA V1.6.1) підключили `reading_run` до всього ланцюга: сесії читання (Фаза
 6-7), Book Memory (8), Before/After (9), Book Capsule (10), DNF-знімок (11), Rating + UI
 історії/порівняння (12). Нових запланованих фаз REREADING MODEL немає.
+
+## Фаза 13 — "Історія прочитань" стає спільним компонентом (Book Memory ungating)
+
+Фаза 13 — НЕ нова фаза REREADING MODEL (модель і так завершена Фазою 12 вище), а окрема фаза
+ТЗ V1.6.1 ("Book Memory ungating + consolidation"), яка робить `ReadingRunsHistorySection`
+(до цього — приватна функція лише всередині `app/work/[workId].tsx`, Фаза 12) спільним
+компонентом (`src/components/reading-runs/ReadingRunsHistorySection.tsx`) з ДРУГИМ
+UI-споживачем — Book Memory (`app/memory/[workId].tsx`, розділ "Історія прочитань" у новій IA
+хаба). Дані й кеш лишаються ТИМИ САМИМИ: обидва екрани викликають той самий
+`useReadingRunsDetail(userBookId)` (`src/features/reading-runs/useReadingRunsDetail.ts`,
+незмінений з Фази 12) — React Query дедуплікує однаковий ключ (`readingRuns.detailByUserBook`),
+тож відкриття обох екранів для однієї книги не подвоює запит до БД. Компонент і його поведінка
+(групування за run, кнопка "Порівняти прочитання" лише при ≥2 завершених) не змінились —
+змінилось лише місце, де він живе, і хто його імпортує.
+
+Ширший контекст Фази 13 (ungating усього екрана Book Memory, нова секція "Пригадування",
+консолідація "Капсула = тип рефлексії, Recall = дія над капсулою") — поза межами цього файлу,
+який документує лише REREADING MODEL; див. коментарі безпосередньо в
+`app/memory/[workId].tsx` і `CHANGELOG.md`.

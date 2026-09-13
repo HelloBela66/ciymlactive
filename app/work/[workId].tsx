@@ -27,11 +27,8 @@ import { useMarkOwned, useUnmarkOwned } from '@/features/owned-library/useOwnedB
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
 import { useStartSession } from '@/features/reading-session/useSessionMutations';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
-import {
-  useReadingRunsDetail,
-  selectComparableRuns,
-  type ReadingRunDetail,
-} from '@/features/reading-runs/useReadingRunsDetail';
+import { useReadingRunsDetail } from '@/features/reading-runs/useReadingRunsDetail';
+import { ReadingRunsHistorySection } from '@/components/reading-runs/ReadingRunsHistorySection';
 import { useRating, useSetRating, useRemoveRating } from '@/features/book-details/useRating';
 import {
   usePreReadingReflection,
@@ -63,7 +60,7 @@ import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel'
 import { formatDuration } from '@/lib/sessionTiming';
 import { computeRollingPace } from '@/lib/readingPace';
 import { predictFinish } from '@/lib/finishPrediction';
-import { editionFormatLabels, userBookStatusLabels, readingRunStatusLabels } from '@/design/i18n-labels';
+import { editionFormatLabels, userBookStatusLabels } from '@/design/i18n-labels';
 import type { EditionWithRelations } from '@/types/edition';
 import type { UserBook, UserBookStatus } from '@/types/userBook';
 import type { OwnedBook } from '@/types/ownedBook';
@@ -1448,89 +1445,6 @@ function ReadingHistorySection({ sessions }: { sessions: ReadingSession[] }) {
           {session.moodNote ? (
             <AppText variant="caption" color="secondary">
               {session.moodNote}
-            </AppText>
-          ) : null}
-        </Card>
-      ))}
-    </View>
-  );
-}
-
-/**
- * "Історія прочитань" — REREADING MODEL, Фаза 12 (`docs/READING_RUN.md` §"Фаза 12"). НА
- * ВІДМІНУ від `ReadingHistorySection` вище (плаский список окремих СЕСІЙ читання) — цей розділ
- * групує за `reading_run` (кожне ОКРЕМЕ прочитання/перечитування книги, Фаза 6-7): один рядок
- * на прочитання з підсумком (статус, дати, оцінка ЦЬОГО прочитання, скільки днів/часу пішло),
- * а не на кожну сесію окремо. Додатковий, а не замінний розділ (`docs/READING_RUN.md` — той
- * самий "additive UI" принцип, що й Фаза 10 Reread CTA вище): існуюча "Історія читання"
- * (сесії) нікуди не подівалась.
- *
- * Кнопка "Порівняти прочитання" з'являється лише коли є ≥2 ЗАВЕРШЕНИХ (`finished`) run —
- * менше ніж два просто нема що порівнювати (`selectComparableRuns`,
- * `useReadingRunsDetail.ts`).
- */
-function ReadingRunsHistorySection({ workId, details }: { workId: string; details: ReadingRunDetail[] }) {
-  const theme = useTheme();
-  const comparableRuns = selectComparableRuns(details);
-
-  return (
-    <View style={{ gap: theme.spacing.md }}>
-      {comparableRuns.length >= 2 ? (
-        <Pressable
-          onPress={() =>
-            router.push({ pathname: '/reread-comparison/[workId]', params: { workId } } as unknown as Href)
-          }
-        >
-          <Card
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: theme.spacing.sm,
-              backgroundColor: theme.colors.accentSoft,
-            }}
-          >
-            <Ionicons name="git-compare-outline" size={20} color={theme.colors.accent} />
-            <View style={{ flex: 1 }}>
-              <AppText variant="body" color="accent">
-                Як змінилася книга для тебе
-              </AppText>
-              <AppText variant="caption" color="secondary">
-                Порівняти {comparableRuns.length} прочитання
-              </AppText>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-          </Card>
-        </Pressable>
-      ) : null}
-
-      {[...details].reverse().map(({ run, rating, dnf, stats }) => (
-        <Card key={run.id} style={{ gap: theme.spacing.xs }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <AppText variant="body" style={{ fontWeight: '600' }}>
-              Прочитання №{run.runNumber}
-            </AppText>
-            <AppText variant="caption" color="secondary">
-              {readingRunStatusLabels[run.status]}
-            </AppText>
-          </View>
-          <AppText variant="caption" color="tertiary">
-            {new Date(run.startedAt).toLocaleDateString('uk-UA')}
-            {run.finishedAt ? ` → ${new Date(run.finishedAt).toLocaleDateString('uk-UA')}` : ''}
-          </AppText>
-          {rating?.value != null ? (
-            <AppText variant="caption" color="secondary">
-              Оцінка: {rating.value} · {stats.daysSpent} дн. читання
-              {stats.totalDurationSeconds > 0 ? ` · ${formatDuration(stats.totalDurationSeconds * 1000)}` : ''}
-            </AppText>
-          ) : (
-            <AppText variant="caption" color="secondary">
-              {stats.daysSpent} дн. читання
-              {stats.totalDurationSeconds > 0 ? ` · ${formatDuration(stats.totalDurationSeconds * 1000)}` : ''}
-            </AppText>
-          )}
-          {run.status === 'did_not_finish' && dnf ? (
-            <AppText variant="caption" color="secondary">
-              Покинуто на сторінці {dnf.page}
             </AppText>
           ) : null}
         </Card>

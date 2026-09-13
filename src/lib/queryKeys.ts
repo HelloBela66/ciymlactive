@@ -117,6 +117,16 @@ export const queryKeys = {
     // `BookCapsuleRepository.getCurrent`.
     currentByUserBook: (userBookId: string) => ['bookCapsule', 'currentByUserBook', userBookId] as const,
   },
+  capsuleRecall: {
+    // Фаза 13 (Book Memory ungating + consolidation, `docs/READING_RUN.md` — "Recall = дія над
+    // Capsule") — історія "спроб згадати" конкретної капсули (`capsule_recall`,
+    // `013_capsule_recall.ts`, POLYTSIA V1.6 Фаза 5). `CapsuleRecallRepository.listByBookCapsuleId`
+    // існував з самої Фази 5 як заготовка для майбутнього UI (`docs/RECALL.md`) — цей ключ і
+    // хук (`useCapsuleRecallHistory`, `useCapsuleRecall.ts`) і є тим UI: новий розділ
+    // "Пригадування" на Book Memory. Параметризований `bookCapsuleId` (НЕ `userBookId`) — той
+    // самий рівень, що й сама таблиця.
+    byBookCapsule: (bookCapsuleId: string) => ['capsuleRecall', 'byBookCapsule', bookCapsuleId] as const,
+  },
   preReadingReflection: {
     // POLYTSIA V1.6, Фаза 6 («До/Після») — той самий "малий запит по одній книзі" сенс, що й
     // `ratings.byUserBook`/`bookCapsule.byUserBook` вище (`pre_reading_reflection.user_book_id`
@@ -135,10 +145,11 @@ export const queryKeys = {
   readingRuns: {
     // REREADING MODEL, Фаза 12 (`docs/READING_RUN.md` §"Фаза 12") — ВСІ run'и книги разом з
     // повними даними по кожному (оцінка/спогад/До-Після/капсула/DNF/статистика сесій),
-    // РІВНО ОДИН запит на обидва UI-споживачі: "Історія прочитань" на Book Details
-    // (`ReadingRunsHistorySection`) і екран порівняння (`app/reread-comparison/[workId].tsx`)
-    // — той самий "один хук, спільний кеш" принцип, що й `sessions`/`FinishPredictionSection`
-    // вище (`ReadingHistorySection`). Порівняння сáме фільтрує лише `status === 'finished'`
+    // РІВНО ОДИН запит на ВСІ UI-споживачі: "Історія прочитань" на Book Details й на Book
+    // Memory (спільний `ReadingRunsHistorySection`, `src/components/reading-runs/`, Фаза 13)
+    // і екран порівняння (`app/reread-comparison/[workId].tsx`) — той самий "один хук,
+    // спільний кеш" принцип, що й `sessions`/`FinishPredictionSection` вище
+    // (`ReadingHistorySection`). Порівняння сáме фільтрує лише `status === 'finished'`
     // зі спільного результату, а не робить власний запит.
     detailByUserBook: (userBookId: string) => ['readingRuns', 'detailByUserBook', userBookId] as const,
   },

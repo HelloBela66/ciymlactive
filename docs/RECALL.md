@@ -90,6 +90,13 @@ recall", щоб не переписувати історичні дані зад
 історії recall-спроб (наприклад, "ти згадував цю книгу 3 рази"), але жоден екран цієї фази його
 не читає — єдиний хук читання цієї фази міг би зайве ускладнити мінімальний флоу вище.
 
+**REREADING MODEL, Фаза 13 (`docs/READING_RUN.md` §"Фаза 13").** Перший реальний UI-читач:
+`useCapsuleRecallHistory` (`src/features/memory/useCapsuleRecall.ts`) — нова секція
+"Пригадування" на Book Memory (`app/memory/[workId].tsx`, `RecallSection`) показує кількість
+попередніх спроб і список (дата + `current_memory_text` кожної). `useCreateCapsuleRecall`
+відтоді інвалідовує цей запит (`queryKeys.capsuleRecall.byBookCapsule`) при створенні нової
+спроби — до Фази 13 інвалідації тут не було, бо нічого не читало ці дані.
+
 **REREADING MODEL, Фаза 10 (`docs/READING_RUN.md` §"Фаза 10").** Жодної зміни схеми чи
 поведінки Recall самого по собі: `capsule_recall` посилається на `book_capsule_id`, не на
 `user_book_id`/`reading_run_id` напряму, тож Recall транзитивно "знає" своє прочитання лише
@@ -117,8 +124,9 @@ recall", щоб не переписувати історичні дані зад
   deep-link'ає одразу на `app/recall/[workId].tsx`: у застосунку взагалі немає інфраструктури
   tap-to-navigate для жодного типу нагадування (`reminder`/`goal`/капсула), тож додавати її лише
   для Recall було б непропорційним розширенням системи сповіщень заради однієї фічі.
-- Історія recall-спроб (`capsule_recall`) не має власного UI перегляду цієї фази — репозиторій
-  готовий (`listByBookCapsuleId`), екран — можлива майбутня функція.
+- ~~Історія recall-спроб (`capsule_recall`) не має власного UI перегляду цієї фази~~ — знято
+  Фазою 13: `RecallSection` на Book Memory (`app/memory/[workId].tsx`) тепер показує історію
+  (див. вище, §"REREADING MODEL, Фаза 13").
 - Reveal-секції "Улюблені моменти"/"Цитати"/"Твої думки" обмежені 5 записами кожна
   (`MAX_ENTRIES_PER_SECTION`) — немає "показати ще"; повний список завжди доступний на
   `app/memory/[workId].tsx`.
@@ -134,6 +142,7 @@ recall", щоб не переписувати історичні дані зад
 - `src/lib/recall.ts` — чисті доменні функції: `formatTimeSinceFinished` ("N місяців/років/днів
   тому"), `normalizeRecallText` (той самий trim-підхід, що й `bookCapsule.ts#normalizeCapsuleText`).
 - `src/data/repositories/CapsuleRecallRepository.ts` — SQL (`create`, `listByBookCapsuleId`).
-- `src/features/memory/useCapsuleRecall.ts` — `useCreateCapsuleRecall` (React Query mutation).
+- `src/features/memory/useCapsuleRecall.ts` — `useCreateCapsuleRecall` (React Query mutation);
+  `useCapsuleRecallHistory` (Фаза 13, читання історії для `RecallSection`).
 - `app/recall/[workId].tsx` — сам Recall-екран, локальний `revealed`-стан (без окремого
   маршруту на крок 2).
