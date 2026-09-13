@@ -9,14 +9,19 @@ import type { BookMemory, BookMemoryEntryRef, MemoryCardTemplateId } from '@/typ
 const log = createLogger('features/memory');
 
 /** «Спогад про книгу» цієї книги, якщо він уже створений — екран підсумку читання
- * (Milestone 11, Фаза 7, `app/completion/[workId].tsx`). */
+ * (Milestone 11, Фаза 7, `app/completion/[workId].tsx`).
+ *
+ * REREADING MODEL, Фаза 8 (`docs/READING_RUN.md`) — `getCurrent` сама визначає "поточний"
+ * (найновіший) run книги: після перечитування тут з'явиться НОВИЙ, порожній спогад для нового
+ * run, а не старий, перезаписаний спогад першого прочитання. Форма виклику з UI НЕ змінюється —
+ * навмисно, той самий `userBookId`. */
 export function useBookMemory(userBookId: string | undefined) {
   return useQuery<BookMemory | null>({
     queryKey: queryKeys.bookMemory.byUserBook(userBookId ?? ''),
     queryFn: async () => {
       if (!userBookId) return null;
       const db = await getDatabase();
-      return BookMemoryRepository.getByUserBookId(db, userBookId);
+      return BookMemoryRepository.getCurrent(db, userBookId);
     },
     enabled: !!userBookId,
   });
@@ -37,7 +42,7 @@ export function useSetBookMemory() {
   >({
     mutationFn: async (params) => {
       const db = await getDatabase();
-      return BookMemoryRepository.upsert(db, params);
+      return BookMemoryRepository.upsertCurrent(db, params);
     },
     onSuccess: (memory) => {
       queryClient.setQueryData(queryKeys.bookMemory.byUserBook(memory.userBookId), memory);

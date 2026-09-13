@@ -1,5 +1,44 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 8 — Book Memory прив'язана до reading_run (REREADING MODEL)
+
+**Дата:** 2026-09-13
+
+Четверта частина REREADING MODEL, перша, що торкається залежної сутності, а не самого
+`reading_run`/`reading_session`. Проблема (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 23, п.5,
+CODE VERIFIED): `book_memory` мала `UNIQUE(user_book_id)` — щонайбільше один спогад на книгу;
+другий `upsert` після перечитування безповоротно перезаписував перший. Повне обґрунтування —
+`docs/READING_RUN.md` §"Фаза 8".
+
+**Додано:**
+- `021_book_memory_run.ts` — rebuild `book_memory` (SQLite не підтримує ALTER TABLE для зміни
+  UNIQUE): обмеження міняється з `UNIQUE(user_book_id)` на `UNIQUE(reading_run_id)`, той самий
+  `_new`+`DROP`+`RENAME` ідіом, що й `002_book_source_isbndb.ts`. Нова колонка `reading_run_id`
+  — nullable, свідомо без SQL `REFERENCES` (той самий урок, що й у `020`). JS-backfill наявних
+  рядків: найновіший `finished`/`did_not_finish` run книги, інакше найновіший run узагалі,
+  інакше `reading_run_id` лишається `NULL` (книга без жодного run) — без вигадування історії.
+- `ReadingRunRepository.getLatestByUserBookId` — найновіший run книги НЕЗАЛЕЖНО від статусу
+  (на відміну від `getActiveByUserBookId`, лише `in_progress`): спогад пишеться вже ПІСЛЯ того,
+  як `updateStatus` (Фаза 7) завершив run.
+- `BookMemoryRepository.getByReadingRunId`/`listByUserBookId` — прямий доступ до спогаду
+  конкретного run і повної історії спогадів книги (заготовка для екрана історії, Фаза 12).
+- 16 нових тестів (652 → 668): `BookMemoryRepository.test.ts` (6, новий файл — перечитування
+  створює ОКРЕМИЙ спогад для нового run, старий не затирається; книга без жодного run
+  фолбечить на "книжковий" спогад), `migrationRunner.test.ts` (7 — усі гілки вибору run при
+  backfill, зняття старого UNIQUE, дія нового UNIQUE), `ReadingRunRepository.test.ts`
+  (3 — `getLatestByUserBookId`).
+
+**Змінено:**
+- `BookMemoryRepository.getByUserBookId`/`.upsert` → `.getCurrent`/`.upsertCurrent` — самі
+  визначають "поточний" (найновіший) run книги. Форма виклику з UI (`useBookMemory.ts` →
+  `app/completion/[workId].tsx`, `app/memory/[workId].tsx`) НЕ змінюється — той самий
+  `userBookId`, жодного нового параметра. Перечитування книги тепер природно починає НОВИЙ,
+  порожній спогад для нового run замість затирання старого; спогади попередніх run НЕ
+  видаляються, лишаються в базі (екран перегляду історії — свідомо поза межами цієї фази,
+  Фаза 12).
+- `docs/READING_RUN.md`/`docs/DATABASE.md` — нова секція "Фаза 8", схема `book_memory` й
+  історія міграцій оновлені.
+
 ## POLYTSIA V1.6.1, Фаза 7 — run-aware sessions (REREADING MODEL)
 
 **Дата:** 2026-09-13

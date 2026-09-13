@@ -207,3 +207,40 @@ describe('ReadingRunRepository — обмеження схеми (019_reading_ru
     ).rejects.toThrow();
   });
 });
+
+/** REREADING MODEL, Фаза 8 (`docs/READING_RUN.md`) — на відміну від `getActiveByUserBookId`
+ * (лише `in_progress`), ця вибірка НЕЗАЛЕЖНА від статусу: `BookMemoryRepository` потребує
+ * "останній прохід книги" вже ПІСЛЯ того, як він завершився (Фаза 7 `updateStatus` уже
+ * зробила run не-`in_progress` на той момент). */
+describe('ReadingRunRepository.getLatestByUserBookId', () => {
+  it('null, якщо книга взагалі не має жодного run', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-latest1');
+    expect(await ReadingRunRepository.getLatestByUserBookId(db, 'ub-latest1')).toBeNull();
+  });
+
+  it('повертає найновіший run НЕЗАЛЕЖНО від статусу (finished теж, не лише in_progress)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-latest2');
+
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-latest2' });
+    await ReadingRunRepository.finish(db, run.id, { status: 'finished' });
+
+    const latest = await ReadingRunRepository.getLatestByUserBookId(db, 'ub-latest2');
+    expect(latest?.id).toBe(run.id);
+    expect(latest?.status).toBe('finished');
+  });
+
+  it('кілька run — обирається найвищий run_number, а не перший/активний', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-latest3');
+
+    const first = await ReadingRunRepository.start(db, { userBookId: 'ub-latest3' });
+    await ReadingRunRepository.finish(db, first.id, { status: 'finished' });
+    const second = await ReadingRunRepository.start(db, { userBookId: 'ub-latest3' });
+
+    const latest = await ReadingRunRepository.getLatestByUserBookId(db, 'ub-latest3');
+    expect(latest?.id).toBe(second.id);
+    expect(latest?.runNumber).toBe(2);
+  });
+});

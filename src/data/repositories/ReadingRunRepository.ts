@@ -70,6 +70,23 @@ export const ReadingRunRepository = {
   },
 
   /**
+   * Найновіший run книги НЕЗАЛЕЖНО від статусу (на відміну від `getActiveByUserBookId` вище,
+   * яка бачить лише `in_progress`) — REREADING MODEL, Фаза 8 (`docs/READING_RUN.md`):
+   * `BookMemoryRepository` потребує "останній прохід цієї книги", а не лише "активний",
+   * оскільки спогад пишеться ПІСЛЯ переходу в `finished`/`did_not_finish` (той момент, коли
+   * `updateStatus`, Фаза 7, уже завершив run — він більше не `in_progress`).
+   */
+  async getLatestByUserBookId(db: SQLiteDatabase, userBookId: string): Promise<ReadingRun | null> {
+    const row = await db.getFirstAsync<ReadingRunRow>(
+      `SELECT * FROM reading_run
+       WHERE user_book_id = ? AND deleted_at IS NULL
+       ORDER BY run_number DESC LIMIT 1`,
+      [userBookId],
+    );
+    return row ? mapRow(row) : null;
+  },
+
+  /**
    * Створює наступний run для книги: `run_number` = (максимальний наявний, включно з
    * `deleted_at`, щоб номери ніколи не перевикористовувались) + 1. Не перевіряє, чи вже є
    * `in_progress` run для цієї книги — той самий свідомий вибір "без жорсткого гейту в

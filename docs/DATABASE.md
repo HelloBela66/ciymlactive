@@ -213,6 +213,16 @@ sync/catalog backend, але жодна читацька дія (старт се
     `user_book.finished_at` НЕ переноситься). Єдина міграція проєкту з процедурною (не чистою
     декларативною SQL) backfill-логікою в TypeScript — обґрунтування винятку та повна таблиця
     правил вибору `status`/`finished_at` — `docs/READING_RUN.md` §Backfill.
+21. **021_book_memory_run** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 8) — `docs/READING_RUN.md`
+    §"Фаза 8". Rebuild `book_memory` (SQLite не підтримує ALTER TABLE для зміни UNIQUE): обмеження
+    міняється з `UNIQUE(user_book_id)` на `UNIQUE(reading_run_id)` — той самий `_new`+`DROP`+
+    `RENAME` ідіом, що й `002_book_source_isbndb.ts`/`003`/`007` (`manualTransaction = true`,
+    `PRAGMA foreign_keys` OFF/ON навколо, `foreign_key_check` одразу після). `reading_run_id` —
+    nullable, СВІДОМО без `REFERENCES` (той самий урок, що й у `020`). Далі — JS-backfill
+    (другий виняток із чистого SQL після `020`): для кожного наявного `book_memory` — найновіший
+    `finished`/`did_not_finish` run цієї книги, інакше найновіший run узагалі, інакше
+    `reading_run_id` лишається `NULL` (книга без жодного run). Кожне завершене прочитання відтепер
+    може мати власний спогад, що не перезаписує попередні.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
@@ -586,21 +596,29 @@ CREATE TABLE pre_reading_reflection (
 );
 
 -- «Спогад про книгу» (`004_book_memory.ts` + `005_book_memory_template.ts`, Milestone 11
--- Фаза 7-8) — щонайбільше один на книгу, той самий UNIQUE(user_book_id)-патерн, що й у rating
--- вище. entry_refs — JSON-масив {id, kind} з ПОСИЛАННЯМИ на note/quote (не копія тексту) —
--- note/quote лишаються єдиним джерелом правди; спогад просто фільтрується проти актуального
--- списку записів при читанні. template_id — який із заготовлених шаблонів картки обрав
--- користувач (Фаза 8, `MemoryCardTemplateId`); БЕЗ CHECK — див. коментар у міграції 005.
--- Саме зображення картки (PNG для шерингу/збереження) — Фаза 9, тут його ще немає.
+-- Фаза 7-8; REREADING MODEL Фаза 8, `021_book_memory_run.ts`, `docs/READING_RUN.md`) —
+-- щонайбільше ОДИН НА RUN (UNIQUE(reading_run_id), НЕ user_book_id — до Фази 8 було навпаки:
+-- один на книгу, і другий upsert після перечитування безповоротно перезаписував перший,
+-- `docs/V1_6_FULL_AUDIT_REPORT.md` розділ 23 п.5). reading_run_id — СВІДОМО БЕЗ SQL REFERENCES
+-- (той самий, уже задокументований урок, що й note.category_id/reading_session.reading_run_id)
+-- — nullable, книга без жодного reading_run (Фаза 7 addToLibrary, свідомо не підключена) і
+-- далі має "книжковий" спогад без прив'язки до run. entry_refs — JSON-масив {id, kind} з
+-- ПОСИЛАННЯМИ на note/quote (не копія тексту) — note/quote лишаються єдиним джерелом правди;
+-- спогад просто фільтрується проти актуального списку записів при читанні. template_id — який
+-- із заготовлених шаблонів картки обрав користувач (Фаза 8 Milestone 11,
+-- `MemoryCardTemplateId`); БЕЗ CHECK — див. коментар у міграції 005. Саме зображення картки
+-- (PNG для шерингу/збереження) — Фаза 9, тут його ще немає.
 CREATE TABLE book_memory (
   id TEXT PRIMARY KEY,
-  user_book_id TEXT NOT NULL UNIQUE REFERENCES user_book(id) ON DELETE CASCADE,
+  user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
+  reading_run_id TEXT UNIQUE,
   reflection TEXT,
   entry_refs TEXT NOT NULL DEFAULT '[]',
   template_id TEXT NOT NULL DEFAULT 'classic',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE INDEX idx_book_memory_user_book ON book_memory(user_book_id);
 
 -- «Капсула книги» (`012_book_capsule.ts`, POLYTSIA V1.6 Фаза 4) — на відміну від book_memory
 -- вище, БЕЗ UNIQUE(user_book_id): немає надійного способу прив'язати капсулу до конкретного

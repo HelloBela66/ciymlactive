@@ -181,15 +181,58 @@ UNIQUE:
 Цей фолбек НЕ чіпає `user_book.status`: обсяг цієї фази — гарантія для `reading_session`, а не
 UX перемикання статусу.
 
-### Свідомо ПОЗА межами Фази 7
+## Фаза 8 — Book Memory (`021_book_memory_run.ts`, `BookMemoryRepository`)
 
-Підключення інших сутностей до `reading_run` (Book Memory, Before/After, Capsule, DNF, порівняння
-прочитань) лишається окремими наступними фазами:
+Четверта частина REREADING MODEL, перша, що торкається НЕ `reading_run`/`reading_session`, а
+залежну сутність. Проблема (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 23, п.5, CODE VERIFIED):
+`book_memory` мала `UNIQUE(user_book_id)` — щонайбільше один спогад на книгу; другий `upsert`
+(після перечитування) безповоротно перезаписував перший.
+
+### Схема — rebuild, `UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`
+
+SQLite не підтримує `ALTER TABLE` для зміни/видалення UNIQUE-обмеження — той самий
+`_new`+`INSERT...SELECT`+`DROP`+`RENAME` ідіом, що й `002_book_source_isbndb.ts`/`003`/`007`
+(`manualTransaction = true`, `PRAGMA foreign_keys` OFF перед транзакцією, rebuild у ручній
+транзакції, `PRAGMA foreign_key_check` одразу після, `foreign_keys` ON у `finally`).
+`reading_run_id` — нова колонка, nullable, СВІДОМО БЕЗ `REFERENCES reading_run(id)` (той самий,
+уже задокументований у цьому проєкті урок — `008_note_category.ts`/`020_reading_run_backfill.ts`).
+`user_book_id` лишається (більше не `UNIQUE`) — досі корисний для "чи має ця книга взагалі
+якийсь спогад" без join через run.
+
+### Backfill наявних рядків
+
+JS-цикл (другий виняток із чистого декларативного SQL у цьому проєкті, після `020`): для кожного
+наявного `book_memory` (до rebuild — щонайбільше ОДИН на книгу, тож жодного ризику конфлікту з
+новим `UNIQUE(reading_run_id)`) — найновіший `finished`/`did_not_finish` run цієї книги; якщо
+такого немає — найновіший run узагалі (навіть `in_progress`); якщо книга взагалі не має жодного
+run — `reading_run_id` лишається `NULL` (той самий принцип "не вигадувати історію", що й у
+Фазі 6b).
+
+### `BookMemoryRepository.getCurrent`/`upsertCurrent` — новий публічний API, стара форма виклику
+
+`ReadingRunRepository.getLatestByUserBookId` (нова, Фаза 8) — найновіший run книги НЕЗАЛЕЖНО
+від статусу (не лише `in_progress`, на відміну від `getActiveByUserBookId`): спогад пишеться вже
+ПІСЛЯ того, як `updateStatus` (Фаза 7) завершив run переходом у `finished`/`did_not_finish`, тож
+на момент запису run уже не "активний". `getCurrent`/`upsertCurrent` самі визначають цей
+"поточний" run і працюють із прив'язаним до нього спогадом; книга без жодного run (Фаза 7
+`addToLibrary`, свідомо не підключена) і далі отримує "книжковий" спогад без прив'язки
+(`reading_run_id IS NULL`) — той самий фолбек, що діяв для ВСІХ спогадів до цієї фази.
+
+Виклики з UI (`useBookMemory.ts` → `app/completion/[workId].tsx`, `app/memory/[workId].tsx`)
+лишаються НЕЗМІННИМИ за формою — той самий `userBookId`, жодного нового параметра. Перечитування
+книги тепер природно починає НОВИЙ, порожній спогад для нового run замість затирання старого;
+спогад(и) попередніх run НЕ видаляються, лишаються в базі (`listByUserBookId`/`getByReadingRunId`
+вже готові для майбутньої історії спогадів), просто ще не мають власного екрана перегляду —
+свідомо поза межами цієї фази, той самий UI, що й Фаза 12 нижче.
+
+## Свідомо ПОЗА межами Фази 8
+
+Підключення інших сутностей до `reading_run` (Before/After, Capsule, DNF, порівняння прочитань)
+лишається окремими наступними фазами:
 
 | Фаза | Що підключається |
 | --- | --- |
-| 8 | Book Memory — `UNIQUE(user_book_id)` → прив'язка до run, історія спогадів замість перезапису |
 | 9 | Before/After — те саме для `pre_reading_reflection` |
 | 10 | Capsule/Recall — `canCreateCapsule` більше не блокує `rereading`, кожен run може мати власну капсулу |
 | 11 | DNF — `dnf_reflection` прив'язується до конкретного run, що не дочитали |
-| 12 | Rereading UX + порівняння прочитань — агрегований показ "як читалося цього разу vs минулого разу", використовуючи `run_number` |
+| 12 | Rereading UX + порівняння прочитань — агрегований показ "як читалося цього разу vs минулого разу", використовуючи `run_number`; тут з'явиться екран історії спогадів по всіх run книги |

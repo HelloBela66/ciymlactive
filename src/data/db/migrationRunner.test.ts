@@ -415,3 +415,189 @@ describe('migrateDbIfNeeded — 020_reading_run_backfill (Фаза 6b)', () => {
     expect(index?.name).toBe('idx_reading_session_reading_run');
   });
 });
+
+/**
+ * `021_book_memory_run.ts` (POLYTSIA V1.6.1, Фаза 8, `docs/READING_RUN.md` §"Фаза 8") — rebuild
+ * `book_memory` (`UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`) + JS-backfill. Той самий
+ * "populated DB на версії 20, потім migrateDbIfNeeded" сценарій, що й тести 020 вище: БД
+ * піднімається до версії 20 (СТАРА схема `book_memory`, ще без `reading_run_id`), книги/run'и/
+ * legacy-спогади сіються напряму raw SQL, потім прогоняється сама міграція 021.
+ */
+const MIGRATION_021_NOW = '2026-09-13T00:00:00.000Z';
+
+async function seedBookForMemoryMigration(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+    `${id}-work`,
+    `Книга ${id}`,
+    MIGRATION_021_NOW,
+    MIGRATION_021_NOW,
+  ]);
+  await db.runAsync(
+    `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    [`${id}-edition`, `${id}-work`, `Книга ${id}`, 'uk', 'paperback', MIGRATION_021_NOW, MIGRATION_021_NOW],
+  );
+  await db.runAsync(
+    `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'finished',0,?,?)`,
+    [id, `${id}-edition`, MIGRATION_021_NOW, MIGRATION_021_NOW],
+  );
+}
+
+async function seedRunForMemoryMigration(
+  db: SQLiteDatabase,
+  params: { id: string; userBookId: string; runNumber: number; status: string },
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO reading_run (
+       id, user_book_id, run_number, status, started_at, finished_at, is_legacy_backfill, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,0,?,?)`,
+    [
+      params.id,
+      params.userBookId,
+      params.runNumber,
+      params.status,
+      MIGRATION_021_NOW,
+      params.status === 'in_progress' ? null : MIGRATION_021_NOW,
+      MIGRATION_021_NOW,
+      MIGRATION_021_NOW,
+    ],
+  );
+}
+
+/** Спогад у СТАРІЙ схемі `book_memory` (версія 20 — ще без `reading_run_id`). */
+async function seedLegacyMemory(db: SQLiteDatabase, id: string, userBookId: string): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO book_memory (id, user_book_id, reflection, entry_refs, template_id, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?)`,
+    [id, userBookId, `Спогад ${id}`, '[]', 'classic', MIGRATION_021_NOW, MIGRATION_021_NOW],
+  );
+}
+
+interface LegacyBookMemoryRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+}
+
+async function getMemory(db: SQLiteDatabase, id: string): Promise<LegacyBookMemoryRow | null> {
+  return db.getFirstAsync<LegacyBookMemoryRow>(`SELECT * FROM book_memory WHERE id = ?`, [id]);
+}
+
+describe('migrateDbIfNeeded — 021_book_memory_run (Фаза 8)', () => {
+  it('книга з finished і in_progress run — спогад лінкується на FINISHED, не на новіший in_progress', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-j');
+    await seedRunForMemoryMigration(db, { id: 'run-j1', userBookId: 'ub-j', runNumber: 1, status: 'finished' });
+    await seedRunForMemoryMigration(db, { id: 'run-j2', userBookId: 'ub-j', runNumber: 2, status: 'in_progress' });
+    await seedLegacyMemory(db, 'memory-j', 'ub-j');
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const memory = await getMemory(db, 'memory-j');
+    expect(memory?.reading_run_id).toBe('run-j1');
+  });
+
+  it('кілька FINISHED run — обирається найновіший (найвищий run_number), не перший знайдений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-n');
+    await seedRunForMemoryMigration(db, { id: 'run-n1', userBookId: 'ub-n', runNumber: 1, status: 'finished' });
+    await seedRunForMemoryMigration(db, { id: 'run-n2', userBookId: 'ub-n', runNumber: 2, status: 'finished' });
+    await seedLegacyMemory(db, 'memory-n', 'ub-n');
+
+    await migrateDbIfNeeded(db);
+
+    const memory = await getMemory(db, 'memory-n');
+    expect(memory?.reading_run_id).toBe('run-n2');
+  });
+
+  it('лише in_progress run (без жодного finished) — фолбек на найновіший run узагалі', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-k');
+    await seedRunForMemoryMigration(db, { id: 'run-k1', userBookId: 'ub-k', runNumber: 1, status: 'in_progress' });
+    await seedLegacyMemory(db, 'memory-k', 'ub-k');
+
+    await migrateDbIfNeeded(db);
+
+    const memory = await getMemory(db, 'memory-k');
+    expect(memory?.reading_run_id).toBe('run-k1');
+  });
+
+  it('книга без жодного reading_run — reading_run_id лишається NULL, нічого не вигадується', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-l');
+    await seedLegacyMemory(db, 'memory-l', 'ub-l');
+
+    await migrateDbIfNeeded(db);
+
+    const memory = await getMemory(db, 'memory-l');
+    expect(memory?.reading_run_id).toBeNull();
+  });
+
+  it('стара UNIQUE(user_book_id) знята: два спогади на одну книгу (різні reading_run_id) — без конфлікту', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-m');
+    await seedRunForMemoryMigration(db, { id: 'run-m1', userBookId: 'ub-m', runNumber: 1, status: 'finished' });
+    await seedRunForMemoryMigration(db, { id: 'run-m2', userBookId: 'ub-m', runNumber: 2, status: 'finished' });
+    await seedLegacyMemory(db, 'memory-m1', 'ub-m');
+
+    await migrateDbIfNeeded(db);
+
+    // Backfill лінкує memory-m1 на run-m2 (найновіший FINISHED, п. вище) — другий спогад
+    // навмисно на РЕШТУ run цієї самої книги (run-m1), яка ще без спогаду: після rebuild це
+    // більше не конфлікт (стара UNIQUE(user_book_id) заборонила б будь-який другий рядок для
+    // ub-m взагалі, незалежно від run).
+    const linkedRun = await getMemory(db, 'memory-m1');
+    expect(linkedRun?.reading_run_id).toBe('run-m2');
+
+    await db.runAsync(
+      `INSERT INTO book_memory (id, user_book_id, reading_run_id, reflection, entry_refs, template_id, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      ['memory-m2', 'ub-m', 'run-m1', 'Другий спогад', '[]', 'classic', MIGRATION_021_NOW, MIGRATION_021_NOW],
+    );
+
+    const rows = await db.getAllAsync<LegacyBookMemoryRow>(`SELECT * FROM book_memory WHERE user_book_id = ?`, [
+      'ub-m',
+    ]);
+    expect(rows).toHaveLength(2);
+  });
+
+  it('нова UNIQUE(reading_run_id) ДІЄ: другий спогад на ТОЙ САМИЙ run кидає виняток', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-o');
+    await seedRunForMemoryMigration(db, { id: 'run-o1', userBookId: 'ub-o', runNumber: 1, status: 'finished' });
+    await seedLegacyMemory(db, 'memory-o1', 'ub-o');
+    await migrateDbIfNeeded(db);
+
+    await expect(
+      db.runAsync(
+        `INSERT INTO book_memory (id, user_book_id, reading_run_id, reflection, entry_refs, template_id, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        ['memory-o2', 'ub-o', 'run-o1', 'Дубль', '[]', 'classic', MIGRATION_021_NOW, MIGRATION_021_NOW],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('book_memory.reading_run_id — нова колонка, індекс idx_book_memory_user_book справді створений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 20);
+    await seedBookForMemoryMigration(db, 'ub-p');
+    await seedLegacyMemory(db, 'memory-p', 'ub-p');
+
+    await migrateDbIfNeeded(db);
+
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_book_memory_user_book'`,
+    );
+    expect(index?.name).toBe('idx_book_memory_user_book');
+
+    // Поле досі читається без винятку — sanity-check, що rebuild не втратив жодної колонки.
+    const memory = await getMemory(db, 'memory-p');
+    expect(memory?.user_book_id).toBe('ub-p');
+  });
+});

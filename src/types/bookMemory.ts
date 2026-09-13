@@ -27,6 +27,11 @@ export type MemoryCardTemplateId = 'classic' | 'quote' | 'stats' | 'minimal' | '
 export interface BookMemory {
   id: string;
   userBookId: string;
+  /** REREADING MODEL, Фаза 8 (`docs/READING_RUN.md`) — до якого `reading_run` (конкретного
+   * прочитання) належить цей спогад. `null` — книга взагалі не має жодного `reading_run`
+   * (Фаза 7 `addToLibrary`, свідомо не підключена) — той самий "книжковий" фолбек, що діяв ДО
+   * цієї фази для всіх спогадів. */
+  readingRunId: string | null;
   /** `null` — користувач нічого не написав, лишив тільки вибрані записи (теж валідний спогад). */
   reflection: string | null;
   entryRefs: BookMemoryEntryRef[];
