@@ -1,5 +1,33 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 18 — Progressive onboarding
+
+**Дата:** 2026-09-13
+
+Аудит V1.6.1 (Розділ 46, FTUE) зафіксував: у застосунку немає жодного welcome-екрана/tutorial-
+кроків, а незнайомі новачку терміни (наприклад, "Капсула книги") з'являються в UI без жодного
+пояснення. Фаза 17 закрила половину цього ризику (коли показувати навігацію — progressive
+disclosure). Ця фаза — інша половина: contextual onboarding замість tutorial, три одноразові
+підказки саме в момент, коли відповідне поняття вперше стає релевантним. Повне обґрунтування —
+`docs/PROGRESSIVE_ONBOARDING.md`.
+
+**Додано:**
+- `src/lib/onboardingHintStorage.ts` — сховище "чи бачив цю підказку" (`expo-secure-store`, той
+  самий патерн, що й `themePreferenceStorage.ts`), три ключі: `welcome`/`firstSession`/
+  `firstFinishedBookCapsule`.
+- `src/features/onboarding/useOnboardingHint.ts` — спільний хук `{ visible, dismiss }` для всіх
+  трьох підказок.
+- `src/components/ui/OnboardingHintCard.tsx` — спільний вигляд підказки (заголовок/опис/×).
+- `app/(tabs)/index.tsx` — `WelcomeHint` (разом із порожньою бібліотекою, Фаза 17) і
+  `FirstSessionHint` (одразу після `TodayStatsRow`, коли `totalSessions === 1`).
+- `app/completion/[workId].tsx` — `CapsuleMemoryOnboardingHint`, одразу над
+  `BookCapsuleSection`, коли ця книга — перша завершена книга користувача
+  (`booksFinishedAllTime === 1`): пояснює, що таке Капсула і чим вона відрізняється від Мого
+  щоденника/Моєї історії.
+- 0 нових тестів (751 без змін) — уся зміна в презентаційній логіці екранів і тонких обгортках
+  над `SecureStore`/React-станом (той самий клас коду, що й наявні `themePreferenceStorage.ts`/
+  `libraryPreferenceStorage.ts`, для яких так само немає окремих тестів).
+
 ## POLYTSIA V1.6.1, Фаза 17 — Home refinement (не redesign)
 
 **Дата:** 2026-09-13

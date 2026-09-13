@@ -10,12 +10,14 @@ import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { ReadingProgressBar } from '@/components/ui/ReadingProgressBar';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { QuickAction } from '@/components/ui/QuickAction';
+import { OnboardingHintCard } from '@/components/ui/OnboardingHintCard';
 import { useTheme } from '@/design/ThemeProvider';
 import { getTimeOfDayGreeting } from '@/lib/greeting';
 import { useActiveSession } from '@/features/reading-session/useActiveSession';
 import { useReadingContinuity } from '@/features/reading-session/useReadingContinuity';
 import { useLibraryAll, useLibraryByStatus } from '@/features/library/useLibrary';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
+import { useOnboardingHint } from '@/features/onboarding/useOnboardingHint';
 import { HomeContextCard } from '@/components/home/HomeContextCard';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 import { computeProgressPercent } from '@/lib/progressPercent';
@@ -224,6 +226,55 @@ function TodayStatsRow() {
   );
 }
 
+/**
+ * PROGRESSIVE ONBOARDING, Фаза 18 (`docs/PROGRESSIVE_ONBOARDING.md`) — разом із порожнім станом
+ * Home для геть нового користувача (`isLibraryEmpty`, `HomeScreen` нижче). На відміну від
+ * самого `EmptyState` (лишається видимим, доки бібліотека порожня), це привітання зникає
+ * НАЗАВЖДИ після першого перегляду/закриття (`useOnboardingHint`) — навіть якщо користувач
+ * пізніше видалить усі книги й бібліотека знову стане порожньою, вдруге не з'явиться.
+ */
+function WelcomeHint() {
+  const theme = useTheme();
+  const { visible, dismiss } = useOnboardingHint('welcome');
+  if (!visible) return null;
+
+  return (
+    <View style={{ marginBottom: theme.spacing.lg }}>
+      <OnboardingHintCard
+        title="Ласкаво просимо до Полиці!"
+        description="Полиця — це пам'ять твого читання: прогрес, нотатки й спогади про кожну книгу збираються в одному місці. Почни з пошуку своєї першої книги."
+        onDismiss={dismiss}
+      />
+    </View>
+  );
+}
+
+/**
+ * PROGRESSIVE ONBOARDING, Фаза 18 — одразу після ПЕРШОЇ ЗАВЕРШЕНОЇ сесії читання
+ * (`totalSessions === 1`) на Home раптом з'являються `TodayStatsRow`/рядок "Зараз читаєш"
+ * (обидва до цього моменту поверталися `null`) — коротко пояснює, що саме тепер з'явилось і
+ * куди йдуть нотатки/цитати. Умова `totalSessions === 1`, а не лише факт показу підказки,
+ * навмисна: природно перестає діяти вже після другої сесії сама собою, а `useOnboardingHint`
+ * (закрито назавжди після першого тапу на ×) захищає від повторної появи, навіть якби
+ * `totalSessions` з якоїсь причини знову став 1 (наприклад, видалення другої сесії).
+ */
+function FirstSessionHint() {
+  const theme = useTheme();
+  const { data } = useOverallStatistics();
+  const { visible, dismiss } = useOnboardingHint('firstSession');
+  if (!visible || data?.totalSessions !== 1) return null;
+
+  return (
+    <View style={{ marginTop: theme.spacing.lg }}>
+      <OnboardingHintCard
+        title="Перша сесія читання позаду!"
+        description="Тепер тут з'являються твій прогрес і сьогоднішня статистика. Занотовуй думки й цитати під час читання — вони збираються в «Мій щоденник»."
+        onDismiss={dismiss}
+      />
+    </View>
+  );
+}
+
 type ShortcutIconName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface ShortcutItem {
@@ -327,6 +378,12 @@ function NextReadEntryPointCard() {
  * інтерактивних елементів із незнайомою термінологією ("Капсула книги", "TBR reality check")
  * ДО єдиного релевантного для нього CTA внизу екрана. Повне обґрунтування —
  * `docs/HOME_REFINEMENT.md`.
+ *
+ * **Оновлено Фазою 18** (PROGRESSIVE ONBOARDING, `docs/PROGRESSIVE_ONBOARDING.md`) — дві з трьох
+ * контекстних підказок цієї фази рендеряться саме тут: `WelcomeHint` (разом із порожньою
+ * бібліотекою) і `FirstSessionHint` (одразу після `TodayStatsRow`, коли `totalSessions === 1`).
+ * Третя (пояснення Капсули/Моєї пам'яті після першої завершеної книги) — на
+ * `app/completion/[workId].tsx`, не тут.
  */
 export default function HomeScreen() {
   const theme = useTheme();
@@ -353,6 +410,9 @@ export default function HomeScreen() {
 
       {/* #3 Today summary */}
       <TodayStatsRow />
+
+      {/* PROGRESSIVE ONBOARDING, Фаза 18 — одразу під тим, що щойно вперше з'явилось. */}
+      <FirstSessionHint />
 
       {/* #4 Одна контекстна картка (ТЗ: "У конкретний момент показуй максимум ОДНУ context
           card... Не показуй 5 одночасно") — уся логіка вибору "яку саме" в
@@ -394,12 +454,15 @@ export default function HomeScreen() {
         // його одразу на Home, без зайвого проміжного переходу через Бібліотеку лише щоб
         // побачити той самий порожній стан ще раз (аудит §Розділ 46: "CTA не перший елемент на
         // екрані").
-        <EmptyState
-          title="Бібліотека поки порожня."
-          description="Знайди книгу через пошук і додай її сюди з Book Details."
-          actionLabel="До пошуку"
-          onAction={() => router.push('/search')}
-        />
+        <>
+          <WelcomeHint />
+          <EmptyState
+            title="Бібліотека поки порожня."
+            description="Знайди книгу через пошук і додай її сюди з Book Details."
+            actionLabel="До пошуку"
+            onAction={() => router.push('/search')}
+          />
+        </>
       ) : showEmptyState ? (
         <EmptyState
           title="Зараз ти нічого не читаєш."

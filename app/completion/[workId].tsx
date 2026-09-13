@@ -13,9 +13,12 @@ import { LabeledInput } from '@/components/ui/LabeledInput';
 import { StarRating } from '@/components/ui/StarRating';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
+import { OnboardingHintCard } from '@/components/ui/OnboardingHintCard';
 import { useTheme } from '@/design/ThemeProvider';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
+import { useOverallStatistics } from '@/features/statistics/useStatistics';
+import { useOnboardingHint } from '@/features/onboarding/useOnboardingHint';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useRating, useSetRating } from '@/features/book-details/useRating';
 import { useReadingHistory } from '@/features/reading-session/useReadingHistory';
@@ -343,6 +346,30 @@ function BookMemorySection({ userBookId, workId }: { userBookId: string; workId:
 }
 
 /**
+ * PROGRESSIVE ONBOARDING, Фаза 18 (`docs/PROGRESSIVE_ONBOARDING.md`) — показується РІВНО ОДИН
+ * РАЗ, одразу над `BookCapsuleSection` нижче, коли ЦЯ книга — перша ЗАВЕРШЕНА книга користувача
+ * (`booksFinishedAllTime === 1`) — саме той момент, коли термін "Капсула" з'являється в UI
+ * вперше без жодного пояснення (аудит §Розділ 46, ризик 2: "Капсула книги"/"TBR reality
+ * check" — термінологія, зрозуміла лише PRODUCT.md-читачу"). Цей екран ревізитуємий (той самий
+ * принцип, що й сам `CompletionSummaryScreen`) — `useOnboardingHint` ("ще не бачив", закрито
+ * назавжди після першого тапу на ×) не дає підказці з'явитись знову при повторному відкритті
+ * того самого підсумку, навіть доки `booksFinishedAllTime` лишається 1 (тобто друга книга ще не
+ * дочитана).
+ */
+function CapsuleMemoryOnboardingHint({ isFirstFinishedBook }: { isFirstFinishedBook: boolean }) {
+  const { visible, dismiss } = useOnboardingHint('firstFinishedBookCapsule');
+  if (!visible || !isFirstFinishedBook) return null;
+
+  return (
+    <OnboardingHintCard
+      title="Що таке Капсула?"
+      description="Капсула — це особиста думка про книгу, яку ти захочеш згадати: вона з'явиться в «Моя пам'ять» і, якщо захочеш, нагадає про себе пізніше. Це не те саме, що «Мій щоденник» (нотатки під час читання) чи «Моя історія» (повний список подій) — просто персональний спогад саме про цю книгу."
+      onDismiss={dismiss}
+    />
+  );
+}
+
+/**
  * «Капсула книги» (POLYTSIA V1.6, Фаза 4, п.1 ТЗ — entry point #1, "запрошення одразу після
  * завершення читання"). Не рендериться, поки капсула ще завантажується (уникає "блимання"
  * запрошення → готова капсула одразу після монтування), і не рендериться взагалі для книг, які
@@ -477,6 +504,14 @@ export default function CompletionSummaryScreen() {
   const { data: rating } = useRating(userBookId);
   const setRating = useSetRating();
 
+  // PROGRESSIVE ONBOARDING, Фаза 18 (`docs/PROGRESSIVE_ONBOARDING.md`) — "перша ЗАВЕРШЕНА
+  // книга" (не "перше відкриття цього екрана", екран ревізитуємий): `status === 'finished'`,
+  // а не `'did_not_finish'`, і `booksFinishedAllTime === 1` — той самий рахунок, що вже читає
+  // `TodayStatsRow`/`FirstSessionHint` на Home (`useOverallStatistics`, Фаза 15 §"свідомо не
+  // об'єднано" підтверджує, що це саме той лічильник фінішованих книг за весь час).
+  const { data: overallStats } = useOverallStatistics();
+  const isFirstFinishedBook = data?.userBook?.status === 'finished' && overallStats?.booksFinishedAllTime === 1;
+
   // Арифметика винесена в чисту функцію (`src/lib/bookStats.ts`, Фаза 8) — та сама статистика
   // потрібна й картці-спогаду (`app/memory/[workId].tsx`), щоб цифри на обох екранах про ту
   // саму книгу ніколи не розходились.
@@ -608,6 +643,8 @@ export default function CompletionSummaryScreen() {
             ) : null}
 
             <BookMemorySection userBookId={data.userBook.id} workId={data.work.id} />
+
+            <CapsuleMemoryOnboardingHint isFirstFinishedBook={isFirstFinishedBook} />
 
             <BookCapsuleSection
               userBookId={data.userBook.id}
