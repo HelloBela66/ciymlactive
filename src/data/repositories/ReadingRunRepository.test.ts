@@ -244,3 +244,72 @@ describe('ReadingRunRepository.getLatestByUserBookId', () => {
     expect(latest?.runNumber).toBe(2);
   });
 });
+
+/** MEMORY HUB HIERARCHY, Фаза 16 (`docs/MEMORY_HUB.md`) — "Перечитання" на `app/memory/index.tsx`
+ * потребує глобальний перелік книг, які реально можна порівняти (≥2 `finished` run), той самий
+ * поріг, що й `selectComparableRuns` (`useReadingRunsDetail.ts`). */
+describe('ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns', () => {
+  it('порожній масив, коли взагалі немає run', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-multi0');
+    expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual([]);
+  });
+
+  it('книга з лише одним finished run — не потрапляє в перелік', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-multi1');
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-multi1' });
+    await ReadingRunRepository.finish(db, run.id, { status: 'finished' });
+
+    expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual([]);
+  });
+
+  it('книга з двома finished run — потрапляє в перелік', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-multi2');
+    const first = await ReadingRunRepository.start(db, { userBookId: 'ub-multi2' });
+    await ReadingRunRepository.finish(db, first.id, { status: 'finished' });
+    const second = await ReadingRunRepository.start(db, { userBookId: 'ub-multi2' });
+    await ReadingRunRepository.finish(db, second.id, { status: 'finished' });
+
+    expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual(['ub-multi2']);
+  });
+
+  it('один finished + один in_progress (або did_not_finish) — не рахується як 2 finished', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-multi3');
+    const first = await ReadingRunRepository.start(db, { userBookId: 'ub-multi3' });
+    await ReadingRunRepository.finish(db, first.id, { status: 'finished' });
+    await ReadingRunRepository.start(db, { userBookId: 'ub-multi3' }); // лишається in_progress
+
+    expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual([]);
+  });
+
+  it('м\'яко видалений (discard) finished run не рахується', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-multi4');
+    const first = await ReadingRunRepository.start(db, { userBookId: 'ub-multi4' });
+    await ReadingRunRepository.finish(db, first.id, { status: 'finished' });
+    const second = await ReadingRunRepository.start(db, { userBookId: 'ub-multi4' });
+    await ReadingRunRepository.finish(db, second.id, { status: 'finished' });
+    await ReadingRunRepository.discard(db, second.id);
+
+    expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual([]);
+  });
+
+  it('серед кількох книг повертає лише ті, що дійсно мають ≥2 finished run', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-multi5a');
+    await seedUserBook(db, 'ub-multi5b');
+
+    const aFirst = await ReadingRunRepository.start(db, { userBookId: 'ub-multi5a' });
+    await ReadingRunRepository.finish(db, aFirst.id, { status: 'finished' });
+    const aSecond = await ReadingRunRepository.start(db, { userBookId: 'ub-multi5a' });
+    await ReadingRunRepository.finish(db, aSecond.id, { status: 'finished' });
+
+    const bFirst = await ReadingRunRepository.start(db, { userBookId: 'ub-multi5b' });
+    await ReadingRunRepository.finish(db, bFirst.id, { status: 'finished' });
+
+    expect(await ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db)).toEqual(['ub-multi5a']);
+  });
+});

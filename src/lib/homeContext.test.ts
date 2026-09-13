@@ -1,6 +1,7 @@
 import {
   findStaleReadingCandidate,
   findCapsuleDueCandidate,
+  listDueCapsuleCandidates,
   findGoalNearCompletionCandidate,
   selectHomeContextCard,
   GOAL_NEAR_COMPLETION_RATIO,
@@ -82,6 +83,38 @@ describe('findCapsuleDueCandidate', () => {
       dueCapsule({ capsuleId: 'oldest', reopenAt: '2026-01-01T00:00:00.000Z' }),
     ];
     expect(findCapsuleDueCandidate(capsules, NOW)?.capsuleId).toBe('oldest');
+  });
+});
+
+describe('listDueCapsuleCandidates', () => {
+  it('порожній масив, коли жодна капсула не due', () => {
+    const capsules = [dueCapsule({ reopenAt: '2026-12-01T00:00:00.000Z' })];
+    expect(listDueCapsuleCandidates(capsules, NOW)).toEqual([]);
+  });
+
+  it('виключає переглянуті (openedAt задано) і без reopenAt', () => {
+    const capsules = [
+      dueCapsule({ capsuleId: 'opened', openedAt: '2026-09-05T00:00:00.000Z' }),
+      dueCapsule({ capsuleId: 'no-reminder', reopenAt: null }),
+    ];
+    expect(listDueCapsuleCandidates(capsules, NOW)).toEqual([]);
+  });
+
+  it('повертає УСІ due-капсули, найдовше прострочена перша', () => {
+    const capsules = [
+      dueCapsule({ capsuleId: 'newer', reopenAt: '2026-09-10T00:00:00.000Z' }),
+      dueCapsule({ capsuleId: 'oldest', reopenAt: '2026-01-01T00:00:00.000Z' }),
+      dueCapsule({ capsuleId: 'middle', reopenAt: '2026-06-01T00:00:00.000Z' }),
+    ];
+    expect(listDueCapsuleCandidates(capsules, NOW).map((c) => c.capsuleId)).toEqual(['oldest', 'middle', 'newer']);
+  });
+
+  it('перший елемент — той самий, що повертає findCapsuleDueCandidate', () => {
+    const capsules = [
+      dueCapsule({ capsuleId: 'newer', reopenAt: '2026-09-10T00:00:00.000Z' }),
+      dueCapsule({ capsuleId: 'oldest', reopenAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    expect(listDueCapsuleCandidates(capsules, NOW)[0]?.capsuleId).toBe(findCapsuleDueCandidate(capsules, NOW)?.capsuleId);
   });
 });
 

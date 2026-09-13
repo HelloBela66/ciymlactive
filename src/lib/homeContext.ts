@@ -87,31 +87,38 @@ export interface CapsuleDueCandidate {
 }
 
 /**
- * Капсула "ready" (ТЗ: "Book Capsule ready") — `reopenAt` уже настав ВІДНОСНО `now`
+ * Капсули "ready" (ТЗ: "Book Capsule ready") — `reopenAt` уже настав ВІДНОСНО `now`
  * (`BookCapsuleRepository.getDue`-еквівалент, той самий поріг, що й `isCapsuleDue` у
- * `bookCapsule.ts`) і ще НЕ переглянута (`openedAt == null` — уже відкритий recall не повинен
- * знову й знову займати Home-слот). Серед кількох таких — найдовше прострочена (найраніший
- * `reopenAt`), той самий "хто найдовше чекає" принцип, що й `findStaleReadingCandidate` вище.
+ * `bookCapsule.ts`) і ще НЕ переглянуті (`openedAt == null` — уже відкритий recall не повинен
+ * знову й знову займати слот). УСІ такі, найдовше прострочена перша (найраніший `reopenAt`) —
+ * Фаза 16 (MEMORY HUB HIERARCHY, `docs/MEMORY_HUB.md`) додала цю функцію для розділу
+ * "Час згадати" на `app/memory/index.tsx`: до цієї фази `BookCapsuleRepository.getDue`
+ * використовувався лише для ОДНОГО Home-слоту (`findCapsuleDueCandidate` нижче, тепер побудована
+ * поверх цієї функції — той самий фільтр/сортування, просто без обрізання до одного елемента).
+ */
+export function listDueCapsuleCandidates(capsules: CapsuleDueCandidateInput[], now: Date): CapsuleDueCandidate[] {
+  const nowIso = now.toISOString();
+  return capsules
+    .filter((c): c is CapsuleDueCandidateInput & { reopenAt: string } => c.openedAt == null && c.reopenAt != null && c.reopenAt <= nowIso)
+    .map((c) => ({
+      capsuleId: c.capsuleId,
+      userBookId: c.userBookId,
+      workId: c.workId,
+      title: c.title,
+      coverUrl: c.coverUrl,
+      coverFallbackColor: c.coverFallbackColor,
+      reopenAt: c.reopenAt,
+    }))
+    .sort((a, b) => (a.reopenAt < b.reopenAt ? -1 : a.reopenAt > b.reopenAt ? 1 : 0));
+}
+
+/**
+ * Капсула "ready", найдовше прострочена — той самий "хто найдовше чекає" принцип, що й
+ * `findStaleReadingCandidate` вище. З Фази 16 — тонка обгортка над `listDueCapsuleCandidates`
+ * (перший елемент уже відсортованого списку); поведінка НЕ змінилась.
  */
 export function findCapsuleDueCandidate(capsules: CapsuleDueCandidateInput[], now: Date): CapsuleDueCandidate | null {
-  const nowIso = now.toISOString();
-  let best: CapsuleDueCandidate | null = null;
-  for (const capsule of capsules) {
-    if (capsule.openedAt != null) continue;
-    if (capsule.reopenAt == null || capsule.reopenAt > nowIso) continue;
-    if (!best || capsule.reopenAt < best.reopenAt) {
-      best = {
-        capsuleId: capsule.capsuleId,
-        userBookId: capsule.userBookId,
-        workId: capsule.workId,
-        title: capsule.title,
-        coverUrl: capsule.coverUrl,
-        coverFallbackColor: capsule.coverFallbackColor,
-        reopenAt: capsule.reopenAt,
-      };
-    }
-  }
-  return best;
+  return listDueCapsuleCandidates(capsules, now)[0] ?? null;
 }
 
 export interface GoalCandidate {

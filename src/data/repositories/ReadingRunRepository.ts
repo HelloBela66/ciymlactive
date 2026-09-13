@@ -158,4 +158,24 @@ export const ReadingRunRepository = {
   async discard(db: SQLiteDatabase, id: string): Promise<void> {
     await db.runAsync(`UPDATE reading_run SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
   },
+
+  /**
+   * `userBookId` усіх книг, що мають ≥2 ЗАВЕРШЕНИХ (`status = 'finished'`) run — тобто книг, які
+   * реально можна порівняти на `app/reread-comparison/[workId].tsx` (`selectComparableRuns`,
+   * `useReadingRunsDetail.ts`, той самий поріг ≥2 `finished`). Фаза 16 (MEMORY HUB HIERARCHY,
+   * `docs/MEMORY_HUB.md`) додала цей метод для розділу "Перечитання" на
+   * `app/memory/index.tsx` — до цієї фази "чи є що порівняти" перевірялось лише ПОЧИНАЮЧИ з
+   * конкретної книги (Book Details/Book Memory), не як глобальний перелік. `GROUP BY ... HAVING`
+   * замість тягнути всі `reading_run` рядки й рахувати в JS — книг завжди набагато менше за
+   * рядків прочитань, але фільтрація в SQL однаково дешевша й точніша.
+   */
+  async listUserBookIdsWithMultipleFinishedRuns(db: SQLiteDatabase): Promise<string[]> {
+    const rows = await db.getAllAsync<{ user_book_id: string }>(
+      `SELECT user_book_id FROM reading_run
+       WHERE status = 'finished' AND deleted_at IS NULL
+       GROUP BY user_book_id
+       HAVING COUNT(*) >= 2`,
+    );
+    return rows.map((row) => row.user_book_id);
+  },
 };

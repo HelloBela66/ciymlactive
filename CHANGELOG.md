@@ -1,5 +1,42 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 16 — Memory hub hierarchy: «Моя пам'ять»
+
+**Дата:** 2026-09-13
+
+Аудит V1.6.1 (§44 "Пара 5") зафіксував: "Journal vs Activity History vs Memory index vs On This
+Day — чотири «стрічки минулого»... новий користувач має чотири правдоподібні відправні точки."
+Завдання Фази 16 — чітко розмежувати ролі «Мій щоденник»/«Моя пам'ять»/«Моя історія» й
+розширити «Моя пам'ять» до справжнього кросс-книжкового хабу (On This Day/due Capsules/Recall/
+Revisit Later/finished Memories/reread comparisons). Повне обґрунтування — `docs/MEMORY_HUB.md`.
+
+**Додано:**
+- `app/memory/index.tsx` — розширено з "лише перелік капсул" до хабу з п'яти розділів: «Цей
+  день у твоєму читанні» (вхід до `/on-this-day` — до цієї фази без жодного постійного входу,
+  єдиний 🔴 цього кластера в аудиті), «Час згадати» (усі due-капсули, не лише одна — водночас
+  фактичний глобальний вхід для Recall), «Повернутися пізніше» (вхід до вже наявного
+  `/journal?revisitLater=1`), «Капсули» (незмінена поведінка попереднього варіанту екрана),
+  «Перечитання» (userBooks із ≥2 завершеними прочитаннями → `/reread-comparison/[workId]`).
+- `src/features/memory/useMemoryHub.ts` — новий хук: "сирі" дані для розділів "Час згадати"/
+  "Перечитання" (due-капсули з N+1 join на деталі книги; кандидати на перечитання пакетним
+  `listWithDetailsByIds`). Розділ "Капсули" й далі йде окремим, незміненим `useMemoryIndex()`.
+- `src/data/repositories/ReadingRunRepository.ts` — новий метод
+  `listUserBookIdsWithMultipleFinishedRuns`: `userBookId` усіх книг із ≥2 `finished` run
+  (`GROUP BY ... HAVING COUNT(*) >= 2`), той самий поріг, що й `selectComparableRuns`.
+- `src/lib/homeContext.ts` — новий `listDueCapsuleCandidates` (усі due-капсули, відсортовані,
+  без обрізання до одного елемента); `findCapsuleDueCandidate` перероблена на тонку обгортку
+  над ним — поведінка Home-слоту не змінилась.
+- 10 нових тестів (741 → 751): `homeContext.test.ts` (4, `listDueCapsuleCandidates`, включно з
+  перевіркою "перший елемент той самий, що й `findCapsuleDueCandidate`"),
+  `ReadingRunRepository.test.ts` (6, `listUserBookIdsWithMultipleFinishedRuns`, включно з
+  discard/змішаними статусами/кількома книгами).
+
+**Змінено:**
+- `app/(tabs)/index.tsx` — "Моя історія" прибрана з `HOME_SHORTCUTS` (→ 3 пункти замість 4) —
+  буквальне рішення завдання Фази 16 ("«Моя історія» (secondary, доступна з Profile/More)"), не
+  самостійна ревізія ТЗ Фази 18. Лишається доступною через меню Профілю, де вже була рядком.
+- `docs/HOME_REDESIGN.md` — додано "Оновлено Фазою 16" до секції HOME SHORTCUTS.
+
 ## POLYTSIA V1.6.1, Фаза 15 — Analytics hierarchy: «Моє читання»
 
 **Дата:** 2026-09-13

@@ -233,17 +233,25 @@ interface ShortcutItem {
 }
 
 /** ТЗ Фази 18 (HOME REDESIGN §HOME SHORTCUTS): "Compact shortcuts: Мій щоденник, Моя історія,
- * Моя пам'ять, Статистика. Не роби великі cards для кожного." — рівно ці чотири пункти, у
- * тому самому порядку, що й ТЗ. Іконки — уже перевірені в застосунку: `book-outline` (сам
- * "Мій щоденник" тут раніше, до цієї фази), `time-outline`/`bar-chart-outline` (той самий
- * вибір, що й у меню Профілю, `app/(tabs)/profile/index.tsx`), `cube-outline` (той самий
- * концепт "капсули"/пам'яті, що й `app/memory/[workId].tsx`/`app/completion/[workId].tsx`).
- * `/journal`/`/history`/`/memory`/`/statistics` — `as unknown as Href` там, де локальний кеш
+ * Моя пам'ять, Статистика. Не роби великі cards для кожного." — початково рівно ці чотири
+ * пункти, у тому самому порядку, що й ТЗ. Іконки — уже перевірені в застосунку: `book-outline`
+ * (сам "Мій щоденник" тут раніше, до цієї фази), `bar-chart-outline` (той самий вибір, що й у
+ * меню Профілю, `app/(tabs)/profile/index.tsx`), `cube-outline` (той самий концепт "капсули"/
+ * пам'яті, що й `app/memory/[workId].tsx`/`app/completion/[workId].tsx`).
+ *
+ * **Оновлено Фазою 16** (MEMORY HUB HIERARCHY, `docs/MEMORY_HUB.md`) — "Моя історія" прибрана
+ * з цього переліку (→ три пункти замість чотирьох). Це ЯВНЕ, буквальне рішення завдання Фази 16
+ * ("«Моя історія» (secondary, доступна з Profile/More)"), а не самостійна ревізія ТЗ Фази 18 —
+ * той самий клас рішення, що й консолідація трьох рекомендаційних карток у Фазі 14. Демоція з
+ * Home НЕ потребує жодної нової роботи в Профілі: "Моя історія" й до цієї фази лишається
+ * окремим рядком меню Профілю (`app/(tabs)/profile/index.tsx`, `MENU_ITEMS`) — саме цей рядок
+ * тепер і є єдиним постійним входом. Аудит V1.6.1 (§44 "Пара 5") сам трактує подвійний вхід
+ * Home+Профіль як прийнятний (не 🔴), тож прибирання одного з двох — звуження, не втрата
+ * функціоналу. `/journal`/`/memory`/`/statistics` — `as unknown as Href` там, де локальний кеш
  * typed routes (`.expo/types/router.d.ts`, не в git) не завжди встигає побачити маршрут до
  * `tsc` (той самий клас питання, що й усюди в цьому файлі). */
 const HOME_SHORTCUTS: ShortcutItem[] = [
   { icon: 'book-outline', label: 'Мій щоденник', onPress: () => router.push('/journal' as unknown as Href) },
-  { icon: 'time-outline', label: 'Моя історія', onPress: () => router.push('/history' as unknown as Href) },
   { icon: 'cube-outline', label: 'Моя пам\'ять', onPress: () => router.push('/memory' as unknown as Href) },
   { icon: 'bar-chart-outline', label: 'Статистика', onPress: () => router.push('/statistics' as unknown as Href) },
 ];

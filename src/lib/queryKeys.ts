@@ -209,6 +209,13 @@ export const queryKeys = {
     // сенс, що й `home.contextCard` вище: один список капсул на весь застосунок.
     all: ['memoryIndex', 'all'] as const,
   },
+  memoryHub: {
+    // MEMORY HUB HIERARCHY, Фаза 16 (`docs/MEMORY_HUB.md`) — окремий ключ від `memoryIndex.all`
+    // вище: той самий екран (`app/memory/index.tsx`), але два НОВІ розділи ("Час згадати"/
+    // "Перечитання"), з іншим `queryFn`, тож окремий кеш-запис, той самий принцип, що й
+    // `userBooks.all` vs `userBooks.allSorted` (різні `queryFn` — ніколи один спільний ключ).
+    all: ['memoryHub', 'all'] as const,
+  },
   wrapped: {
     year: (year: number) => ['wrapped', 'year', year] as const,
   },
