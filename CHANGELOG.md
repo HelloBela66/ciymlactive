@@ -1,5 +1,37 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 7 — run-aware sessions (REREADING MODEL)
+
+**Дата:** 2026-09-13
+
+Третя частина REREADING MODEL (продовження Фаз 6/6b). Схема не змінюється — жодної нової
+міграції: реальний (не заднім числом) старт/завершення `reading_run` тепер прив'язаний до дій
+користувача, і нові `reading_session` більше не мають `reading_run_id = NULL` за замовчуванням.
+Повне обґрунтування кожного рішення — `docs/READING_RUN.md` §"Фаза 7 — run-aware sessions".
+
+**Змінено:**
+- `UserBookRepository.updateStatus` — єдина точка входу для зміни статусу книги тепер прив'язує
+  старт/завершення `reading_run` до переходу: у `reading`/`rereading` без активного run →
+  `ReadingRunRepository.start` (новий прохід); `paused` → `reading` run НЕ створює (пауза в межах
+  того самого проходу); у `finished`/`did_not_finish` з активним run → `ReadingRunRepository.finish`
+  (ідемпотентно). Обидва записи — в одній транзакції.
+- `UserBookRepository.addToLibrary` — СВІДОМО НЕ підключено (на відміну від `updateStatus`):
+  конфлікт з `useImportGoodreadsCsv.ts`, який одразу після `addToLibrary` перезаписує
+  `started_at` реальною історичною датою через `applyImportedDates` — інакше щойно створений run
+  лишився б із хибною датою старту (сьогодні замість дати імпорту). Рішення й обґрунтування —
+  `docs/READING_RUN.md`.
+- `ReadingSessionRepository.start` — нова сесія ЗАВЖДИ прив'язується до `reading_run_id`: якщо
+  активний run уже є (зазвичай створений `updateStatus`) — до нього; якщо немає (старт сесії й
+  зміна статусу — свідомо незалежні дії в цьому застосунку) — створює новий сама, в одній
+  транзакції з самою сесією. Не чіпає `user_book.status`.
+- 10 нових тестів (642 → 652): `UserBookRepository.test.ts` (6 — усі переходи run: перший старт,
+  пауза/резюм без дублю run, завершення, перечитування створює run №2, DNF створює run №3,
+  книга без run через `addToLibrary` нічого не вигадує) і `ReadingSessionRepository.test.ts`
+  (4 — прив'язка до активного run, створення нового, дві сесії поспіль без дублю run, статус
+  книги лишається незмінним).
+- `docs/READING_RUN.md` — нова секція "Фаза 7 — run-aware sessions", роадмап-таблиця звужена до
+  фаз 8-12, що лишились.
+
 ## POLYTSIA V1.6.1, Фаза 6b — reading_run_id + legacy backfill (REREADING MODEL)
 
 **Дата:** 2026-09-13

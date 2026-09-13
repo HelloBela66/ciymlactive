@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { migrateDbIfNeeded } from '@/data/db/migrationRunner';
 import { openTestDatabase } from '@/data/db/testDb';
 import { UserBookRepository } from './UserBookRepository';
+import { ReadingRunRepository } from './ReadingRunRepository';
 
 /**
  * Repository-інтеграційний тест для `UserBookRepository` — перший тест на цей репозиторій
@@ -217,6 +218,111 @@ describe('UserBookRepository.updateStatus — started_at/finished_at виста�
   it('updateStatus на неіснуючий id — no-op, не кидає виняток', async () => {
     const db = await openMigratedTestDb();
     await expect(UserBookRepository.updateStatus(db, 'nonexistent', 'reading')).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — `updateStatus` тепер прив'язує реальний
+ * старт/завершення `reading_run` до переходу статусу. Тести нижче — прямі, через
+ * `ReadingRunRepository`, окремо від тестів вище (які навмисно не чіпались, щоб лишити
+ * незмінною вже наявну перевірку started_at/finished_at).
+ */
+describe('UserBookRepository.updateStatus — прив\'язка reading_run (Фаза 7)', () => {
+  it("want_to_read → reading: створює run №1 (in_progress)", async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'run-a');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'want_to_read');
+
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+
+    const active = await ReadingRunRepository.getActiveByUserBookId(db, created.id);
+    expect(active?.runNumber).toBe(1);
+    expect(active?.status).toBe('in_progress');
+    expect(active?.startedAt).not.toBeNull();
+    expect(active?.isLegacyBackfill).toBe(false);
+  });
+
+  it("reading → paused → reading: НЕ створює новий run, лишається той самий (пауза в межах одного проходу)", async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'run-b');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'want_to_read');
+
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+    const firstRun = await ReadingRunRepository.getActiveByUserBookId(db, created.id);
+
+    await UserBookRepository.updateStatus(db, created.id, 'paused');
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+
+    const runs = await ReadingRunRepository.listByUserBookId(db, created.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.id).toBe(firstRun?.id);
+  });
+
+  it('reading → finished: завершує активний run (status=finished, finishedAt виставлено)', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'run-c');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'want_to_read');
+
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+    await UserBookRepository.updateStatus(db, created.id, 'finished');
+
+    expect(await ReadingRunRepository.getActiveByUserBookId(db, created.id)).toBeNull();
+    const runs = await ReadingRunRepository.listByUserBookId(db, created.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe('finished');
+    expect(runs[0]?.finishedAt).not.toBeNull();
+  });
+
+  it('finished → rereading: створює ДРУГИЙ run (run_number=2), перший лишається finished', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'run-d');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'want_to_read');
+
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+    await UserBookRepository.updateStatus(db, created.id, 'finished');
+    await UserBookRepository.updateStatus(db, created.id, 'rereading');
+
+    const runs = await ReadingRunRepository.listByUserBookId(db, created.id);
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.runNumber).toBe(1);
+    expect(runs[0]?.status).toBe('finished');
+    expect(runs[1]?.runNumber).toBe(2);
+    expect(runs[1]?.status).toBe('in_progress');
+  });
+
+  it('rereading → did_not_finish: завершує ДРУГИЙ run зі статусом did_not_finish; did_not_finish → reading створює ТРЕТІЙ', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'run-e');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'want_to_read');
+
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+    await UserBookRepository.updateStatus(db, created.id, 'finished');
+    await UserBookRepository.updateStatus(db, created.id, 'rereading');
+    await UserBookRepository.updateStatus(db, created.id, 'did_not_finish');
+
+    let runs = await ReadingRunRepository.listByUserBookId(db, created.id);
+    expect(runs).toHaveLength(2);
+    expect(runs[1]?.status).toBe('did_not_finish');
+    expect(runs[1]?.finishedAt).not.toBeNull();
+
+    await UserBookRepository.updateStatus(db, created.id, 'reading');
+    runs = await ReadingRunRepository.listByUserBookId(db, created.id);
+    expect(runs).toHaveLength(3);
+    expect(runs[2]?.runNumber).toBe(3);
+    expect(runs[2]?.status).toBe('in_progress');
+  });
+
+  it("книга додана напряму статусом 'reading' через addToLibrary (без run, Фаза 7 свідомо не підключає addToLibrary) → finished НІЧОГО не вигадує", async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'run-f');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+
+    expect(await ReadingRunRepository.listByUserBookId(db, created.id)).toHaveLength(0);
+
+    await expect(UserBookRepository.updateStatus(db, created.id, 'finished')).resolves.toBeUndefined();
+
+    expect(await ReadingRunRepository.listByUserBookId(db, created.id)).toHaveLength(0);
+    expect((await UserBookRepository.getById(db, created.id))?.status).toBe('finished');
   });
 });
 

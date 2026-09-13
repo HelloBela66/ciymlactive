@@ -9,6 +9,7 @@ import { WorkRepository } from './WorkRepository';
 import { AuthorRepository } from './AuthorRepository';
 import { PublisherRepository } from './PublisherRepository';
 import { TranslatorRepository } from './TranslatorRepository';
+import { ReadingRunRepository } from './ReadingRunRepository';
 
 interface UserBookRow {
   id: string;
@@ -106,6 +107,19 @@ export const UserBookRepository = {
     return row ? mapRow(row) : null;
   },
 
+  /**
+   * REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — СВІДОМО не створює `reading_run`, на
+   * відміну від `updateStatus` нижче. Причина: `useImportGoodreadsCsv.ts` викликає саме цей
+   * метод, а одразу ПІСЛЯ нього — `applyImportedDates`, який перезаписує щойно виставлений
+   * `started_at` РЕАЛЬНОЮ історичною датою з CSV. Якби `addToLibrary` тут же створював run
+   * (із `startedAt = now`, бо саме "зараз" — єдина дата, яку ця функція взагалі знає), той run
+   * лишився б із хибною датою старту (сьогодні замість реальної дати з імпорту) — саме той клас
+   * "вигаданих" даних, якого свідомо уникає backfill. Це не втрата покриття для "нових reading
+   * sessions" (ціль Фази 7): `addToLibrary` сесій не створює, а `ReadingSessionRepository.start`
+   * нижче має власний "graceful" фолбек — якщо книгу додано напряму зі статусом
+   * 'reading'/'finished' і активного run ще немає, перший реальний старт сесії (або перший
+   * подальший виклик `updateStatus`) створить його сам, із коректною на той момент датою.
+   */
   async addToLibrary(db: SQLiteDatabase, editionId: string, status: UserBookStatus): Promise<UserBook> {
     const existing = await UserBookRepository.getByEditionId(db, editionId);
     if (existing) return existing;
@@ -205,10 +219,33 @@ export const UserBookRepository = {
     const finishedAt =
       status === 'did_not_finish' ? null : current.finishedAt ?? (status === 'finished' ? now : null);
 
-    await db.runAsync(
-      `UPDATE user_book SET status = ?, started_at = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
-      [status, startedAt, finishedAt, now, id],
-    );
+    // REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — саме тут (єдина точка входу для будь-якої
+    // зміни `status`, `useUpdateUserBookStatus`) реальний старт/завершення `reading_run`
+    // прив'язується до переходу статусу. "Graceful" підхід — той самий принцип, що й усюди в цій
+    // сутності (жодного жорсткого UNIQUE, лише запит активного run):
+    //   - перехід у 'reading'/'rereading' БЕЗ уже активного run -> новий прохід (перший старт
+    //     АБО повторний після 'finished'/'did_not_finish') -> ReadingRunRepository.start.
+    //     Перехід 'paused' -> 'reading' сюди навмисно НЕ потрапляє: активний run уже є (пауза
+    //     лишається в межах того самого проходу, docs/READING_RUN.md §"Ключові рішення" п.1).
+    //   - перехід у 'finished'/'did_not_finish' З активним run -> ReadingRunRepository.finish
+    //     (ідемпотентно). Якщо активного run немає (книгу додано напряму зі статусом
+    //     'reading'/'finished' через addToLibrary, яку ця фаза СВІДОМО НЕ підключає — див.
+    //     коментар над addToLibrary нижче) — свідомо нічого не вигадуємо, той самий принцип "не
+    //     вигадувати історію", що й у 020_reading_run_backfill.ts.
+    const activeRun = await ReadingRunRepository.getActiveByUserBookId(db, id);
+
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        `UPDATE user_book SET status = ?, started_at = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
+        [status, startedAt, finishedAt, now, id],
+      );
+
+      if ((status === 'reading' || status === 'rereading') && !activeRun) {
+        await ReadingRunRepository.start(db, { userBookId: id, startedAt: now });
+      } else if ((status === 'finished' || status === 'did_not_finish') && activeRun) {
+        await ReadingRunRepository.finish(db, activeRun.id, { status, finishedAt: now });
+      }
+    });
   },
 
   async updateCurrentPage(db: SQLiteDatabase, id: string, currentPage: number): Promise<void> {

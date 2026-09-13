@@ -4,6 +4,7 @@ import { openTestDatabase } from '@/data/db/testDb';
 import { ReadingSessionRepository } from './ReadingSessionRepository';
 import { ReadingProgressRepository } from './ReadingProgressRepository';
 import { UserBookRepository } from './UserBookRepository';
+import { ReadingRunRepository } from './ReadingRunRepository';
 
 /**
  * Repository-інтеграційний тест для `ReadingSessionRepository.setReadingExperience` (ТЗ
@@ -481,5 +482,63 @@ describe('ReadingSessionRepository.setReadingExperience (Фаза 9)', () => {
     const session = await ReadingSessionRepository.getById(db, 'session-1');
     expect(session?.endPage).toBe(10);
     expect(session?.durationSeconds).toBe(600);
+  });
+});
+
+/**
+ * REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — `start()` тепер ЗАВЖДИ прив'язує сесію до
+ * якогось `ReadingRun`: або до вже активного (зазвичай створеного переходом статусу,
+ * `UserBookRepository.updateStatus`, Фаза 7), або, якщо активного немає, створює новий сама
+ * (graceful-фолбек — старт сесії й зміна статусу свідомо незалежні дії в цьому застосунку).
+ */
+describe("ReadingSessionRepository.start — прив'язка до reading_run (Фаза 7)", () => {
+  it('активний run уже існує → сесія прив\'язується до нього, новий НЕ створюється', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-run1' });
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-run1' });
+
+    const session = await ReadingSessionRepository.start(db, { userBookId: 'ub-run1', startPage: 0 });
+
+    expect(session.readingRunId).toBe(run.id);
+    const runs = await ReadingRunRepository.listByUserBookId(db, 'ub-run1');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('активного run немає → створює новий (run_number=1) і прив\'язує сесію до нього', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-run2' });
+    expect(await ReadingRunRepository.getActiveByUserBookId(db, 'ub-run2')).toBeNull();
+
+    const session = await ReadingSessionRepository.start(db, { userBookId: 'ub-run2', startPage: 0 });
+
+    expect(session.readingRunId).not.toBeNull();
+    const run = await ReadingRunRepository.getById(db, session.readingRunId as string);
+    expect(run?.runNumber).toBe(1);
+    expect(run?.status).toBe('in_progress');
+
+    const fetched = await ReadingSessionRepository.getById(db, session.id);
+    expect(fetched?.readingRunId).toBe(session.readingRunId);
+  });
+
+  it('дві сесії підряд без завершення run між ними → обидві належать тому самому run, дубль не створюється', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-run3' });
+
+    const first = await ReadingSessionRepository.start(db, { userBookId: 'ub-run3', startPage: 0 });
+    const second = await ReadingSessionRepository.start(db, { userBookId: 'ub-run3', startPage: 5 });
+
+    expect(second.readingRunId).toBe(first.readingRunId);
+    const runs = await ReadingRunRepository.listByUserBookId(db, 'ub-run3');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('створення run-фолбеком не чіпає user_book.status (свідомо поза обсягом цієї фази)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-run4', status: 'want_to_read' });
+
+    await ReadingSessionRepository.start(db, { userBookId: 'ub-run4', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-run4');
+    expect(userBook?.status).toBe('want_to_read');
   });
 });

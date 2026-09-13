@@ -5,6 +5,7 @@ import { computeElapsedMs, isCurrentlyPaused } from '@/lib/sessionTiming';
 import type { PausedInterval, ReadingSession } from '@/types/readingSession';
 import { UserBookRepository } from './UserBookRepository';
 import { ReadingProgressRepository } from './ReadingProgressRepository';
+import { ReadingRunRepository } from './ReadingRunRepository';
 
 interface ReadingSessionRow {
   id: string;
@@ -82,6 +83,21 @@ export const ReadingSessionRepository = {
     return row ? mapRow(row) : null;
   },
 
+  /**
+   * REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — нова сесія ЗАВЖДИ належить якомусь
+   * `ReadingRun`. "Graceful" підхід, той самий принцип, що й `getActiveSession` вище /
+   * `ReadingRunRepository.getActiveByUserBookId`: активний run шукається запитом, а не жорстким
+   * UNIQUE. Основний шлях створення run — перехід `user_book.status` у 'reading'/'rereading'
+   * (`UserBookRepository.updateStatus`, підключено тією самою Фазою 7) — на момент старту сесії
+   * активний run уже майже завжди існує. Але старт сесії й зміна статусу — свідомо незалежні дії
+   * (`ReadingControls`/`SessionLaunchScreen` ніколи не викликають `updateStatus`, книгу можна
+   * почати читати, лишаючи статус 'want_to_read'), тож без запасного "створити, якщо немає" тут
+   * сесія могла б лишитись без run у цілком легітимному сценарії. Цей фолбек НЕ чіпає
+   * `user_book.status` — лишає його свідомо незмінним, як і раніше (не розширює обсяг цієї фази
+   * на UX перемикання статусу). Обидва записи (можливе створення run + сама сесія) — в одній
+   * транзакції: `ReadingRunRepository.start`/`finish` не відкривають власних транзакцій, тож
+   * безпечно викликати їх усередині цієї.
+   */
   async start(
     db: SQLiteDatabase,
     params: { userBookId: string; startPage: number; goalMinutes?: number | null },
@@ -89,13 +105,27 @@ export const ReadingSessionRepository = {
     const id = generateId();
     const now = nowIso();
 
-    await db.runAsync(
-      `INSERT INTO reading_session (
-         id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
-         start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at
-       ) VALUES (?, ?, ?, NULL, ?, '[]', ?, NULL, NULL, NULL, 0, ?, ?)`,
-      [id, params.userBookId, now, params.goalMinutes ?? null, params.startPage, now, now],
-    );
+    const existingActiveRun = await ReadingRunRepository.getActiveByUserBookId(db, params.userBookId);
+    let readingRunId = existingActiveRun?.id ?? null;
+
+    await db.withTransactionAsync(async () => {
+      if (!readingRunId) {
+        const newRun = await ReadingRunRepository.start(db, {
+          userBookId: params.userBookId,
+          startedAt: now,
+        });
+        readingRunId = newRun.id;
+      }
+
+      await db.runAsync(
+        `INSERT INTO reading_session (
+           id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
+           start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at,
+           reading_run_id
+         ) VALUES (?, ?, ?, NULL, ?, '[]', ?, NULL, NULL, NULL, 0, ?, ?, ?)`,
+        [id, params.userBookId, now, params.goalMinutes ?? null, params.startPage, now, now, readingRunId],
+      );
+    });
 
     return {
       id,
@@ -112,9 +142,7 @@ export const ReadingSessionRepository = {
       isEdited: false,
       createdAt: now,
       updatedAt: now,
-      // REREADING MODEL, Фаза 6b (`docs/READING_RUN.md`) — нові сесії поки завжди без run;
-      // реальне підключення до конкретного `ReadingRun` — Фаза 7, свідомо не ця.
-      readingRunId: null,
+      readingRunId,
     };
   },
 
