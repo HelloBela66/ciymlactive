@@ -1,5 +1,37 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 6 — ReadingRun: нова сутність для REREADING MODEL
+
+**Дата:** 2026-09-13
+
+`docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 23, "REREADING MODEL — критичний розділ") назвав
+відсутність окремої сутності "прочитання" найбільшою структурною прогалиною архітектури V1.6:
+`user_book.status = 'rereading'` — лише мутабельний прапорець, без жодного запису історії.
+Наслідки, підтверджені CODE VERIFIED: Wrapped/статистика недораховують перечитувані книги,
+Book Memory й Before/After втрачають дані попереднього прочитання при `upsert`, Capsule
+свідомо не пропонується для перечитування. Докладний розбір — новий `docs/READING_RUN.md`.
+
+Ця фаза — лише сама сутність. Жоден інший файл коду її не викликає: **нуль зміни продуктової
+поведінки.** Підключення (реальний старт/завершення run, `reading_session.reading_run_id`,
+FK від Book Memory/Before-After/Capsule/DNF) — окремими наступними фазами (6b, 7-12),
+дорожня карта зафіксована в `docs/READING_RUN.md`.
+
+**Додано:**
+- `019_reading_run.ts` — нова таблиця `reading_run`: `run_number` (монотонний, ніколи не
+  перевикористовується), `status` (`in_progress`/`finished`/`did_not_finish` — СВІДОМО не
+  дублює `UserBookStatus`), `is_legacy_backfill` (зарезервовано для Фази 6b), `deleted_at`.
+  Немає жорсткого DB-обмеження "лише один `in_progress` run на книгу" — та сама
+  "graceful"-філософія, що й перевірена тестами Фази 5 `ReadingSessionRepository.getActiveSession`.
+- `src/types/readingRun.ts` — Zod-схема `ReadingRun`/`ReadingRunStatus`.
+- `src/data/repositories/ReadingRunRepository.ts` — `getById`, `listByUserBookId`,
+  `getActiveByUserBookId`, `start`, `finish` (ідемпотентний), `discard`.
+- `src/data/repositories/ReadingRunRepository.test.ts` — 14 нових тестів (622 → 636):
+  нумерація run'ів (загальна й окремо на книгу), "активний" run без DB-корупції при кількох
+  незавершених, ідемпотентність `finish`, `discard` + монотонність номерів крізь видалення,
+  `ON DELETE CASCADE` разом із `user_book`, пряма перевірка `UNIQUE(user_book_id, run_number)`.
+- `docs/READING_RUN.md` — архітектурне рішення й дорожня карта підключення для Фаз 6b-12.
+- `docs/DATABASE.md` — запис міграції 019.
+
 ## POLYTSIA V1.6.1, Фаза 5 — прямі тести на транзакційну серцевину ReadingSession
 
 **Дата:** 2026-09-13

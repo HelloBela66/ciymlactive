@@ -186,6 +186,21 @@ sync/catalog backend, але жодна читацька дія (старт се
     композитного `PRIMARY KEY (shelf_id, user_book_id)` у `shelf_book`, тож
     `ShelfRepository.listShelfIdsForUserBook`/`listNamesByUserBookIds` (обидва фільтрують саме
     за ним) не можуть використати цей PK як індекс (SQLite leftmost-prefix rule).
+19. **019_reading_run** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 6) — `docs/READING_RUN.md`.
+    Нова таблиця `reading_run`: одне конкретне "проходження" книги (перше читання,
+    перечитування №2, №3...), відокремлене від `user_book.status` (поточний UI-стан картки) —
+    закриває прогалину, яку `docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 23) назвав "найбільшою
+    структурною прогалиною архітектури V1.6 щодо перечитування". `status` СВІДОМО не дублює
+    `UserBookStatus` — лише термінальний результат (`in_progress`/`finished`/`did_not_finish`).
+    `run_number` — монотонний, ніколи не перевикористовується (`UNIQUE(user_book_id,
+    run_number)` без урахування `deleted_at`), щоб лишатись стабільним посиланням для
+    майбутніх FK з Book Memory/Before-After/Capsule/DNF (Фази 8-11). `is_legacy_backfill` —
+    зарезервовано для Фази 6b, ця міграція ним нічого не заповнює. Немає жорсткого
+    DB-обмеження "лише один `in_progress` run на книгу" — свідома відповідність тому самому
+    "graceful, не UNIQUE-індекс" підходу, що вже перевірено тестами
+    `ReadingSessionRepository.getActiveSession` (Фаза 5). Ця фаза — лише сама сутність, жоден
+    інший файл її ще не викликає (нуль зміни продуктової поведінки); підключення — окремими
+    наступними фазами, докладна дорожня карта — `docs/READING_RUN.md`.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12
