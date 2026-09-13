@@ -16,6 +16,7 @@ import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { useBookCapsule, useMarkCapsuleOpened } from '@/features/memory/useBookCapsule';
 import { useCreateCapsuleRecall } from '@/features/memory/useCapsuleRecall';
 import { formatTimeSinceFinished, normalizeRecallText } from '@/lib/recall';
+import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries } from '@/lib/spoilerSafe';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import type { JournalEntry } from '@/types/journalEntry';
 import type { NoteCategory } from '@/types/noteCategory';
@@ -68,6 +69,17 @@ function RecallEntryLine({
  *
  * Вимагає вже існуючу капсулу (recall — "На основі Capsule + Memory", без капсули згадувати
  * нема чого; точки входу вже самі показують «Згадати книгу» лише коли капсула є).
+ *
+ * SPOILER-SAFE MODE (ТЗ Фази 3 V1.6.1, аудит V1.6 §42 — раніше цей екран не фільтрував нічого).
+ * `canCreateCapsule` дозволяє СТВОРИТИ капсулу лише для `status === 'finished'`
+ * (`src/lib/bookCapsule.ts`), але вже ІСНУЮЧА капсула лишається доступною й пізніше — зокрема
+ * коли власник почав ПЕРЕЧИТУВАТИ ту саму книгу (`status` тоді знову `'rereading'`,
+ * `isSpoilerSafeActive` — активний): без фільтра улюблені моменти/цитати/думки з ПЕРШОГО
+ * прочитання (і `linkedEntry`, обраний під час створення капсули) могли б показати щось "далі"
+ * за поточний прогрес повторного читання. Той самий `filterSpoilerSafeJournalEntries`, що й на
+ * Book Details/Recap — записи не видаляються, лише не потрапляють у списки нижче; секція
+ * "Момент, до якого хотів повернутися" просто не рендериться, якщо саме `linkedEntry` прихований
+ * (та сама умова видимості `{linkedEntry ? ... : null}`, що вже була).
  */
 export default function RecallScreen() {
   const theme = useTheme();
@@ -87,18 +99,31 @@ export default function RecallScreen() {
   const [memoryText, setMemoryText] = useState('');
   const [revealed, setRevealed] = useState(false);
 
+  // SPOILER-SAFE MODE — див. коментар над екраном: капсула/recall лишаються доступні й під час
+  // повторного читання тієї самої книги, тож усе, що показує реальний текст запису, іде через
+  // відфільтрований `visibleEntries`, а не сирий `allEntries`.
+  const spoilerSafeActive = data?.userBook
+    ? isSpoilerSafeActive(data.userBook.status, data.userBook.spoilerSafeEnabled)
+    : false;
+  const currentPage = data?.userBook?.currentPage ?? null;
+  const pageCount = data?.primaryEdition?.pageCount ?? null;
+  const visibleEntries = useMemo(
+    () => filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, { currentPage, pageCount }),
+    [allEntries, spoilerSafeActive, currentPage, pageCount],
+  );
+
   const linkedEntry = useMemo(() => {
-    if (!capsule?.journalEntryId || !allEntries) return null;
-    return allEntries.find((entry) => entry.id === capsule.journalEntryId) ?? null;
-  }, [capsule, allEntries]);
+    if (!capsule?.journalEntryId) return null;
+    return visibleEntries.find((entry) => entry.id === capsule.journalEntryId) ?? null;
+  }, [capsule, visibleEntries]);
 
   // Улюблене — окрема секція; цитати/думки — те, що лишилось, без дублю в двох секціях одразу
   // (той самий "кожен запис рівно в одній секції" вибір, що явно спрощує reveal-крок).
   const favoriteMoments = useMemo(
-    () => (allEntries ?? []).filter((entry) => entry.isFavorite).slice(0, MAX_ENTRIES_PER_SECTION),
-    [allEntries],
+    () => visibleEntries.filter((entry) => entry.isFavorite).slice(0, MAX_ENTRIES_PER_SECTION),
+    [visibleEntries],
   );
-  const remainingEntries = useMemo(() => (allEntries ?? []).filter((entry) => !entry.isFavorite), [allEntries]);
+  const remainingEntries = useMemo(() => visibleEntries.filter((entry) => !entry.isFavorite), [visibleEntries]);
   const quotes = useMemo(
     () => remainingEntries.filter((entry) => entry.kind === 'quote').slice(0, MAX_ENTRIES_PER_SECTION),
     [remainingEntries],

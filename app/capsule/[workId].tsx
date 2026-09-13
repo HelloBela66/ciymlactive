@@ -17,6 +17,7 @@ import { useJournalEntries } from '@/features/journal/useJournal';
 import { useBookCapsule, useRemoveBookCapsule } from '@/features/memory/useBookCapsule';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
+import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries } from '@/lib/spoilerSafe';
 
 /** "11 вересня 2026" — той самий формат, що й дата завершення на `app/completion/[workId].tsx`,
  * лише завжди з роком (капсула переглядається, можливо, роки по тому — контекст поточного
@@ -35,6 +36,12 @@ function formatFullDate(iso: string): string {
  * (доступний з "Переглянути деталі" на `BookCapsuleSection`), відмінний від повноцінного
  * recall-досвіду «Згадати книгу» (`app/recall/[workId].tsx`, Фаза 5 ТЗ), який єдиний проставляє
  * `openedAt` — докладніше `docs/RECALL.md` §Відмінність від перегляду капсули.
+ *
+ * SPOILER-SAFE MODE (ТЗ Фази 3 V1.6.1, аудит V1.6 §42) — той самий випадок, що й
+ * `app/recall/[workId].tsx`: капсулу можна СТВОРИТИ лише для `status === 'finished'`
+ * (`canCreateCapsule`), але вже існуюча лишається доступною й під час подальшого ПЕРЕЧИТУВАННЯ
+ * тієї самої книги, коли `isSpoilerSafeActive` знову активний — `linkedEntry` тому шукається у
+ * відфільтрованому списку, не в сирому `allEntries`.
  */
 export default function BookCapsuleScreen() {
   const theme = useTheme();
@@ -48,10 +55,20 @@ export default function BookCapsuleScreen() {
   const categoriesById = categoriesToMap(categories);
   const removeCapsule = useRemoveBookCapsule();
 
+  const spoilerSafeActive = data?.userBook
+    ? isSpoilerSafeActive(data.userBook.status, data.userBook.spoilerSafeEnabled)
+    : false;
+  const currentPage = data?.userBook?.currentPage ?? null;
+  const pageCount = data?.primaryEdition?.pageCount ?? null;
+  const visibleEntries = useMemo(
+    () => filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, { currentPage, pageCount }),
+    [allEntries, spoilerSafeActive, currentPage, pageCount],
+  );
+
   const linkedEntry = useMemo(() => {
-    if (!capsule?.journalEntryId || !allEntries) return null;
-    return allEntries.find((entry) => entry.id === capsule.journalEntryId) ?? null;
-  }, [capsule, allEntries]);
+    if (!capsule?.journalEntryId) return null;
+    return visibleEntries.find((entry) => entry.id === capsule.journalEntryId) ?? null;
+  }, [capsule, visibleEntries]);
 
   const handleEdit = () => {
     router.push({ pathname: '/capsule/[workId]/edit', params: { workId } } as unknown as Href);

@@ -222,3 +222,85 @@ describe('JournalRepository — «Повернутися пізніше» (Фа�
     expect(book2).toEqual([]);
   });
 });
+
+/**
+ * ТЗ Фази 3 V1.6.1 (аудит V1.6 §42 — Personal Search і Global Journal раніше НЕ застосовували
+ * жодної spoiler-safe фільтрації, на відміну від однокнижних екранів). `listFeedPage` (Global
+ * Journal) і `searchFeed` (Personal Search) тепер приховують записи, що лежать попереду
+ * поточного прогресу книги, що активно читається/перечитується з увімкненим прапорцем —
+ * той самий інваріант (`isSpoilerHidden`, `src/lib/spoilerSafe.ts`), що й на Book Details.
+ */
+describe('JournalRepository — spoiler-safe фільтрація багатокнижних стрічок (Фаза 3 V1.6.1)', () => {
+  async function seedSpoilerScenario(db: SQLiteDatabase): Promise<void> {
+    // book-safe: активно читається, "без спойлерів" увімкнено, зараз на с. 50 — запис попереду
+    // (с. 300) має ховатись, запис позаду (с. 10) — лишатись видимим.
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-safe',
+      'Книга з активним spoiler-safe',
+      D1,
+      D1,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at, page_count) VALUES (?,?,?,?,?,?,?,?)`,
+      ['edition-safe', 'work-safe', 'Книга з активним spoiler-safe', 'uk', 'paperback', D1, D1, 400],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, spoiler_safe_enabled, added_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['user_book-safe', 'edition-safe', 'reading', 50, 1, D1, D1],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, page, text, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+      ['note-ahead', 'user_book-safe', 'thought', 300, 'Спойлер з кінця книги.', '[]', D2, D2],
+    );
+    await db.runAsync(
+      `INSERT INTO quote (id, user_book_id, edition_id, page, text, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['quote-behind', 'user_book-safe', 'edition-safe', 10, 'Цитата з початку книги.', D3, D3],
+    );
+
+    // book-disabled: той самий статус/прогрес, але прапорець вимкнено власником — нічого не
+    // повинно ховатись, попри активне читання й запис попереду.
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-disabled',
+      'Книга з вимкненим spoiler-safe',
+      D1,
+      D1,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at, page_count) VALUES (?,?,?,?,?,?,?,?)`,
+      ['edition-disabled', 'work-disabled', 'Книга з вимкненим spoiler-safe', 'uk', 'paperback', D1, D1, 400],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, spoiler_safe_enabled, added_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['user_book-disabled', 'edition-disabled', 'reading', 50, 0, D1, D1],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, page, text, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+      ['note-disabled-ahead', 'user_book-disabled', 'thought', 300, 'Не спойлер — вимкнено власником.', '[]', D4, D4],
+    );
+  }
+
+  it('listFeedPage (Мій щоденник): ховає запис попереду прогресу активної книги, лишає позаду й з вимкненим прапорцем', async () => {
+    const db = await openMigratedTestDb();
+    await seedSpoilerScenario(db);
+
+    const feed = await JournalRepository.listFeedPage(db);
+    const ids = feed.items.map((i) => i.id);
+    expect(ids).not.toContain('note-ahead');
+    expect(ids).toContain('quote-behind');
+    expect(ids).toContain('note-disabled-ahead');
+  });
+
+  it('searchFeed (Особистий пошук): та сама фільтрація для notes/quotes окремо', async () => {
+    const db = await openMigratedTestDb();
+    await seedSpoilerScenario(db);
+
+    const bySpoilerText = await JournalRepository.searchFeed(db, 'кінця');
+    expect(bySpoilerText.notes).toEqual([]);
+
+    const byVisibleText = await JournalRepository.searchFeed(db, 'початку');
+    expect(byVisibleText.quotes.map((q) => q.id)).toEqual(['quote-behind']);
+
+    const byDisabledText = await JournalRepository.searchFeed(db, 'вимкнено власником');
+    expect(byDisabledText.notes.map((n) => n.id)).toEqual(['note-disabled-ahead']);
+  });
+});

@@ -18,6 +18,13 @@ import type { OnThisDaySummary } from '@/types/onThisDay';
  * методи, що й `useLibraryByStatus` (Бібліотека, Home "Зараз читаєш") — жодного нового
  * repository-методу заради spoiler-мапи не додано (`applySpoilerRules` у `src/lib/onThisDay.ts`
  * пояснює, чому мапа обмежена саме цими двома статусами).
+ *
+ * ВИПРАВЛЕННЯ (ТЗ Фази 3 V1.6.1, аудит V1.6 §42) — раніше сюди потрапляли ВСІ книги зі статусом
+ * reading/rereading незалежно від `user_book.spoilerSafeEnabled`: власник міг вимкнути "режим
+ * без спойлерів" саме для цієї книги (`app/work/[workId].tsx`, перемикач), а On This Day все
+ * одно ховав записи попереду прогресу — прапорець ігнорувався. Тепер книга потрапляє в
+ * `activePageByWorkId` лише коли `spoilerSafeEnabled === true`, той самий інваріант, що й
+ * `isSpoilerSafeActive` (`src/lib/spoilerSafe.ts`), яким керуються всі інші поверхні.
  */
 export function useOnThisDay() {
   const now = new Date();
@@ -43,6 +50,7 @@ export function useOnThisDay() {
         ]);
         const activePageByWorkId = new Map<string, number>();
         for (const userBook of [...reading, ...rereading]) {
+          if (!userBook.spoilerSafeEnabled) continue;
           activePageByWorkId.set(userBook.work.id, userBook.currentPage);
         }
         summary = applySpoilerRules(summary, activePageByWorkId);

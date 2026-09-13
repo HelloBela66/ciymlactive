@@ -1,4 +1,5 @@
 import { format, parseISO } from 'date-fns';
+import { isAheadOfCurrentProgress } from './spoilerSafe';
 import type { OnThisDayRawEvent } from '@/data/repositories/OnThisDayRepository';
 import type {
   OnThisDayJournalPreview,
@@ -231,15 +232,25 @@ export function selectHomePrimaryMemory(
 }
 
 /**
- * П.17 ТЗ (SPOILER SAFETY) — самодостатня, спрощена евристика Фази 3: повноцінний "spoiler-safe
- * mode" — окрема майбутня Фаза 12 ТЗ, якої ще немає. Тут: якщо конкретна книга спогаду ЗАРАЗ
- * активно читається/перечитується (`activePageByWorkId` містить її `workId` — заповнюється
- * викликаючим кодом лише зі статусів 'reading'/'rereading', книг "завершено" там немає), і
- * запис щоденника прив'язаний до сторінки, яка лежить ДАЛІ за поточний прогрес користувача —
- * текст цього запису ховається (позначається `hidden`, `text` очищується), решта картки
- * (сесія/старт/фініш) лишається видимою — сторінки самі по собі не "спойлер". Запис БЕЗ
- * прив'язаної сторінки ніколи не ховається (немає надійного способу визначити, чи він "далі",
- * п.15 ТЗ — "не вигадуй" там, де схема не дає точної відповіді).
+ * П.17 ТЗ (SPOILER SAFETY) — Фаза 3 V1.6.1 (`docs/SPOILER_SAFE.md`): раніше це була "самодостатня,
+ * спрощена евристика" з власним `entry.page > currentPage` порівнянням, що ДУБЛЮВАЛО (а не
+ * перевикористовувало) логіку `src/lib/spoilerSafe.ts` — тепер порівняння позицій іде через
+ * спільний `isAheadOfCurrentProgress` (той самий консервативний "не можу довести → не ховати"
+ * інваріант, page-first/percent-fallback), щоб уся кодова база мала РІВНО ОДНЕ визначення
+ * "цей запис попереду поточного прогресу", а не два, що можуть розійтися. `progressPercent` тут
+ * завжди `null` з обох боків (`OnThisDayRepository.listByMonthDay` не тягне цю колонку — On This
+ * Day історично лише page-based, і розширення схеми запиту виходить за межі цього фазового
+ * фікса) — тож фактична поведінка порівняно зі старою версією НЕ змінюється, змінюється лише
+ * те, що обчислення тепер в ОДНОМУ місці.
+ *
+ * Якщо конкретна книга спогаду ЗАРАЗ активно читається/перечитується (`activePageByWorkId`
+ * містить її `workId` — заповнюється викликаючим кодом (`useOnThisDay.ts`) лише зі статусів
+ * 'reading'/'rereading' І лише коли `user_book.spoiler_safe_enabled` увімкнено для тієї книги
+ * (виправлення реального багу — раніше прапорець ігнорувався, "без спойлерів" був ефективно
+ * завжди-на для активних книг), і запис щоденника прив'язаний до сторінки, яка лежить ДАЛІ за
+ * поточний прогрес користувача — текст цього запису ховається (позначається `hidden`, `text`
+ * очищується), решта картки (сесія/старт/фініш) лишається видимою. Запис БЕЗ прив'язаної
+ * сторінки ніколи не ховається (п.15 ТЗ — "не вигадуй" там, де схема не дає точної відповіді).
  */
 export function applySpoilerRules(
   summary: OnThisDaySummary,
@@ -255,7 +266,11 @@ export function applySpoilerRules(
 
       let changed = false;
       const journalEntries = memory.journalEntries.map((entry) => {
-        if (entry.page != null && entry.page > currentPage) {
+        const ahead = isAheadOfCurrentProgress(
+          { page: entry.page, progressPercent: null },
+          { currentPage, pageCount: null },
+        );
+        if (ahead) {
           changed = true;
           return { ...entry, text: '', hidden: true };
         }

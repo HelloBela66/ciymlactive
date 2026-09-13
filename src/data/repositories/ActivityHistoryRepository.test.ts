@@ -220,3 +220,63 @@ describe('ActivityHistoryRepository.listRecent', () => {
     expect(await ActivityHistoryRepository.listRecent(db)).toEqual([]);
   });
 });
+
+/**
+ * ТЗ Фази 3 V1.6.1 (аудит V1.6 §42 — Activity History показувала `entryText` для
+ * `journal_entry`/`quote` без жодної spoiler-safe перевірки, на відміну від однокнижних
+ * екранів). Лише ці два типи подій несуть текст запису — решта шести (сесія/старт/фініш/
+ * додавання/оцінка/полиця) не спойлер за визначенням і тому не фільтруються.
+ */
+describe('ActivityHistoryRepository.listRecent — spoiler-safe фільтрація (Фаза 3 V1.6.1)', () => {
+  const T1 = '2026-02-01T10:00:00.000Z';
+  const T2 = '2026-02-02T10:00:00.000Z';
+  const T3 = '2026-02-03T10:00:00.000Z';
+
+  async function seedOneBookWithAheadAndBehindEntries(
+    db: SQLiteDatabase,
+    spoilerSafeEnabled: 0 | 1,
+  ): Promise<void> {
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-1',
+      'Книга',
+      T1,
+      T1,
+    ]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at, page_count) VALUES (?,?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга', 'uk', 'paperback', T1, T1, 400],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, spoiler_safe_enabled, added_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['user_book-1', 'edition-1', 'reading', 50, spoilerSafeEnabled, T1, T1],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, page, text, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+      ['note-ahead', 'user_book-1', 'thought', 300, 'Спойлер з кінця.', '[]', T2, T2],
+    );
+    await db.runAsync(
+      `INSERT INTO quote (id, user_book_id, edition_id, page, text, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['quote-behind', 'user_book-1', 'edition-1', 10, 'Цитата з початку.', T3, T3],
+    );
+  }
+
+  it('ховає journal_entry/quote попереду прогресу активної книги з увімкненим прапорцем', async () => {
+    const db = await openMigratedTestDb();
+    await seedOneBookWithAheadAndBehindEntries(db, 1);
+
+    const events = await ActivityHistoryRepository.listRecent(db);
+    const ids = events.map((e) => e.id);
+    expect(ids).not.toContain('note-ahead');
+    expect(ids).toContain('quote-behind');
+  });
+
+  it('нічого не ховає, коли власник вимкнув прапорець для цієї книги', async () => {
+    const db = await openMigratedTestDb();
+    await seedOneBookWithAheadAndBehindEntries(db, 0);
+
+    const events = await ActivityHistoryRepository.listRecent(db);
+    const ids = events.map((e) => e.id);
+    expect(ids).toContain('note-ahead');
+    expect(ids).toContain('quote-behind');
+  });
+});

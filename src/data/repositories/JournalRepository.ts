@@ -1,6 +1,8 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { isSpoilerHidden } from '@/lib/spoilerSafe';
 import type { JournalEntry, JournalEntryCursor, JournalEntryType, JournalFeedEntry } from '@/types/journalEntry';
 import type { NoteType } from '@/types/note';
+import type { UserBookStatus } from '@/types/userBook';
 
 interface JournalUnionRow {
   id: string;
@@ -85,13 +87,23 @@ function mapRow(row: JournalUnionRow): JournalEntry {
   };
 }
 
-/** Додаткові колонки, які `listFeedPage` приєднує через JOIN — див. коментар там-таки. */
+/** Додаткові колонки, які `listFeedPage`/`searchFeed` приєднують через JOIN — див. коментар
+ * там-таки. `ub_status`/`ub_spoiler_safe_enabled`/`ub_current_page`/`edition_page_count` —
+ * ТЗ Фази 3 V1.6.1 (центральна spoiler-safe policy): багатокнижні стрічки змішують записи
+ * різних книг у ЄДИНОМУ запиті, тож контекст для `isSpoilerHidden` (`src/lib/spoilerSafe.ts`)
+ * зручніше й дешевше (нуль додаткових round-trip'ів до SQLite) отримати тим самим JOIN'ом, що
+ * вже й так приєднує `user_book`/`edition`/`work` для назви й обкладинки книги, ніж окремим
+ * батч-запитом за списком `userBookId` — рядок уже несе все необхідне. */
 interface FeedJoinRow {
   work_id: string;
   work_title: string;
   cover_url: string | null;
   cover_fallback_color: string | null;
   category_label: string | null;
+  ub_status: string;
+  ub_spoiler_safe_enabled: number;
+  ub_current_page: number;
+  edition_page_count: number | null;
 }
 
 function mapFeedRow(row: JournalUnionRow & FeedJoinRow): JournalFeedEntry {
@@ -103,6 +115,26 @@ function mapFeedRow(row: JournalUnionRow & FeedJoinRow): JournalFeedEntry {
     coverFallbackColor: row.cover_fallback_color,
     categoryLabel: row.category_label,
   };
+}
+
+/**
+ * ТЗ Фази 3 V1.6.1 — той самий централізований `isSpoilerHidden`, що й усі інші поверхні
+ * (`src/lib/spoilerSafe.ts`), застосований до рядка ДО мапінгу в публічний `JournalFeedEntry`
+ * (який навмисно НЕ несе службові поля статусу/прапорця книги — це деталь реалізації фільтра,
+ * не частина контракту типу, яким користуються екрани). Приховані записи не видаляються з БД
+ * і не позначаються — просто не потрапляють у масив `items`, той самий "фільтруй уже
+ * завантажене" підхід, що й однокнижні `filterSpoilerSafeJournalEntries`.
+ */
+function isFeedRowSpoilerHidden(row: JournalUnionRow & FeedJoinRow): boolean {
+  return isSpoilerHidden(
+    { page: row.page, progressPercent: row.progress_percent },
+    {
+      status: row.ub_status as UserBookStatus,
+      spoilerSafeEnabled: row.ub_spoiler_safe_enabled === 1,
+      currentPage: row.ub_current_page,
+      pageCount: row.edition_page_count,
+    },
+  );
 }
 
 export interface JournalListPageOptions {
@@ -396,7 +428,9 @@ export const JournalRepository = {
                     t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                     t.created_at AS created_at, t.updated_at AS updated_at,
                     w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
-                    w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label
+                    w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label,
+                    ub.status AS ub_status, ub.spoiler_safe_enabled AS ub_spoiler_safe_enabled,
+                    ub.current_page AS ub_current_page, e.page_count AS edition_page_count
                   FROM note t${bookJoin} ${categoryJoin}
                   WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
@@ -438,7 +472,9 @@ export const JournalRepository = {
                     t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                     t.created_at AS created_at, t.updated_at AS updated_at,
                     w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
-                    w.cover_fallback_color AS cover_fallback_color, NULL AS category_label
+                    w.cover_fallback_color AS cover_fallback_color, NULL AS category_label,
+                    ub.status AS ub_status, ub.spoiler_safe_enabled AS ub_spoiler_safe_enabled,
+                    ub.current_page AS ub_current_page, e.page_count AS edition_page_count
                   FROM quote t${bookJoin}
                   WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
@@ -479,9 +515,17 @@ export const JournalRepository = {
     const rows = await db.getAllAsync<JournalUnionRow & FeedJoinRow>(sql, params);
     const hasMore = rows.length > limit;
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
-    const items = pageRows.map(mapFeedRow);
-    const last = items[items.length - 1];
-    const nextCursor = hasMore && last ? { createdAt: last.createdAt, id: last.id } : null;
+    // ТЗ Фази 3 V1.6.1 — фільтр застосовується ДО мапінгу в публічний тип, а курсор
+    // (`nextCursor`) береться з ОСТАННЬОГО СИРОГО рядка сторінки (`pageRows`), а не з останнього
+    // ВИДИМОГО (`items` після фільтра): інакше приховані рядки в хвості сторінки випали б із
+    // діапазону курсора назавжди (курсор `created_at < ?` — виключний, тож курсор на видиміший,
+    // ранішому рядку пропустив би прихований(і) рядок(и) між ним і справжнім кінцем сторінки).
+    // Курсор на СИРОМУ останньому рядку максимум спричиняє повторний (але безпечний,
+    // ідемпотентний) перефільтр уже баченого прихованого хвоста на наступній сторінці — приховані
+    // рядки й так ніколи не мали бути видимі.
+    const lastRawRow = pageRows[pageRows.length - 1];
+    const items = pageRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow);
+    const nextCursor = hasMore && lastRawRow ? { createdAt: lastRawRow.created_at, id: lastRawRow.id } : null;
 
     return { items, nextCursor };
   },
@@ -525,7 +569,9 @@ export const JournalRepository = {
                 t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                 t.created_at AS created_at, t.updated_at AS updated_at,
                 w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
-                w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label
+                w.cover_fallback_color AS cover_fallback_color, nc.label AS category_label,
+                ub.status AS ub_status, ub.spoiler_safe_enabled AS ub_spoiler_safe_enabled,
+                ub.current_page AS ub_current_page, e.page_count AS edition_page_count
          FROM note t${bookJoin} ${categoryJoin}
          WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL
            AND t.text LIKE ?
@@ -540,7 +586,9 @@ export const JournalRepository = {
                 t.is_favorite AS is_favorite, t.revisit_later AS revisit_later, t.reaction AS reaction,
                 t.created_at AS created_at, t.updated_at AS updated_at,
                 w.id AS work_id, w.title AS work_title, e.cover_url AS cover_url,
-                w.cover_fallback_color AS cover_fallback_color, NULL AS category_label
+                w.cover_fallback_color AS cover_fallback_color, NULL AS category_label,
+                ub.status AS ub_status, ub.spoiler_safe_enabled AS ub_spoiler_safe_enabled,
+                ub.current_page AS ub_current_page, e.page_count AS edition_page_count
          FROM quote t${bookJoin}
          WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL
            AND (t.text LIKE ? OR t.comment LIKE ?)
@@ -550,7 +598,14 @@ export const JournalRepository = {
       ),
     ]);
 
-    return { notes: noteRows.map(mapFeedRow), quotes: quoteRows.map(mapFeedRow) };
+    // ТЗ Фази 3 V1.6.1 (аудит V1.6 §42 — Personal Search раніше не фільтрував жодного зі своїх
+    // результатів щоденника/цитат за spoiler-safe режимом книги). `searchFeed` без курсора/
+    // пагінації (`limit=10`, "швидка знахідка", докладніше — коментар над методом) — фільтр тут
+    // просто звужує масив, без нюансів `listFeedPage`'s keyset-курсора вище.
+    return {
+      notes: noteRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow),
+      quotes: quoteRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow),
+    };
   },
 
   /**

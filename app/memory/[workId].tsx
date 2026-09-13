@@ -27,7 +27,7 @@ import { useGenresForWork } from '@/features/book-details/useGenres';
 import { useBookMemory, useSetBookMemory } from '@/features/memory/useBookMemory';
 import { useBookCapsule } from '@/features/memory/useBookCapsule';
 import { useLoreEntities } from '@/features/lore/useLoreEntities';
-import { isSpoilerSafeActive, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
+import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries, filterSpoilerSafeLoreEntities } from '@/lib/spoilerSafe';
 import { usePreReadingReflection } from '@/features/memory/usePreReadingReflection';
 import { canCreateCapsule } from '@/lib/bookCapsule';
 import { pickBeforeCardText } from '@/lib/beforeAfter';
@@ -43,6 +43,19 @@ import type { PreReadingReflection } from '@/types/preReadingReflection';
 
 const log = createLogger('app/memory');
 
+/**
+ * SPOILER-SAFE MODE (ТЗ Фази 3 V1.6.1, аудит V1.6 §42.3) — цей екран (картка-спогад +
+ * `JournalTimeline` шкала) раніше не фільтрував ЖОДНОГО зі своїх списків записів, на відміну від
+ * `LoreSection` нижче на цьому самому екрані, яка вже коректно фільтрувала «Світ книги». Реальна
+ * причина: `MemoryCardScreen` доступний і під час `'rereading'` (той самий інваріант, що й
+ * `LoreSection`'s коментар — "доступний не лише для 'прочитано', а й під час 'перечитую'"), тож
+ * і `selectedEntries` (записи, обрані для самої картки), і повний `allEntries`, що йде в
+ * `JournalTimeline`, могли показати текст запису, зробленого ПІД ЧАС першого читання далі за
+ * сюжетом, ніж зайшло поточне повторне читання. `MemoryCardPreview`/`JournalTimeline` тепер
+ * отримують уже відфільтровані масиви (`visibleSelectedEntries`/`visibleAllEntries` нижче),
+ * замість сирих `selectedEntries`/`allEntries` — той самий `filterSpoilerSafeJournalEntries`, що
+ * й скрізь.
+ */
 const TEMPLATE_OPTIONS: { value: MemoryCardTemplateId; label: string }[] = (
   Object.keys(memoryCardTemplateLabels) as MemoryCardTemplateId[]
 ).map((id) => ({ value: id, label: memoryCardTemplateLabels[id] }));
@@ -96,14 +109,29 @@ function RevisitLaterEntryLine({
  * фільтрований лише на `revisitLater`-позначені записи (`useJournalRevisitLater`, той самий
  * "малий список по одній книзі" хук, що й на екрані підсумку читання). Рендерить `null`, коли
  * позначених записів нема — та сама умова видимості, що й нова картка на екрані підсумку.
+ *
+ * SPOILER-SAFE MODE (ТЗ Фази 3 V1.6.1) — «Повернутися пізніше» позначає запис для власного
+ * майбутнього повернення, а не спойлер-безпечність; той самий ризик, що й у `JournalTimeline`
+ * вище (екран доступний під час `'rereading'`), тож і тут — той самий
+ * `filterSpoilerSafeJournalEntries` над уже завантаженим `entries`.
  */
-function RevisitLaterSection({ userBookId }: { userBookId: string | undefined }) {
+function RevisitLaterSection({
+  userBookId,
+  spoilerContext,
+}: {
+  userBookId: string | undefined;
+  spoilerContext: { active: boolean; currentPage: number | null; pageCount: number | null };
+}) {
   const theme = useTheme();
-  const { data: entries } = useJournalRevisitLater(userBookId);
+  const { data: rawEntries } = useJournalRevisitLater(userBookId);
   const { data: categories } = useAllNoteCategories(userBookId);
   const categoriesById = categoriesToMap(categories);
+  const entries = filterSpoilerSafeJournalEntries(rawEntries ?? [], spoilerContext.active, {
+    currentPage: spoilerContext.currentPage,
+    pageCount: spoilerContext.pageCount,
+  });
 
-  if (!entries || entries.length === 0) return null;
+  if (entries.length === 0) return null;
 
   return (
     <MemorySection icon="bookmark" title="Повернутися до цих думок">
@@ -400,6 +428,25 @@ export default function MemoryCardScreen() {
     return allEntries.filter((entry) => ids.has(entry.id));
   }, [memory, allEntries]);
 
+  // SPOILER-SAFE MODE — див. коментар над `TEMPLATE_OPTIONS`. Навмисно похідні від СИРИХ
+  // `selectedEntries`/`allEntries` (а не навпаки) — `handleTemplateChange` нижче зберігає
+  // `memory.entryRefs` напряму з уже завантаженого `memory`, не з цих відфільтрованих масивів,
+  // тож приховування тут — лише про те, що видно на екрані, і жодним чином не може тихо
+  // змінити, які записи насправді закріплені за карткою в БД.
+  const spoilerSafeActive = data?.userBook
+    ? isSpoilerSafeActive(data.userBook.status, data.userBook.spoilerSafeEnabled)
+    : false;
+  const currentPage = data?.userBook?.currentPage ?? null;
+  const pageCount = data?.primaryEdition?.pageCount ?? null;
+  const visibleSelectedEntries = useMemo(
+    () => filterSpoilerSafeJournalEntries(selectedEntries, spoilerSafeActive, { currentPage, pageCount }),
+    [selectedEntries, spoilerSafeActive, currentPage, pageCount],
+  );
+  const visibleAllEntries = useMemo(
+    () => filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, { currentPage, pageCount }),
+    [allEntries, spoilerSafeActive, currentPage, pageCount],
+  );
+
   const stats = computeBookStats({
     sessions,
     pageCount: data?.primaryEdition?.pageCount,
@@ -464,7 +511,7 @@ export default function MemoryCardScreen() {
                   coverFallbackColor: data.work.coverFallbackColor,
                 }}
                 reflection={memory.reflection}
-                entries={selectedEntries}
+                entries={visibleSelectedEntries}
                 rating={rating?.value ?? null}
                 stats={stats}
                 genres={genres ?? []}
@@ -502,7 +549,7 @@ export default function MemoryCardScreen() {
              * `allEntries`). Рендерить `null` сама, коли позиціонувати нічого — тому
              * умовного `{allEntries?.length ? ... : null}` тут не потрібно. */}
             <JournalTimeline
-              entries={allEntries ?? []}
+              entries={visibleAllEntries}
               pageCount={data.primaryEdition?.pageCount ?? null}
               userBookId={userBookId}
             />
@@ -515,7 +562,10 @@ export default function MemoryCardScreen() {
               />
             ) : null}
 
-            <RevisitLaterSection userBookId={userBookId} />
+            <RevisitLaterSection
+              userBookId={userBookId}
+              spoilerContext={{ active: spoilerSafeActive, currentPage, pageCount }}
+            />
 
             <LoreSection
               workId={data.work.id}

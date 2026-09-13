@@ -1,8 +1,9 @@
-# SPOILER_SAFE.md — режим «без спойлерів» (Фаза 11)
+# SPOILER_SAFE.md — режим «без спойлерів» (Фаза 11, централізовано у Фазі 3 V1.6.1)
 
-POLYTSIA V1.6, Фаза 11 (SPOILER-SAFE MODE). Цей документ фіксує точну поведінку фічі й
-архітектурне рішення, яке інакше довелось би пояснювати заново при кожній фазі (той самий підхід,
-що й `docs/PERSONAL_LORE.md`/`docs/BOOK_CAPSULES.md`/`docs/RECALL.md`).
+POLYTSIA V1.6, Фаза 11 (SPOILER-SAFE MODE), розширено й централізовано POLYTSIA V1.6.1, Фаза 3
+(«одна централізована spoiler-safe policy замість копіпасту по екранах»). Цей документ фіксує
+точну поведінку фічі й архітектурне рішення, яке інакше довелось би пояснювати заново при кожній
+фазі (той самий підхід, що й `docs/PERSONAL_LORE.md`/`docs/BOOK_CAPSULES.md`/`docs/RECALL.md`).
 
 ## Мета
 
@@ -61,7 +62,43 @@ function isSpoilerSafeActive(status: UserBookStatus, spoilerSafeEnabled: boolean
 Уся логіка — чисті функції в `src/lib/spoilerSafe.ts` (той самий house-патерн, що й
 `bookCapsule.ts`/`staleReading.ts`: жодного `new Date()`/SQL/React усередині, `now`/поточний
 прогрес — завжди явний параметр): `isSpoilerSafeActive`, `filterSpoilerSafeJournalEntries`,
-`filterSpoilerSafeLoreEntities`.
+`filterSpoilerSafeLoreEntities`, `isAheadOfCurrentProgress` (раніше приватна, ТЗ Фази 3 V1.6.1
+зробило її спільною — див. нижче).
+
+### Централізація (Фаза 3 V1.6.1)
+
+Аудит V1.6 (§42) знайшов, що ФАКТИЧНО ця "централізована policy" була централізованою лише для
+трьох однокнижних екранів (Book Details/Lore/Recap) — усе, що показує записи БАГАТЬОХ книг одразу
+(Personal Search, Global Journal, Activity History), і `onThisDay.ts` зі своєю ОКРЕМОЮ, повністю
+продубльованою евристикою, узагалі не перевіряли spoiler-safe стан. Фаза 3 V1.6.1 це закрила,
+додавши до `src/lib/spoilerSafe.ts` шар для багатокнижних поверхонь:
+
+```ts
+export interface SpoilerSafeBookContext {
+  status: UserBookStatus;
+  spoilerSafeEnabled: boolean;
+  currentPage: number | null;
+  pageCount: number | null;
+}
+
+function deriveSpoilerContext(userBook, pageCount): SpoilerSafeBookContext { … }
+function isSpoilerHidden(position, context: SpoilerSafeBookContext): boolean { … } // = isSpoilerSafeActive + isAheadOfCurrentProgress, в один виклик
+```
+
+Однокнижні `filterSpoilerSafeJournalEntries`/`filterSpoilerSafeLoreEntities` НЕ переписані на
+новий тип (щоб не чіпати вже усталену сигнатуру `active: boolean` на десятку викликів) — семантика
+та сама, лише спосіб виклику лишився старим. Нові багатокнижні місця (нижче) викликають САМЕ
+`isSpoilerHidden`, щоб не дублювати комбінацію ще раз по-своєму.
+
+Ключова відмінність багатокнижних поверхонь: кожен запис/подія в одній стрічці може належати
+ІНШІЙ книзі з ІНШИМ статусом/прапорцем/прогресом одночасно. `JournalRepository.listFeedPage`
+(Global Journal) і `JournalRepository.searchFeed` (Personal Search) та
+`ActivityHistoryRepository.listRecent` (Activity History) тому фільтрують ПРЯМО В РЕПОЗИТОРІЇ,
+одразу після SQL — контекст книги (`status`/`spoiler_safe_enabled`/`current_page`/`page_count`)
+приєднується ТИМ САМИМ `JOIN`'ом, що вже й так тягне назву/обкладинку книги для рядка стрічки,
+тож жодного додаткового round-trip'у до SQLite не додається. Публічні типи (`JournalFeedEntry`,
+`ActivityEvent`) навмисно НЕ несуть ці службові поля — це деталь реалізації фільтра, не частина
+контракту, яким користуються екрани.
 
 ## Перечитування
 
@@ -71,27 +108,41 @@ function isSpoilerSafeActive(status: UserBookStatus, spoilerSafeEnabled: boolean
 використовує `FinishPredictionSection`/`StaleReadingSection`), тож `isSpoilerSafeActive`/фільтри
 не потребують жодної окремої гілки для перечитування — вони просто читають те саме поле.
 
-## Де застосовується (і де свідомо ні)
+## Де застосовується — повний аудит поверхонь (Фаза 3 V1.6.1)
 
-Фільтр застосований на клієнті, над уже завантаженим масивом (той самий підхід, що й
-`revisitLaterOnly`/`favoriteOnly` — жодного SQL-рівня виключення чи видалення) у трьох місцях:
+Фільтр застосований над уже завантаженим масивом (той самий підхід, що й
+`revisitLaterOnly`/`favoriteOnly` — жодного SQL-рівня `DELETE`/`WHERE`-виключення; для
+багатокнижних поверхонь нижче — фільтр У JS одразу після SQL, докладніше — попередній розділ
+«Централізація»). Таблиця — повний перелік поверхонь, названих в аудиті V1.6 (§42) і ТЗ Фази 3
+V1.6.1, з приміткою SAFE / INTENTIONALLY UNFILTERED / NOT APPLICABLE:
 
-- `app/work/[workId].tsx`, `JournalSection` — список нотаток/цитат книги на Book Details.
-- `app/lore/[workId].tsx` та компактна картка `LoreSection` (і на Book Details, і на Book
-  Memory) — елементи світу книги.
-- `app/recap/[workId].tsx` — екран прямо названий у ТЗ як такий, що "гарантує spoiler-safe
-  experience"; "Останні записи"/"Улюблений момент" рахуються з уже відфільтрованого списку.
+| Поверхня | Статус | Примітка |
+|---|---|---|
+| Book Details (`app/work/[workId].tsx`, `JournalSection`+`LoreSection`) | SAFE | Первісна реалізація Фази 11 — еталонний патерн, включно з індикатором "Ще N приховано". |
+| Book Memory / картка-спогад (`app/memory/[workId].tsx`) | SAFE (Фаза 3 V1.6.1) | Раніше НЕ фільтрував нічого. Тепер: `JournalTimeline` (шкала), `selectedEntries` (записи картки), `RevisitLaterSection` — усі три через `visibleAllEntries`/`visibleSelectedEntries`/`spoilerContext`. `LoreSection` тут уже була SAFE раніше. |
+| Journal Timeline (компонент `JournalTimeline`, використовується в Book Memory) | SAFE (Фаза 3 V1.6.1) | Той самий фікс, що й вище — шкала тепер будується з уже відфільтрованого масиву, не з сирого `allEntries`. |
+| Lore / «Світ книги» (`app/lore/[workId].tsx`) | SAFE | Без змін цієї фази — вже фільтрував коректно. |
+| Recap (`app/recap/[workId].tsx`) | SAFE | Без змін цієї фази — вже фільтрував коректно, ТЗ прямо називає екран "spoiler-safe experience". |
+| Personal Search (`app/(tabs)/search.tsx` → `usePersonalSearch.ts` → `JournalRepository.searchFeed`) | SAFE (Фаза 3 V1.6.1) | Раніше НЕ фільтрував нічого — реальний виявлений витік. Фільтр тепер у `searchFeed` (репозиторій), перед мапінгом у `JournalFeedEntry`. |
+| Global Journal / «Мій щоденник» (`app/journal/index.tsx` → `useJournalFeed` → `JournalRepository.listFeedPage`) | SAFE (Фаза 3 V1.6.1) | Раніше НЕ фільтрував нічого — реальний виявлений витік (документ до цієї фази прямо (й хибно) називав це "поза межами book-level фази"). Фільтр тепер у `listFeedPage`. Лічильники (`useJournalGlobalCount`, реакції) навмисно лишаються НЕвідфільтрованими — той самий "лічильник рахує все, список показує видиме" принцип, що й на Book Details. |
+| On This Day / «Цей день у твоєму читанні» (`useOnThisDay.ts` + `src/lib/onThisDay.ts#applySpoilerRules`) | SAFE (виправлено у Фазі 3 V1.6.1) | Мав ВЛАСНУ, продубльовану евристику (лише `page`, без `progressPercent`-фолбеку) — тепер перевикористовує спільний `isAheadOfCurrentProgress`. Реальний БАГ: `activePageByWorkId` будувався з УСІХ книг `reading`/`rereading` незалежно від `user_book.spoilerSafeEnabled` — власник, що вимкнув прапорець для конкретної книги, однаково отримував приховані записи. Виправлено: книга потрапляє в мапу лише коли `spoilerSafeEnabled === true`. |
+| Activity History (`app/history.tsx` → `useActivityHistory` → `ActivityHistoryRepository.listRecent`) | SAFE (Фаза 3 V1.6.1) | Раніше НЕ фільтрував нічого — реальний виявлений витік. Фільтр застосований лише до `journal_entry`/`quote` (єдині 2 з 8 типів подій із текстом запису); решта 6 (сесія/старт/фініш/додавання/оцінка/полиця) не спойлер за визначенням і не фільтруються. |
+| Recall / «Згадати книгу» (`app/recall/[workId].tsx`) | SAFE (Фаза 3 V1.6.1) | Раніше НЕ фільтрував нічого. Реальний ризик — крайовий випадок: капсулу можна СТВОРИТИ лише для `finished` (`canCreateCapsule`), але вже ІСНУЮЧА капсула (і recall над нею) лишається доступною й під час подальшого ПЕРЕЧИТУВАННЯ тієї самої книги, коли `isSpoilerSafeActive` знову активний. `favoriteMoments`/`quotes`/`thoughts`/`linkedEntry` тепер ідуть через `visibleEntries`. |
+| Capsule — перегляд (`app/capsule/[workId].tsx`) | SAFE (Фаза 3 V1.6.1) | Той самий крайовий випадок, що й Recall — `linkedEntry` тепер шукається у відфільтрованому списку. |
+| Capsule — редагування (`app/capsule/[workId]/edit.tsx`) | SAFE (Фаза 3 V1.6.1) | Пікер (`pickerEntries`) тепер будується з відфільтрованих `favorites`/`allEntries`. `journalEntryKind` (значення, що ЗБЕРІГАЄТЬСЯ) навмисно рахується з СИРОГО `allEntries`, не з відфільтрованого — інакше приховування спойлера тихо занулило б збережене поле капсули при рутинному збереженні (`docs/V1_6_1_FINAL_REPORT.md`, принцип "приховуй текст від користувача, не псуй дані"). |
+| Season cards (`app/seasons/[seasonKey].tsx`) | NOT APPLICABLE | Показує лише список прочитаних книг (назва/автор/обкладинка) і агреговану статистику сезону — жоден текст запису щоденника тут не рендериться. |
+| Memory cards / картка-спогад (`MemoryCardPreview`, рендериться на Book Memory) | SAFE (Фаза 3 V1.6.1) | Той самий фікс, що й Book Memory вище — дані картки (`entries`) тепер `visibleSelectedEntries`. |
+| Fingerprint / «Читацький відбиток» (`app/fingerprint.tsx`) | NOT APPLICABLE | Лише агреговані поведінкові бейджі (`BADGE_META`) — жоден текст конкретного запису щоденника не показується. |
 
-Свідомо ПОЗА межами цього проходу (задокументоване обмеження, не недогляд):
+### Список зі старої версії цього документа (виправлено)
 
-- `JournalTimeline` (`app/memory/[workId].tsx`) — самостійна візуалізація ВСІХ записів
-  щоденника як шкали 0–100% книги; сам сенс шкали — показати розподіл записів по всій книзі, а
-  не окремі їхні тексти, тож спойлер-ризик тут інший і значно нижчий, ніж читати текст запису
-  напряму.
-- Пікери записів на екранах, доступних лише для вже завершених книг (капсула, спогад-картка,
-  recall) — там `status` уже `finished`/`rereading`-після-фінішу, спойлерів по визначенню немає.
-- Глобальна стрічка "Мій щоденник" (`app/journal/index.tsx`) — крос-книжковий фід, поза межами
-  book-level налаштування цієї фази.
+Попередня версія цього документа (до Фази 3 V1.6.1) прямо стверджувала, що `JournalTimeline`,
+пікери записів на капсулі/спогаді/recall та глобальна стрічка "Мій щоденник" є "свідомо поза
+межами" фільтрації — **це виявилось хибним твердженням** (аудит V1.6 §42): жодна з цих поверхонь
+насправді ніколи не мала захисту, документ лише описував НАМІР, який не був реалізований. Таблиця
+вище — актуальний стан після Фази 3 V1.6.1; окремого розділу "свідомо поза межами" більше немає,
+бо жодна з 14 перелічених у ТЗ поверхонь тепер не лишається невідфільтрованою без причини —
+лишились тільки дві NOT APPLICABLE (Season cards, Fingerprint), де тексту запису просто немає.
 
 ## UI
 
@@ -104,6 +155,16 @@ function isSpoilerSafeActive(status: UserBookStatus, spoilerSafeEnabled: boolean
 `JournalSection` показують коротке пояснення ("Ще N приховано режимом «без спойлерів».") замість
 тихого порожнього стану — це свідоме налаштування користувача, а не брак даних, тож "quiet
 degradation" тут недоречний: людина має розуміти, чому список коротший, ніж вона очікує.
+
+**Свідоме обмеження Фази 3 V1.6.1**: жоден із новознайдених і виправлених у цій фазі поверхонь
+(Book Memory/Journal Timeline/Personal Search/Global Journal/Activity History/Recall/Capsule) поки
+НЕ отримав того самого індикатора "N приховано" — фільтрація там тиха (список просто коротший).
+ТЗ Фази 3 явно вимагало ручний reveal-UX ("Приховано, щоб не забігати наперед." + опційне
+"Показати") лише "де це виправдано UX поверхні", а не всюди одразу — тиха фільтрація вже закриває
+головний ризик (реальний показ спойлера), а не просто відсутність тексту без пояснення в
+основному списку (де користувач і так очікує можливо неповний список через фільтри/пошук). Явний
+"N приховано" індикатор на цих нових поверхнях — задокументований, свідомо відкладений
+UX-полiш, не забутий crash/bug; кандидат на майбутню UX-ітерацію, не блокер цієї фази.
 
 ## Приватність
 

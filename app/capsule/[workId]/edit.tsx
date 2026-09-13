@@ -16,6 +16,7 @@ import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { useBookCapsule, useCreateBookCapsule, useUpdateBookCapsule } from '@/features/memory/useBookCapsule';
 import { validateCapsuleContent, canCreateCapsule } from '@/lib/bookCapsule';
+import { isSpoilerSafeActive, filterSpoilerSafeJournalEntries } from '@/lib/spoilerSafe';
 import type { CapsuleReopenOption } from '@/types/bookCapsule';
 import type { JournalEntry } from '@/types/journalEntry';
 
@@ -58,6 +59,16 @@ function formsEqual(a: CapsuleFormState, b: CapsuleFormState): boolean {
  * видно, збереження — одна кнопка внизу. Режим (створення/редагування) визначається наявністю
  * вже створеної капсули (`useBookCapsule`), не окремим параметром маршруту — та сама форма для
  * обох випадків (редагування пізніше не повинно виглядати як інший інструмент).
+ *
+ * SPOILER-SAFE MODE (ТЗ Фази 3 V1.6.1, аудит V1.6 §42) — той самий випадок, що й View screen
+ * (`app/capsule/[workId].tsx`): СТВОРЕННЯ можливе лише для `finished` (`canCreateCapsule`), але
+ * РЕДАГУВАННЯ вже існуючої капсули лишається доступним і під час подальшого ПЕРЕЧИТУВАННЯ тієї
+ * самої книги. Пікер записів (`pickerEntries`) тому будується з уже відфільтрованих
+ * `favorites`/`allEntries` — записи попереду поточного прогресу повторного читання просто не
+ * з'являються серед варіантів вибору. Раніше вибраний (`form.journalEntryId`) запис, який після
+ * цього став прихованим, НЕ втрачається (значення форми не залежить від того, що зараз видно в
+ * списку) — лише тимчасово не показується у списку для вибору/зняття вибору, доки не стане знову
+ * видимим (прогрес наздогнав) чи режим "без спойлерів" не вимкнено.
  */
 export default function BookCapsuleEditScreen() {
   const theme = useTheme();
@@ -99,11 +110,32 @@ export default function BookCapsuleEditScreen() {
 
   const isDirty = initialForm !== null && !formsEqual(form, initialForm);
 
-  // Той самий "обране спершу, з фолбеком на все" патерн, що й `BookMemorySection`
-  // (`app/completion/[workId].tsx`) — консистентний вибір джерела для пов'язаного моменту.
-  const pickerEntries = favorites && favorites.length > 0 ? favorites : (allEntries ?? []);
-  const usingAllAsFallback = !(favorites && favorites.length > 0) && (allEntries?.length ?? 0) > 0;
+  // SPOILER-SAFE MODE — див. коментар над екраном.
+  const spoilerSafeActive = data?.userBook
+    ? isSpoilerSafeActive(data.userBook.status, data.userBook.spoilerSafeEnabled)
+    : false;
+  const currentPage = data?.userBook?.currentPage ?? null;
+  const pageCount = data?.primaryEdition?.pageCount ?? null;
+  const visibleFavorites = useMemo(
+    () => filterSpoilerSafeJournalEntries(favorites ?? [], spoilerSafeActive, { currentPage, pageCount }),
+    [favorites, spoilerSafeActive, currentPage, pageCount],
+  );
+  const visibleAllEntries = useMemo(
+    () => filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, { currentPage, pageCount }),
+    [allEntries, spoilerSafeActive, currentPage, pageCount],
+  );
 
+  // Той самий "обране спершу, з фолбеком на все" патерн, що й `BookMemorySection`
+  // (`app/completion/[workId].tsx`) — консистентний вибір джерела для пов'язаного моменту, тепер
+  // над уже відфільтрованими списками.
+  const pickerEntries = visibleFavorites.length > 0 ? visibleFavorites : visibleAllEntries;
+  const usingAllAsFallback = visibleFavorites.length === 0 && visibleAllEntries.length > 0;
+
+  // Навмисно НЕ з `visibleAllEntries` — це лише для `journalEntryKind` при збереженні
+  // (`handleSave` нижче), не для показу тексту. Якби тут теж фільтрувати, ЗБЕРЕЖЕННЯ вже
+  // обраного (в іншому сеансі, коли запис ще не був прихований) запису під час повторного
+  // читання хибно занулило б `journalEntryKind`, хоча сам `form.journalEntryId` і далі коректний
+  // — приховування спойлерів має ховати ТЕКСТ від користувача, а не тихо псувати збережені дані.
   const selectedEntry = useMemo(
     () => (allEntries ?? []).find((entry) => entry.id === form.journalEntryId) ?? null,
     [allEntries, form.journalEntryId],
