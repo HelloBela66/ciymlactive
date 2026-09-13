@@ -254,6 +254,23 @@ sync/catalog backend, але жодна читацька дія (старт се
     `app/memory/[workId].tsx` + `app/completion/[workId].tsx`) — адитивна зміна: новий блок
     "залишити капсулу для цього прочитання" зʼявляється ПОРЯД зі старим переглядом капсули, коли
     вона є, але не для поточного run — стару капсулу як і раніше можна переглянути/recall'нути.
+24. **024_dnf_reflection_run** — REREADING MODEL (POLYTSIA V1.6.1, Фаза 11) —
+    `docs/READING_RUN.md` §"Фаза 11". Дзеркалить `021`/`022` схемою (rebuild:
+    `UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`, той самий `_new`+`DROP`+`RENAME` ідіом),
+    але з ІНШОЮ backfill-логікою: `dnf_reflection` концептуально може належати ЛИШЕ
+    `did_not_finish`-run'у (на відміну від `021`/`022`, тут НЕМАЄ фолбеку на "найновіший run
+    узагалі" — лише `did_not_finish`-кандидати, інакше `NULL`), і, як і `023` (капсула), кожен
+    легасі-рядок шукає свій НАЙБЛИЖЧИЙ ЗА ЧАСОМ `did_not_finish`-run (`finished_at <=
+    created_at`, найновіший серед таких), а не просто "найновіший `did_not_finish`-run книги" —
+    бо до Фази 11 `captureIfMissing` спрацьовував ЩОНАЙБІЛЬШЕ раз на все життя книги, тож
+    легасі-знімок міг зафіксувати ПЕРШИЙ епізод "Не дочитав", навіть якщо найновіший
+    `did_not_finish`-run книги — інший, пізніший. `DnfReflectionRepository.
+    getCurrent`/`captureIfMissing`/`updateDetails` — та сама динамічна ре-резолюція через
+    `getLatestByUserBookId` щоразу, що й `BookMemoryRepository`/`PreReadingReflectionRepository`
+    (Фази 8-9), НЕ фіксований раз-назавжди підхід капсули (Фаза 10): перечитування, покинуте
+    вдруге, автоматично отримує ВЛАСНИЙ знімок — жодних змін в UI (`DnfReflectionSection`) не
+    знадобилось, на відміну від Фази 10, бо тут немає "старого запису, що маскує пропозицію
+    нового" — `getCurrent` сама завжди показує знімок актуального run.
 
 **POLYTSIA V1.5, Фаза 12 («Моя історія» / READING ACTIVITY HISTORY) — БЕЗ нової міграції.**
 Так само, як `JournalRepository` (union note+quote «на рівні читання», п. 3 вище) — ТЗ Фази 12

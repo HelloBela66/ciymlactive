@@ -1,5 +1,52 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 11 — DNF прив'язаний до reading_run (REREADING MODEL)
+
+**Дата:** 2026-09-13
+
+Сьома частина REREADING MODEL. Проблема (задача: "Run #1 abandoned і Run #2 started пізніше —
+дві різні історії, старий DNF snapshot не перезаписується"): `dnf_reflection` мала
+`UNIQUE(user_book_id)` (`017_dnf_reflection.ts`) — щонайбільше ОДИН знімок "Не дочитав" на
+книгу; `captureIfMissing` бачив уже наявний рядок першого покинутого прочитання й нічого не
+робив для другого. Повне обґрунтування — `docs/READING_RUN.md` §"Фаза 11".
+
+**Додано:**
+- `024_dnf_reflection_run.ts` — схемою дзеркалить `021`/`022` (rebuild:
+  `UNIQUE(user_book_id)` → `UNIQUE(reading_run_id)`, той самий `_new`+`DROP`+`RENAME` ідіом,
+  бо, на відміну від `023`/капсули, `dnf_reflection` УЖЕ мала стару UNIQUE), але з ІНШОЮ
+  backfill-логікою: кандидатом рахується ЛИШЕ `did_not_finish`-run (жодного фолбеку на
+  "найновіший run узагалі", на відміну від `021`/`022` — прив'язка DNF-знімка до `finished`-run
+  архітектурно неможлива), і, як і `023`, кожен легасі-рядок шукає СВІЙ найближчий ЗА ЧАСОМ
+  `did_not_finish`-run (`finished_at <= created_at`, найновіший серед таких); якщо такого
+  нема — фолбек на найновіший `did_not_finish`-run книги (а не `NULL`, як у `023`) — бо до Фази
+  11 `captureIfMissing` спрацьовував ЩОНАЙБІЛЬШЕ раз на все життя книги, тож легасі-знімок
+  напевно належав ЯКОМУСЬ `did_not_finish`-run'у книги, навіть якщо час трохи розходиться.
+- `DnfReflectionRepository.getByReadingRunId`/`listByUserBookId` — прямий доступ до знімка
+  конкретного run і повної історії DNF-епізодів книги (заготовка для екрана історії, Фаза 12).
+- 9 нових тестів (691 → 700): `DnfReflectionRepository.test.ts` (7 → 9 — перебудований під
+  `getCurrent`/`captureIfMissing`, що резолвлять run динамічно; перечитування, покинуте вдруге,
+  отримує ОКРЕМИЙ знімок, старий лишається доступним через `getByReadingRunId`; run, що
+  завершився `finished`, не показує чужий DNF-знімок), `migrationRunner.test.ts` (+7 — нестандартна
+  backfill-логіка: найближчий `did_not_finish`-run, фолбек на найновіший `did_not_finish` (НЕ
+  NULL), `finished`-run ніколи не кандидат, книга без run, лише `in_progress`, sanity-check
+  індексу).
+
+**Змінено:**
+- `DnfReflectionRepository.getByUserBookId` → `.getCurrent` (перейменовано, як і в Фазах 8-9 —
+  НЕ додано паралельно до старого, на відміну від капсули Фаза 10, бо тут немає окремого
+  UI-кейсу "показати старий запис попри новий run"); `captureIfMissing`/`updateDetails` тепер
+  резолвлять поточний run через `ReadingRunRepository.getLatestByUserBookId` щоразу — та сама
+  динамічна ре-резолюція, що й у `BookMemoryRepository`/`PreReadingReflectionRepository`, НЕ
+  фіксований раз-назавжди підхід капсули.
+- `useDnfReflection` — виклик змінено на `getCurrent`; форма виклику з UI НЕ змінюється, той
+  самий `userBookId`. `DnfReflectionSection` (`app/work/[workId].tsx`) не отримала ЖОДНОГО
+  нового блоку чи параметра (на відміну від Фази 10) — `getCurrent` сама завжди показує знімок
+  актуального run, тож перечитування, покинуте вдруге, автоматично починає показувати НОВИЙ
+  знімок замість старого.
+- `docs/READING_RUN.md`/`docs/DATABASE.md`/`docs/DNF_IMPROVEMENT.md` — нова секція "Фаза 11",
+  схема `dnf_reflection`, історія міграцій і задокументоване обмеження оновлені (позначене
+  вирішеним).
+
 ## POLYTSIA V1.6.1, Фаза 10 — Capsule/Recall прив'язані до reading_run (REREADING MODEL)
 
 **Дата:** 2026-09-13

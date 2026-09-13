@@ -120,9 +120,12 @@ export const queryKeys = {
     byUserBook: (userBookId: string) => ['preReadingReflection', 'byUserBook', userBookId] as const,
   },
   dnfReflection: {
-    // POLYTSIA V1.6, Фаза 12 (DNF IMPROVEMENT) — той самий "малий запит по одній книзі" сенс,
-    // що й `preReadingReflection.byUserBook` вище (`dnf_reflection.user_book_id` — UNIQUE,
-    // `017_dnf_reflection.ts`).
+    // POLYTSIA V1.6, Фаза 12 (DNF IMPROVEMENT); REREADING MODEL, Фаза 11
+    // (`024_dnf_reflection_run.ts`) — той самий "малий запит по одній книзі" сенс, що й
+    // `preReadingReflection.byUserBook` вище: ключ НЕ перейменований разом з репозиторієм
+    // (`DnfReflectionRepository.getCurrent`, Фаза 11) — сам ключ і досі про "запит по
+    // userBookId", лише те, ЩО він повертає, тепер прив'язане до поточного run, а не до книги
+    // взагалі (`dnf_reflection.reading_run_id` — тепер UNIQUE, більше не `user_book_id`).
     byUserBook: (userBookId: string) => ['dnfReflection', 'byUserBook', userBookId] as const,
   },
   loreEntities: {

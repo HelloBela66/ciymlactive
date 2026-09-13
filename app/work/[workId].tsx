@@ -818,23 +818,26 @@ function PreReadingReflectionSection({ userBookId, status }: { userBookId: strin
 }
 
 /**
- * «Не дочитав» (POLYTSIA V1.6, Фаза 12 ТЗ: DNF IMPROVEMENT). ТЗ §UX PRINCIPLE: "DNF не є
- * failure. Microcopy повинна бути neutral... Не використовуй broken streak/negative
- * achievement" — жодних сумних ілюстрацій чи докорів, той самий нейтральний тон, що вже
- * усталений для інших "стан книги" секцій (`StaleReadingSection`: "Не використовуй guilt
- * language").
+ * «Не дочитав» (POLYTSIA V1.6, Фаза 12 ТЗ: DNF IMPROVEMENT; REREADING MODEL, Фаза 11,
+ * `docs/READING_RUN.md` §"Фаза 11"). ТЗ §UX PRINCIPLE: "DNF не є failure. Microcopy повинна
+ * бути neutral... Не використовуй broken streak/negative achievement" — жодних сумних
+ * ілюстрацій чи докорів, той самий нейтральний тон, що вже усталений для інших "стан книги"
+ * секцій (`StaleReadingSection`: "Не використовуй guilt language").
  *
  * На відміну від `PreReadingReflectionSection` вище, рядок `dnf_reflection` завжди вже існує
- * (щойно статус хоч раз став "Не дочитав") — `useDnfReflection`, автоматично зафіксований
- * `DnfReflectionRepository.captureIfMissing` усередині `useUpdateUserBookStatus`, а не формою.
- * Тому тут немає "запрошення почати" — лише "додати деталі" (причина/нотатка) до вже існуючого
- * знімка сторінки й дати. Сторінка/дата НЕ редагуються — лише причина й нотатка
- * (`useSaveDnfReflectionDetails`).
+ * (щойно ПОТОЧНИЙ run книги хоч раз завершився "Не дочитав") — `useDnfReflection`, автоматично
+ * зафіксований `DnfReflectionRepository.captureIfMissing` усередині `useUpdateUserBookStatus`,
+ * а не формою. Тому тут немає "запрошення почати" — лише "додати деталі" (причина/нотатка) до
+ * вже існуючого знімка сторінки й дати. Сторінка/дата НЕ редагуються — лише причина й нотатка
+ * (`useSaveDnfReflectionDetails`). REREADING MODEL, Фаза 11: `useDnfReflection` резолвить
+ * знімок САМЕ поточного run (`getCurrent`, не "книги взагалі") — перечитування, покинуте
+ * вдруге, показує ВЛАСНИЙ знімок, а не той, що лишився від першого покинутого прочитання.
  *
- * Видима лише коли `dnf_reflection` уже існує (`reflection != null`) — для книги, яка ніколи не
- * була "Не дочитав", секції просто нема, той самий "quiet degradation" підхід, що й решта
- * секцій цього екрана. Форма редагування — лише поки статус РЕАЛЬНО "Не дочитав"
- * (`canEditDnfReflection`); сам запис лишається видимим (read-only) і після зміни статусу —
+ * Видима лише коли `dnf_reflection` уже існує для поточного run (`reflection != null`) — для
+ * книги, яка (чи новий run якої) ніколи не була "Не дочитав", секції просто нема, той самий
+ * "quiet degradation" підхід, що й решта секцій цього екрана. Форма редагування — лише поки
+ * статус РЕАЛЬНО "Не дочитав" (`canEditDnfReflection`, НЕ змінена Фазою 11); сам запис
+ * лишається видимим (read-only) і після зміни статусу —
  * той самий підхід, що й `canEdit`/`reflection` у `PreReadingReflectionSection`.
  */
 function DnfReflectionSection({

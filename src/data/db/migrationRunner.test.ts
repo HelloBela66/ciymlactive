@@ -1006,3 +1006,235 @@ describe('migrateDbIfNeeded — 023_book_capsule_run (Фаза 10)', () => {
     expect(capsule?.user_book_id).toBe('ub-dd');
   });
 });
+
+/**
+ * Фаза 11 (`024_dnf_reflection_run.ts`) — на відміну від `023` (проста `ADD COLUMN`, бо
+ * `book_capsule` ніколи не мала `UNIQUE(user_book_id)`), `dnf_reflection` цю UNIQUE МАЛА, тож
+ * тут rebuild-ідіом, той самий, що й `021`/`022`. Backfill — ІНША логіка, ніж усі три попередні:
+ * (1) кандидатом рахується ЛИШЕ `did_not_finish`-run (не "`finished` АБО `did_not_finish`", як
+ * у `021`/`022`/`023`) — DNF-знімок концептуально не може належати `finished`-run'у; (2) якщо
+ * жодного run із `finished_at <= created_at` немає, фолбек — НАЙНОВІШИЙ `did_not_finish`-run
+ * книги (а не `NULL`, як у `023`) — той самий принцип "легасі-знімок точно належав ЯКОМУСЬ
+ * did_not_finish-run'у книги, навіть якщо час трохи розходиться", докладніше —
+ * `docs/READING_RUN.md` §"Фаза 11".
+ */
+const MIGRATION_024_NOW = '2026-09-13T00:00:00.000Z';
+
+async function seedBookForDnfMigration(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+    `${id}-work`,
+    `Книга ${id}`,
+    MIGRATION_024_NOW,
+    MIGRATION_024_NOW,
+  ]);
+  await db.runAsync(
+    `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    [`${id}-edition`, `${id}-work`, `Книга ${id}`, 'uk', 'paperback', MIGRATION_024_NOW, MIGRATION_024_NOW],
+  );
+  await db.runAsync(
+    `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'did_not_finish',0,?,?)`,
+    [id, `${id}-edition`, MIGRATION_024_NOW, MIGRATION_024_NOW],
+  );
+}
+
+async function seedRunForDnfMigration(
+  db: SQLiteDatabase,
+  params: { id: string; userBookId: string; runNumber: number; status: string; startedAt: string; finishedAt: string | null },
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO reading_run (
+       id, user_book_id, run_number, status, started_at, finished_at, is_legacy_backfill, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,0,?,?)`,
+    [
+      params.id,
+      params.userBookId,
+      params.runNumber,
+      params.status,
+      params.startedAt,
+      params.finishedAt,
+      params.startedAt,
+      params.finishedAt ?? params.startedAt,
+    ],
+  );
+}
+
+/** DNF-знімок у СТАРІЙ схемі `dnf_reflection` (версія 23 — ще без `reading_run_id`, з
+ * `UNIQUE(user_book_id)`), з явним `created_at` для контролю "найближчого в часі" backfill-збігу. */
+async function seedLegacyDnfReflection(
+  db: SQLiteDatabase,
+  id: string,
+  userBookId: string,
+  createdAt: string,
+  page = 50,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO dnf_reflection (id, user_book_id, page, created_at, updated_at) VALUES (?,?,?,?,?)`,
+    [id, userBookId, page, createdAt, createdAt],
+  );
+}
+
+interface LegacyDnfReflectionRow {
+  id: string;
+  user_book_id: string;
+  reading_run_id: string | null;
+  page: number;
+}
+
+async function getDnfReflectionRow(db: SQLiteDatabase, id: string): Promise<LegacyDnfReflectionRow | null> {
+  return db.getFirstAsync<LegacyDnfReflectionRow>(`SELECT * FROM dnf_reflection WHERE id = ?`, [id]);
+}
+
+describe('migrateDbIfNeeded — 024_dnf_reflection_run (Фаза 11)', () => {
+  it('один знімок, один did_not_finish run з finished_at ≤ created_at — лінкується на нього', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-x');
+    await seedRunForDnfMigration(db, {
+      id: 'run-x1',
+      userBookId: 'ub-x',
+      runNumber: 1,
+      status: 'did_not_finish',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    await seedLegacyDnfReflection(db, 'dnf-x', 'ub-x', '2026-01-10T00:05:00.000Z', 88);
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const row = await getDnfReflectionRow(db, 'dnf-x');
+    expect(row?.reading_run_id).toBe('run-x1');
+    expect(row?.page).toBe(88);
+  });
+
+  it('два did_not_finish run — легасі-знімок (записаний невдовзі після ПЕРШОГО) лінкується на найближчий (перший), не на найновіший', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-y');
+    await seedRunForDnfMigration(db, {
+      id: 'run-y1',
+      userBookId: 'ub-y',
+      runNumber: 1,
+      status: 'did_not_finish',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    await seedRunForDnfMigration(db, {
+      id: 'run-y2',
+      userBookId: 'ub-y',
+      runNumber: 2,
+      status: 'did_not_finish',
+      startedAt: '2026-03-01T00:00:00.000Z',
+      finishedAt: '2026-03-10T00:00:00.000Z',
+    });
+    // ДО Фази 11 captureIfMissing спрацьовував ЩОНАЙБІЛЬШЕ раз на все життя книги — легасі-рядок
+    // зафіксував ПЕРШИЙ епізод "Не дочитав", хоча найновіший did_not_finish-run книги — другий.
+    await seedLegacyDnfReflection(db, 'dnf-y', 'ub-y', '2026-01-10T00:05:00.000Z', 40);
+
+    await migrateDbIfNeeded(db);
+
+    const row = await getDnfReflectionRow(db, 'dnf-y');
+    expect(row?.reading_run_id).toBe('run-y1');
+  });
+
+  it('знімок СТАРІШИЙ за будь-який did_not_finish run (жоден finished_at ≤ created_at) — фолбек на НАЙНОВІШИЙ did_not_finish run, НЕ NULL', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-z');
+    await seedRunForDnfMigration(db, {
+      id: 'run-z1',
+      userBookId: 'ub-z',
+      runNumber: 1,
+      status: 'did_not_finish',
+      startedAt: '2026-03-01T00:00:00.000Z',
+      finishedAt: '2026-03-10T00:00:00.000Z',
+    });
+    await seedRunForDnfMigration(db, {
+      id: 'run-z2',
+      userBookId: 'ub-z',
+      runNumber: 2,
+      status: 'did_not_finish',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      finishedAt: '2026-05-10T00:00:00.000Z',
+    });
+    // Аномалія легасі-даних: знімок "старіший" за ОБИДВА did_not_finish run — на відміну від
+    // `023` (де це дало б NULL), тут фолбек — найновіший did_not_finish run книги (run-z2).
+    await seedLegacyDnfReflection(db, 'dnf-z', 'ub-z', '2026-01-01T00:00:00.000Z', 20);
+
+    await migrateDbIfNeeded(db);
+
+    const row = await getDnfReflectionRow(db, 'dnf-z');
+    expect(row?.reading_run_id).toBe('run-z2');
+  });
+
+  it('книга має лише finished run (жодного did_not_finish) — reading_run_id лишається NULL', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-aa');
+    await seedRunForDnfMigration(db, {
+      id: 'run-aa1',
+      userBookId: 'ub-aa',
+      runNumber: 1,
+      status: 'finished',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-10T00:00:00.000Z',
+    });
+    // Легасі-дані з часів до Фази 6 (reading_run) могли лишити DNF-знімок навіть на книзі, чий
+    // ЄДИНИЙ відомий run зрештою вважається finished (наприклад, ручна корекція статусу) —
+    // finished-run НІКОЛИ не рахується кандидатом для DNF-знімка.
+    await seedLegacyDnfReflection(db, 'dnf-aa', 'ub-aa', '2026-01-05T00:00:00.000Z', 15);
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getDnfReflectionRow(db, 'dnf-aa'))?.reading_run_id).toBeNull();
+  });
+
+  it('книга без жодного reading_run — reading_run_id лишається NULL, нічого не вигадується', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-bb');
+    await seedLegacyDnfReflection(db, 'dnf-bb', 'ub-bb', MIGRATION_024_NOW, 5);
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getDnfReflectionRow(db, 'dnf-bb'))?.reading_run_id).toBeNull();
+  });
+
+  it('лише in_progress run (не did_not_finish) — НЕ рахується кандидатом, reading_run_id лишається NULL', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-cc');
+    await seedRunForDnfMigration(db, {
+      id: 'run-cc1',
+      userBookId: 'ub-cc',
+      runNumber: 1,
+      status: 'in_progress',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    });
+    await seedLegacyDnfReflection(db, 'dnf-cc', 'ub-cc', '2026-01-05T00:00:00.000Z', 7);
+
+    await migrateDbIfNeeded(db);
+
+    expect((await getDnfReflectionRow(db, 'dnf-cc'))?.reading_run_id).toBeNull();
+  });
+
+  it('dnf_reflection.reading_run_id — нова колонка, індекс idx_dnf_reflection_user_book справді створений', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 23);
+    await seedBookForDnfMigration(db, 'ub-dd');
+    await seedLegacyDnfReflection(db, 'dnf-dd', 'ub-dd', MIGRATION_024_NOW, 3);
+
+    await migrateDbIfNeeded(db);
+
+    const index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_dnf_reflection_user_book'`,
+    );
+    expect(index?.name).toBe('idx_dnf_reflection_user_book');
+
+    // Поле досі читається без винятку — sanity-check, що rebuild не зламав решту колонок.
+    const row = await getDnfReflectionRow(db, 'dnf-dd');
+    expect(row?.user_book_id).toBe('ub-dd');
+    expect(row?.page).toBe(3);
+  });
+});

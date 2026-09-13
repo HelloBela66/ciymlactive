@@ -1,8 +1,20 @@
 # DNF_IMPROVEMENT.md — «Не дочитав» (Фаза 12)
 
-POLYTSIA V1.6, Фаза 12 (DNF IMPROVEMENT). Цей документ фіксує точну поведінку фічі й
-архітектурне рішення, яке інакше довелось би пояснювати заново при кожній фазі (той самий
-підхід, що й `docs/SPOILER_SAFE.md`/`docs/PERSONAL_LORE.md`/`docs/BEFORE_AFTER.md`).
+POLYTSIA V1.6, Фаза 12 (DNF IMPROVEMENT); REREADING MODEL, Фаза 11 (POLYTSIA V1.6.1,
+`docs/READING_RUN.md` §"Фаза 11"). Цей документ фіксує точну поведінку фічі й архітектурне
+рішення, яке інакше довелось би пояснювати заново при кожній фазі (той самий підхід, що й
+`docs/SPOILER_SAFE.md`/`docs/PERSONAL_LORE.md`/`docs/BEFORE_AFTER.md`).
+
+## REREADING MODEL, Фаза 11 — вирішено
+
+~~`dnf_reflection` мала `UNIQUE(user_book_id)` — щонайбільше один знімок на книгу. Друге
+покинуте прочитання (книгу почали знову, потім знову покинули) НЕ отримувало власного знімка:
+`captureIfMissing` бачив уже наявний рядок першого покинутого прочитання й нічого не робив —
+друга дата/сторінка/причина просто НІКОЛИ не фіксувались.~~ — вирішено REREADING MODEL, Фаза 11
+(`024_dnf_reflection_run.ts`): обмеження змінене на `UNIQUE(reading_run_id)`, кожен
+`did_not_finish`-run книги тепер має власний знімок. Докладне архітектурне обґрунтування, і
+чому ця фаза відрізняється від Фаз 8-10 (капсула/спогад/До), — `docs/READING_RUN.md`
+§"Фаза 11".
 
 ## Мета
 
@@ -25,9 +37,12 @@ Book Details — це запрошення, а не форма-перешкод�
 ### Схема
 
 ```sql
+-- Схема ПІСЛЯ REREADING MODEL, Фаза 11 (`024_dnf_reflection_run.ts`) — до неї
+-- `user_book_id` був `UNIQUE`, не `reading_run_id` (`017_dnf_reflection.ts`).
 CREATE TABLE dnf_reflection (
   id TEXT PRIMARY KEY,
-  user_book_id TEXT NOT NULL UNIQUE REFERENCES user_book(id) ON DELETE CASCADE,
+  user_book_id TEXT NOT NULL REFERENCES user_book(id) ON DELETE CASCADE,
+  reading_run_id TEXT UNIQUE,
   page INTEGER NOT NULL,
   reason TEXT,
   note TEXT,
@@ -44,7 +59,10 @@ CREATE TABLE dnf_reflection (
    викликана всередині `useUpdateUserBookStatus` (`src/features/library/useUpdateUserBook.ts`),
    тим самим потоком, що вже виставляє `started_at`/`finished_at` у `UserBookRepository.
    updateStatus`. Це і є "date" з ТЗ ("Зберігай: page/progress; date; reason; note") — момент,
-   коли книгу залишили, а не момент, коли хтось повернувся дописати деталі.
+   коли книгу залишили, а не момент, коли хтось повернувся дописати деталі. REREADING MODEL,
+   Фаза 11: `captureIfMissing` резолвить run через `ReadingRunRepository.getLatestByUserBookId`
+   у ту саму мить — той самий run, який `updateStatus` щойно завершив (`ReadingRunRepository.
+   finish`) кількома рядками вище в тій самій мутації.
 2. **`page` — `NOT NULL`.** На відміну від `lore_entity.first_seen_page` (де користувач міг і не
    вказати сторінку), тут сторінка ЗАВЖДИ відома — це знімок уже наявного
    `user_book.current_page` (сам `NOT NULL INTEGER` з дефолтом 0), взятий програмно, а не
@@ -52,10 +70,13 @@ CREATE TABLE dnf_reflection (
    рахується на льоту з `page`/`pageCount` видання (`computeDnfProgressPercent`,
    `src/lib/dnfReflection.ts`, обгортка над тим самим `computeProgressPercent`, що й решта
    застосунку).
-3. **`page`/`created_at` фіксуються рівно один раз.** Повторний перехід у той самий статус (чи
-   вихід і повернення в DNF пізніше) НЕ перезаписує вже наявний рядок —
-   `DnfReflectionRepository.captureIfMissing` перевіряє наявність перед вставкою. Той самий
-   "не переписуємо заднім числом" дух, що й `user_book.started_at`/`finished_at`.
+3. **`page`/`created_at` фіксуються рівно один раз НА RUN.** Повторний перехід у той самий
+   статус БЕЗ проміжного нового run (чи просто ще один виклик з тим самим статусом) НЕ
+   перезаписує вже наявний рядок — `DnfReflectionRepository.captureIfMissing` перевіряє
+   наявність знімка САМЕ для поточного run перед вставкою. Той самий "не переписуємо заднім
+   числом" дух, що й `user_book.started_at`/`finished_at`. REREADING MODEL, Фаза 11: книгу, яку
+   покинули, потім знову почали читати (новий run) і покинули ВДРУГЕ — це вже ІНШИЙ run, тож
+   `captureIfMissing` створює для нього СВІЙ ОКРЕМИЙ знімок; перший не зачіпається.
 4. **`reason` — вільний `TEXT` без CHECK.** Фіксований список (рівно сім причин ТЗ, і в тому ж
    порядку) живе лише на рівні TypeScript — `DnfReasonId`/`DNF_REASON_META`/`DNF_REASON_ORDER`
    (`src/design/dnfReason.ts`) — той самий "не потрібна нова міграція заради нового значення"
@@ -86,13 +107,20 @@ UI-компонент, що й вибір типу лору/статусу) ви
 ### Екран
 
 Секція "Не дочитав" — `app/work/[workId].tsx`, одразу після "До читання" (`PreReadingReflection
-Section`). Видима лише коли `dnf_reflection` уже існує для книги (тобто статус хоч раз був "Не
-дочитав") — для книги, яка ніколи туди не переходила, секції просто немає. Форма редагування
-причини/нотатки доступна лише поки статус РЕАЛЬНО "Не дочитав" (`canEditDnfReflection`); сам
-запис (сторінка, дата, причина, нотатка) лишається видимим і після зміни статусу — той самий
-"read-only спогад" підхід, що й `PreReadingReflectionSection` після завершення читання. Коли
-причина й нотатка ще порожні, замість форми-перешкоди показується нейтральний текст ТЗ: «Не
-кожна книга має бути дочитана.»
+Section`). Видима лише коли `dnf_reflection` уже існує ДЛЯ ПОТОЧНОГО RUN книги
+(`DnfReflectionRepository.getCurrent`, REREADING MODEL Фаза 11 — до неї було "для книги
+взагалі") — для книги, яка ніколи туди не переходила (чи для нового run, що ще не був
+покинутий), секції просто немає. Форма редагування причини/нотатки доступна лише поки статус
+РЕАЛЬНО "Не дочитав" (`canEditDnfReflection` — НЕ змінювалась Фазою 11: run-обізнаність робить
+своє через `getCurrent`, а не через розширення статусів, на відміну від
+`canEditPreReadingReflection` у Фазі 9); сам запис (сторінка, дата, причина, нотатка) лишається
+видимим і після зміни статусу — той самий "read-only спогад" підхід, що й
+`PreReadingReflectionSection` після завершення читання. Коли причина й нотатка ще порожні,
+замість форми-перешкоди показується нейтральний текст ТЗ: «Не кожна книга має бути дочитана.»
+UI-код (`DnfReflectionSection`, `useDnfReflection`) НЕ змінювався формою — той самий
+`userBookId`, жодного нового параметра чи додаткового блоку (на відміну від капсули, Фаза 10,
+де знадобився новий адитивний блок: тут немає "старого запису, що маскує пропозицію нового" —
+`getCurrent` сама показує знімок ТОГО run, який зараз актуальний).
 
 ## DNF MEMORY і майбутнє
 

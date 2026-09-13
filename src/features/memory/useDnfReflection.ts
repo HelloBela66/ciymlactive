@@ -9,16 +9,19 @@ import type { DnfReflection } from '@/types/dnfReflection';
 
 const log = createLogger('features/memory/dnfReflection');
 
-/** DNF IMPROVEMENT (POLYTSIA V1.6, Фаза 12) — знімок "Не дочитав" ЦІЄЇ книги, якщо він уже
- * зафіксований (`DnfReflectionRepository.captureIfMissing`, викликається з
- * `useUpdateUserBookStatus` автоматично при переході статусу). */
+/** DNF IMPROVEMENT (POLYTSIA V1.6, Фаза 12); REREADING MODEL, Фаза 11 — знімок "Не дочитав"
+ * ПОТОЧНОГО (найновішого) run цієї книги, якщо він уже зафіксований
+ * (`DnfReflectionRepository.captureIfMissing`, викликається з `useUpdateUserBookStatus`
+ * автоматично при переході статусу). `getCurrent` (не `getByUserBookId` — Фаза 11 прибрала цей
+ * метод, `docs/READING_RUN.md` §"Фаза 11") резолвить поточний run динамічно, тож перечитування,
+ * покинуте вдруге, показує СВІЙ ВЛАСНИЙ знімок, а не знімок першого покинутого прочитання. */
 export function useDnfReflection(userBookId: string | undefined) {
   return useQuery<DnfReflection | null>({
     queryKey: queryKeys.dnfReflection.byUserBook(userBookId ?? ''),
     queryFn: async () => {
       if (!userBookId) return null;
       const db = await getDatabase();
-      return DnfReflectionRepository.getByUserBookId(db, userBookId);
+      return DnfReflectionRepository.getCurrent(db, userBookId);
     },
     enabled: !!userBookId,
   });
