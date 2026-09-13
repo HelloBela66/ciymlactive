@@ -47,8 +47,12 @@ Wrapped (`src/features/wrapped/useWrappedYear.ts`) — сезон лише гр�
   сезону (якщо є хоч одна) береться найвище оцінена (чи перша, якщо жодна не оцінена);
   інакше — фолбек на найвищу оцінку сезону (той самий `topRatedBook`, що й у Wrapped);
 - `topGenre`/`busiestMonth` — той самий підрахунок, що й у Wrapped ("most-read genre"/"most
-  active month optional" з ТЗ); свідомо БЕЗ `topAuthor` — автора року в переліку статистик
-  Фази 13 немає;
+  active month optional" з ТЗ); до Фази 15 (POLYTSIA V1.6.1, ANALYTICS HIERARCHY,
+  `docs/MY_READING.md`) це були дві незалежні, буквально ідентичні копії коду — аудит V1.6.1
+  (§"Пара 4") це й зафіксував; тепер обидва рахуються спільними `computeTopGenreAmong`/
+  `computeBusiestMonth` (`src/lib/readingAggregates.ts`), той самий tie-break, що й раніше,
+  жодної зміни поведінки. Свідомо БЕЗ `topAuthor` — автора року в переліку статистик Фази 13
+  немає;
 - `journalHighlight` — "journal highlight optional" з ТЗ: останній за датою позначений
   "обраним" запис щоденника в межах дат сезону (`JournalRepository.listFeedPage`,
   `favoriteOnly: true`, `limit: 1`), уже наявний метод, жодного нового SQL не знадобилось.

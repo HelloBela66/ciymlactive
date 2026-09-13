@@ -5,7 +5,7 @@ import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepo
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { computeStreaks } from '@/lib/streaks';
-import type { ReadingSession } from '@/types/readingSession';
+import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
 
 const DAY_KEY_FORMAT = 'yyyy-MM-dd';
 
@@ -22,17 +22,14 @@ export interface OverallStatistics {
   today: { minutes: number; pages: number };
 }
 
-function sessionPages(session: ReadingSession): number {
-  const delta = session.endPage != null ? session.endPage - session.startPage : 0;
-  return Math.max(0, delta);
-}
-
 /**
  * Загальна статистика (розділ 30 ТЗ): один запит, що тягне всі завершені сесії та всі
  * прочитані книги користувача й рахує з них усе інше в JS — `streaks.ts` (чиста функція,
- * окремо перевірена й протестована) для поточного/найдовшого streak, прості
- * reduce/filter для решти. Дані одного локального користувача, тож повна вибірка лишається
- * дешевою (докладніше — коментар у `ReadingSessionRepository.listAllCompleted`).
+ * окремо перевірена й протестована) для поточного/найдовшого streak, `readingAggregates.ts`
+ * (Фаза 15, `docs/MY_READING.md`) для сум хвилин/сторінок — той самий вираз, що був
+ * продубльований і в `useWrappedYear.ts`/`useReadingSeason.ts`, тепер один спільний. Дані
+ * одного локального користувача, тож повна вибірка лишається дешевою (докладніше — коментар у
+ * `ReadingSessionRepository.listAllCompleted`).
  */
 export function useOverallStatistics() {
   return useQuery<OverallStatistics>({
@@ -52,12 +49,12 @@ export function useOverallStatistics() {
       const activeDaySet = new Set(dayKeys);
       const { current, longest } = computeStreaks(dayKeys, todayKey);
 
-      const totalMinutes = sessions.reduce((sum, s) => sum + Math.round((s.durationSeconds ?? 0) / 60), 0);
-      const totalPages = sessions.reduce((sum, s) => sum + sessionPages(s), 0);
+      const totalMinutes = sumSessionMinutes(sessions);
+      const totalPages = sumSessionPages(sessions);
 
       const todaySessions = sessions.filter((s) => s.startedAt.slice(0, 10) === todayKey);
-      const todayMinutes = todaySessions.reduce((sum, s) => sum + Math.round((s.durationSeconds ?? 0) / 60), 0);
-      const todayPages = todaySessions.reduce((sum, s) => sum + sessionPages(s), 0);
+      const todayMinutes = sumSessionMinutes(todaySessions);
+      const todayPages = sumSessionPages(todaySessions);
 
       const currentYear = new Date().getFullYear();
       const booksFinishedThisYear = finishedBooks.filter(

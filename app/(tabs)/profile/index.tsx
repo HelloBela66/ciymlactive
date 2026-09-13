@@ -10,7 +10,6 @@ import { useTheme, ThemePreference } from '@/design/ThemeProvider';
 import { themePreferenceLabels } from '@/design/i18n-labels';
 import { useOverallStatistics } from '@/features/statistics/useStatistics';
 import { pluralizeUk } from '@/lib/pluralizeUk';
-import { currentSeasonKey, formatSeasonKey } from '@/lib/season';
 
 const THEME_OPTIONS: ThemePreference[] = ['system', 'light', 'dark'];
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
@@ -25,7 +24,18 @@ interface MenuItem {
 }
 
 const MENU_ITEMS: MenuItem[] = [
-  { icon: 'bar-chart-outline', label: 'Статистика', onPress: () => router.push('/statistics') },
+  {
+    icon: 'bar-chart-outline',
+    label: 'Моє читання',
+    // POLYTSIA V1.6.1, Фаза 15 (ANALYTICS HIERARCHY, `docs/MY_READING.md`) — ОДИН рядок замість
+    // п'яти, що стояли тут до цієї фази (Статистика/Мій читацький профіль/Wrapped/Читацькі
+    // сезони/Мій читацький відбиток): усі п'ять екранів лишаються повністю доступними, тепер
+    // через новий хаб `app/my-reading.tsx`. `as unknown as Href` — той самий випадок, що й
+    // "Моя історія"/"Перевірка даних" нижче: щойно доданий маршрут, про який локально
+    // згенерований кеш типізованих маршрутів (`.expo/types/router.d.ts`) ще не знає до першого
+    // запуску dev-сервера на новій машині.
+    onPress: () => router.push('/my-reading' as unknown as Href),
+  },
   {
     icon: 'time-outline',
     label: 'Моя історія',
@@ -38,47 +48,8 @@ const MENU_ITEMS: MenuItem[] = [
     onPress: () => router.push('/history' as unknown as Href),
   },
   { icon: 'flag-outline', label: 'Цілі читання', onPress: () => router.push('/goals') },
-  {
-    icon: 'analytics-outline',
-    label: 'Мій читацький профіль',
-    // ТЗ Фази 14 (READING PROFILE) — `as unknown as Href`, той самий випадок, що й "Читацькі
-    // сезони"/"Моя історія"/"Перевірка даних" вище: щойно доданий маршрут
-    // (`app/reading-profile.tsx`), про який локально згенерований кеш типізованих маршрутів
-    // ще не знає до першого запуску dev-сервера на новій машині.
-    onPress: () => router.push('/reading-profile' as unknown as Href),
-  },
   { icon: 'notifications-outline', label: 'Нагадування', onPress: () => router.push('/reminders') },
   { icon: 'layers-outline', label: 'TBR reality check', onPress: () => router.push('/tbr') },
-  {
-    icon: 'sparkles-outline',
-    label: 'Wrapped',
-    onPress: () =>
-      router.push({ pathname: '/wrapped/[year]', params: { year: String(new Date().getFullYear()) } }),
-  },
-  {
-    icon: 'leaf-outline',
-    label: 'Читацькі сезони',
-    // ТЗ Фази 13 (READING SEASONS) — та сама "поточний рік" точка входу, що й Wrapped вище,
-    // лише замінена на "поточний сезон" (`currentSeasonKey`, `src/lib/season.ts`).
-    // `as unknown as Href` — той самий випадок, що й "Моя історія"/"Перевірка даних"/"Імпорт
-    // з Goodreads" нижче: щойно доданий маршрут (`app/seasons/[seasonKey].tsx`), про який
-    // локально згенерований кеш типізованих маршрутів (`.expo/types/router.d.ts`) ще не знає
-    // до першого запуску dev-сервера на новій машині.
-    onPress: () =>
-      router.push({
-        pathname: '/seasons/[seasonKey]',
-        params: { seasonKey: formatSeasonKey(currentSeasonKey(new Date())) },
-      } as unknown as Href),
-  },
-  {
-    icon: 'finger-print-outline',
-    label: 'Мій читацький відбиток',
-    // ТЗ Фази 15 (READING FINGERPRINT) — `as unknown as Href`, той самий випадок, що й "Мій
-    // читацький профіль"/"Читацькі сезони" вище: щойно доданий маршрут (`app/fingerprint.tsx`),
-    // про який локально згенерований кеш типізованих маршрутів ще не знає до першого запуску
-    // dev-сервера на новій машині.
-    onPress: () => router.push('/fingerprint' as unknown as Href),
-  },
   { icon: 'cloud-upload-outline', label: 'Резервна копія', onPress: () => router.push('/backup') },
   {
     icon: 'shield-checkmark-outline',

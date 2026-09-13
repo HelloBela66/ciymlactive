@@ -7,6 +7,13 @@ import { GenreRepository } from '@/data/repositories/GenreRepository';
 import { JournalRepository } from '@/data/repositories/JournalRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { seasonDateRange, formatSeasonKey } from '@/lib/season';
+import {
+  sumSessionMinutes,
+  sumSessionPages,
+  computeBusiestMonth,
+  filterFinishedInRange,
+  computeTopGenreAmong,
+} from '@/lib/readingAggregates';
 import type { SeasonId } from '@/design/season';
 import type { UserBookWithDetails } from '@/types/userBook';
 import type { JournalFeedEntry } from '@/types/journalEntry';
@@ -38,6 +45,11 @@ export interface ReadingSeasonData {
  * Фази 13 автора року немає ("finished books; pages; hours; sessions; favorite/highest rated
  * book; genre; active month"), на відміну від Wrapped. Два поля, яких у Wrapped нема:
  * `sessionsCount` (прямо в ТЗ) і `journalHighlight` (ТЗ: "journal highlight optional").
+ *
+ * Фаза 15 (ANALYTICS HIERARCHY, `docs/MY_READING.md`) — суми хвилин/сторінок, найактивніший
+ * місяць, фільтр "завершено в межах діапазону" й підрахунок топ-жанру підняті в
+ * `src/lib/readingAggregates.ts`: цей код був буквально ідентичний у `useWrappedYear.ts`
+ * (аудит §"Пара 4"). `favoriteBook`/`journalHighlight` лишаються тут — унікальні для сезонів.
  */
 export function useReadingSeason(seasonId: SeasonId, year: number) {
   return useQuery<ReadingSeasonData>({
@@ -51,15 +63,10 @@ export function useReadingSeason(seasonId: SeasonId, year: number) {
         ReadingSessionRepository.listStartedBetween(db, range.start, range.end),
       ]);
 
-      const booksFinished = allFinished.filter(
-        (ub) => ub.finishedAt != null && ub.finishedAt >= range.start && ub.finishedAt < range.end,
-      );
+      const booksFinished = filterFinishedInRange(allFinished, range);
 
-      const totalMinutes = sessions.reduce((sum, s) => sum + Math.round((s.durationSeconds ?? 0) / 60), 0);
-      const totalPages = sessions.reduce((sum, s) => {
-        const delta = s.endPage != null ? s.endPage - s.startPage : 0;
-        return sum + Math.max(0, delta);
-      }, 0);
+      const totalMinutes = sumSessionMinutes(sessions);
+      const totalPages = sumSessionPages(sessions);
 
       // Пакетні запити (той самий Milestone 8-style підхід, що й `useWrappedYear`) замість
       // одного на кожну завершену книгу сезону.
@@ -80,26 +87,11 @@ export function useReadingSeason(seasonId: SeasonId, year: number) {
       }
 
       const genresByWorkId = await GenreRepository.listByWorkIds(db, booksFinished.map((ub) => ub.work.id));
-      const genreCounts = new Map<string, number>();
-      for (const ub of booksFinished) {
-        for (const genre of genresByWorkId.get(ub.work.id) ?? []) {
-          genreCounts.set(genre.nameUk, (genreCounts.get(genre.nameUk) ?? 0) + 1);
-        }
-      }
-      let topGenre: ReadingSeasonData['topGenre'] = null;
-      for (const [name, count] of genreCounts) {
-        if (!topGenre || count > topGenre.count) topGenre = { name, count };
-      }
+      const topGenre = computeTopGenreAmong(
+        booksFinished.map((ub) => (genresByWorkId.get(ub.work.id) ?? []).map((g) => g.nameUk)),
+      );
 
-      const monthCounts = new Map<number, number>();
-      for (const session of sessions) {
-        const month = new Date(session.startedAt).getUTCMonth() + 1;
-        monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
-      }
-      let busiestMonth: ReadingSeasonData['busiestMonth'] = null;
-      for (const [month, count] of monthCounts) {
-        if (!busiestMonth || count > busiestMonth.sessionsCount) busiestMonth = { month, sessionsCount: count };
-      }
+      const busiestMonth = computeBusiestMonth(sessions);
 
       // "Journal highlight optional" (ТЗ) — останній ЗА ДАТОЮ позначений "обраним" запис
       // щоденника в межах дат сезону (глобальна стрічка, не одна книга — той самий
