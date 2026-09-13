@@ -1434,3 +1434,129 @@ describe('migrateDbIfNeeded — 025_rating_run (Фаза 12)', () => {
     expect(rating?.value).toBe(4);
   });
 });
+
+/**
+ * `026_hot_query_indexes.ts` (POLYTSIA V1.6.1, Фаза 24: PERFORMANCE / INDEX AUDIT,
+ * `docs/PERFORMANCE_AUDIT.md`) — той самий "чистий CREATE/DROP INDEX, без нової колонки і без
+ * per-row backfill" клас міграції, що й `018_shelf_book_index.ts` (тест 018 вище): існуючі рядки
+ * мають лишитись недоторканими, нові індекси — реально з'явитися в `sqlite_master`, а старі
+ * (тепер надлишкові — композит покриває їх за leftmost-prefix rule) — реально зникнути. На
+ * відміну від 018 (один новий індекс на одній таблиці), тут п'ять нових індексів на чотирьох
+ * таблицях і чотири видалених — тому трохи більше тестів, ніж у 018, але без окремого тесту на
+ * кожен individual index (це вже перевірено емпірично бенчмарком, не по одному в кожному it()).
+ */
+const MIGRATION_026_NOW = '2026-09-13T00:00:00.000Z';
+
+describe('migrateDbIfNeeded — 026_hot_query_indexes (Фаза 24)', () => {
+  async function seedPreMigration026Data(db: SQLiteDatabase): Promise<void> {
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, [
+      'work-1',
+      'Книга 1',
+      MIGRATION_026_NOW,
+      MIGRATION_026_NOW,
+    ]);
+    // Видання з isbn10 БЕЗ isbn13 — саме той рядок, який до цієї міграції змушував
+    // `EditionRepository.getByIsbn` падати в повний SCAN (нема індексу на isbn10).
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, isbn10, isbn13, language, format, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга 1', '1234567890', null, 'uk', 'paperback', MIGRATION_026_NOW, MIGRATION_026_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, added_at, updated_at) VALUES (?,?,'reading',0,?,?)`,
+      ['ub-1', 'edition-1', MIGRATION_026_NOW, MIGRATION_026_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, text, created_at, updated_at) VALUES (?,?,'general',?,?,?)`,
+      ['note-1', 'ub-1', 'Нотатка до міграції 026', MIGRATION_026_NOW, MIGRATION_026_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO quote (id, user_book_id, edition_id, text, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
+      ['quote-1', 'ub-1', 'edition-1', 'Цитата до міграції 026', MIGRATION_026_NOW, MIGRATION_026_NOW],
+    );
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, started_at, ended_at, paused_intervals, start_page, end_page,
+         duration_seconds, is_edited, created_at, updated_at
+       ) VALUES (?,?,?,?,'[]',?,?,?,0,?,?)`,
+      ['session-1', 'ub-1', MIGRATION_026_NOW, MIGRATION_026_NOW, 10, 25, 600, MIGRATION_026_NOW, MIGRATION_026_NOW],
+    );
+  }
+
+  it('старі рядки (edition/user_book/note/quote/reading_session) лишаються недоторканими після міграції', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 25);
+    await seedPreMigration026Data(db);
+
+    const finalVersion = await migrateDbIfNeeded(db);
+    expect(finalVersion).toBe(LATEST_SCHEMA_VERSION);
+
+    const edition = await db.getFirstAsync<{ isbn10: string | null; isbn13: string | null }>(
+      `SELECT isbn10, isbn13 FROM edition WHERE id = ?`,
+      ['edition-1'],
+    );
+    expect(edition).toEqual({ isbn10: '1234567890', isbn13: null });
+
+    // Сам запит getByIsbn (лише isbn10, без isbn13) і далі знаходить рядок — не лише індекс
+    // з'явився, а й поведінка читання не зламана.
+    const found = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM edition WHERE (isbn10 = ? OR isbn13 = ?) AND deleted_at IS NULL LIMIT 1`,
+      ['1234567890', '1234567890'],
+    );
+    expect(found?.id).toBe('edition-1');
+
+    const note = await db.getFirstAsync<{ text: string }>(`SELECT text FROM note WHERE id = ?`, ['note-1']);
+    expect(note?.text).toBe('Нотатка до міграції 026');
+
+    const quote = await db.getFirstAsync<{ text: string }>(`SELECT text FROM quote WHERE id = ?`, ['quote-1']);
+    expect(quote?.text).toBe('Цитата до міграції 026');
+
+    const session = await db.getFirstAsync<{ start_page: number }>(
+      `SELECT start_page FROM reading_session WHERE id = ?`,
+      ['session-1'],
+    );
+    expect(session?.start_page).toBe(10);
+  });
+
+  it('усі 5 нових композитних/одноколонкових індексів справді створені', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 25);
+    await seedPreMigration026Data(db);
+    await migrateDbIfNeeded(db);
+
+    const names = [
+      'idx_edition_isbn10',
+      'idx_user_book_status_updated_at',
+      'idx_note_user_book_created_at',
+      'idx_quote_user_book_created_at',
+      'idx_session_user_book_started_at',
+    ];
+    const rows = await db.getAllAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name IN (${names.map(() => '?').join(',')}) ORDER BY name`,
+      names,
+    );
+    expect(rows.map((r) => r.name)).toEqual([...names].sort());
+  });
+
+  it('старі надлишкові одноколонкові індекси видалені (композит покриває їх за leftmost-prefix); idx_edition_isbn13 лишається', async () => {
+    const db = await openTestDatabase();
+    await __applyMigrationsForTests(db, 25);
+    await seedPreMigration026Data(db);
+    await migrateDbIfNeeded(db);
+
+    const dropped = ['idx_user_book_status', 'idx_note_user_book', 'idx_quote_user_book', 'idx_session_user_book'];
+    const stillThere = await db.getAllAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name IN (${dropped.map(() => '?').join(',')})`,
+      dropped,
+    );
+    expect(stillThere).toHaveLength(0);
+
+    // isbn13 — НЕ видалений: MULTI-INDEX OR потребує ОБИДВА одноколонкові індекси (isbn10 і
+    // isbn13), композит тут не застосовний (два різні стовпці в диз'юнкції, не filter+sort
+    // однієї таблиці).
+    const isbn13Index = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_edition_isbn13'`,
+    );
+    expect(isbn13Index?.name).toBe('idx_edition_isbn13');
+  });
+});

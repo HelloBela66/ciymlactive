@@ -1,5 +1,38 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 24 — Performance / index audit
+
+**Дата:** 2026-09-13
+
+Аудит гарячих SQL-запитів проти реальних 25 (тепер 26) міграцій, виконаних справжнім SQLite
+(`node:sqlite`) на детермінованій seeded-фікстурі (1000 книг/5000 сесій/10000 записів
+щоденника/1000 lore-сутностей/500 капсул-прочитань). Три з чотирьох знайдених прогалин — уже
+точно названі в `docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 30.3) з позначкою "NOT BENCHMARKED";
+ця фаза — саме той бенчмарк. Повне обґрунтування, точні `EXPLAIN QUERY PLAN`-виводи до/після і
+методологія фікстури — `docs/PERFORMANCE_AUDIT.md`.
+
+**Додано:**
+- `src/data/db/migrations/026_hot_query_indexes.ts` (нова, версія схеми 26) — 5 нових
+  індексів: `edition(isbn10)` (виправляє реальний `SCAN edition` замість `MULTI-INDEX OR` у
+  `EditionRepository.getByIsbn` — ~6x на фікстурі), `user_book(status, updated_at)`,
+  `note(user_book_id, created_at)`, `quote(user_book_id, created_at)`,
+  `reading_session(user_book_id, started_at)` — усі чотири прибирають `TEMP B-TREE FOR ORDER
+  BY`, ~1.2x на 1000 книгах, зростає з розміром бібліотеки.
+- Та сама міграція ВИДАЛЯЄ 4 надлишкові одноколонкові індекси, які нові композити повністю
+  замінюють (leftmost-prefix rule): `idx_user_book_status`, `idx_note_user_book`,
+  `idx_quote_user_book`, `idx_session_user_book` — тримати обидва означало б подвійний
+  overhead на запис без користі на читання.
+- `docs/PERFORMANCE_AUDIT.md` (нове).
+- `docs/DATABASE.md` §"Індекси для продуктивності" — оновлено під нову композитну схему.
+- 3 нові тести (774 разом, було 771) — `migrationRunner.test.ts`: старі дані виживають
+  недоторканими, нові 5 індексів справді створені, старі 4 надлишкові справді видалені (а
+  `edition(isbn13)` — навмисно ні, той самий клас тесту, що й `018_shelf_book_index.ts`).
+
+**Свідомо НЕ зроблено:** індекс на `reading_session(ended_at)` окремо (жоден реальний виграш —
+`docs/PERFORMANCE_AUDIT.md`), індекс на `deleted_at` жодної таблиці (низька вибірковість),
+зміна UNION-запитів `ActivityHistoryRepository`/`OnThisDayRepository` (архітектурна властивість
+підходу, не прогалина в індексах — уже пояснено в аудиті, розділи 29.1-29.3).
+
 ## POLYTSIA V1.6.1, Фаза 23 — Haptics cleanup + CHANGELOG fix
 
 **Дата:** 2026-09-13

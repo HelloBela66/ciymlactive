@@ -868,9 +868,26 @@ CREATE TABLE app_settings (
 
 ## Індекси для продуктивності при 1000+ книг / 10000+ нотаток
 
-- `user_book(status)` — фільтр бібліотеки за статусом (найчастіший запит).
-- `reading_session(user_book_id)`, `reading_session(started_at)` — календар та статистика.
-- `note(user_book_id)`, `quote(user_book_id)` — сторінка книги.
+- `user_book(status, updated_at)` (POLYTSIA V1.6.1, Фаза 24 — композит, замінює одноколонковий
+  `user_book(status)`) — фільтр бібліотеки за статусом + сортування за `updated_at`
+  (`UserBookRepository.listByStatus`/`listStatusOnly`), найчастіший запит застосунку (кожне
+  відкриття Home/Library). Одноколонковий індекс покривав лише рівність за `status`;
+  сортування виконувалось окремим `TEMP B-TREE`-кроком — композит прибирає його повністю
+  (`EXPLAIN QUERY PLAN`, `docs/PERFORMANCE_AUDIT.md`).
+- `reading_session(user_book_id, started_at)` (POLYTSIA V1.6.1, Фаза 24 — композит, замінює
+  одноколонковий `reading_session(user_book_id)`) — історія сесій конкретної книги, найновіші
+  зверху (`ReadingSessionRepository.listByUserBookId`, Book Details); `reading_session(started_at)`
+  окремо — календар/цілі за діапазоном дат (`listStartedBetween`).
+- `note(user_book_id, created_at)`, `quote(user_book_id, created_at)` (POLYTSIA V1.6.1, Фаза 24
+  — композити, замінюють одноколонкові `note(user_book_id)`/`quote(user_book_id)`) — сторінка
+  книги (`NoteRepository.listByUserBook`/`QuoteRepository.listByUserBook`, фільтр за книгою +
+  сортування за `created_at` в одному індексі, без окремого `TEMP B-TREE`).
+- `edition(isbn10)` (POLYTSIA V1.6.1, Фаза 24) — `EditionRepository.getByIsbn`:
+  `WHERE (isbn10 = ? OR isbn13 = ?)`. Без індексу на ОБОХ боках `OR` SQLite не застосовує
+  `MULTI-INDEX OR`-оптимізацію й падає до повного `SCAN edition` навіть попри те, що
+  `edition(isbn13)` індексований — реальний CODE VERIFIED дефект, задокументований ще в
+  `docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 30.3, п.1), підтверджений `EXPLAIN QUERY PLAN` у
+  Фазі 24 (`docs/PERFORMANCE_AUDIT.md`).
 - `note(type)`, `note(is_favorite)`, `quote(is_favorite)`, `note(created_at)`,
   `quote(created_at)` (Milestone 11) — фільтр/сортування щоденника (по книзі/сесії через
   `JournalRepository.listPage`, глобально через `JournalRepository.listFeedPage`, Фаза 4) на
@@ -886,6 +903,15 @@ CREATE TABLE app_settings (
   `JournalRepository.listPage`/`listFeedPage` уже реалізують keyset на `(created_at, id)` —
   останній ще й з приєднанням `user_book → edition → work` для обкладинки/назви книги в
   глобальному екрані "Мій щоденник" (`app/journal/index.tsx`).
+
+**Примітка (Фаза 24):** старі одноколонкові `user_book(status)`/`reading_session(user_book_id)`/
+`note(user_book_id)`/`quote(user_book_id)` — ВИДАЛЕНІ, не залишені поруч із новими композитами:
+composite index покриває будь-який запит на самій лише провідній колонці так само добре
+(leftmost-prefix rule), тож тримати обидва означало б подвійний overhead на запис без користі
+на читання. `edition(isbn13)` НЕ видалений і не замінений композитом — `MULTI-INDEX OR`
+потребує окремого індексу на кожному боці диз'юнкції. Докладніше, з точними
+`EXPLAIN QUERY PLAN`-виводами до/після на детермінованій фікстурі 1000 книг/5000 сесій/10000
+записів щоденника — `docs/PERFORMANCE_AUDIT.md`.
 
 ## Backup-формат (докладно в `BACKUP_FORMAT.md`)
 
