@@ -1,5 +1,42 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 4 — ключ Google Books прибрано з клієнта (security-проксі)
+
+**Дата:** 2026-09-13
+
+Знахідка 🟡 з `docs/SECURITY.md`/`docs/V1_6_FULL_AUDIT_REPORT.md` (розділ 26/32): опційний
+`EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY` компілювався буквально в клієнтський бандл. Той самий
+шлюз-патерн, що вже застосовано до ISBNdb у Фазі 1.1 (`POLYTSIA V1.5`) — з однією
+принциповою архітектурною відмінністю, продиктованою правилом «DO NOT SILENTLY CHANGE
+PRODUCT BEHAVIOR»: Google Books безкоштовний і має робочий анонімний fallback, тож на
+відміну від ISBNdb провайдер НЕ вимикається без проксі — лише втрачає підвищену квоту.
+
+**Нове:**
+- `supabase/functions/google-books-proxy/` — нова Supabase Edge Function (Deno): три операції
+  (`search`/`lookup`/`get_edition`), ключ (опційний) живе виключно як Supabase secret
+  `GOOGLE_BOOKS_API_KEY`, таймаут 8с, ліміт відповіді 2 МБ, IP-based rate limiting (той самий
+  механізм, що й `isbndb-proxy`: `edge_rate_limit`/`edge_rate_limit_check`), щедріші вікна
+  (30/60с, 2000/добу) — Google Books найчастіше викликається з усіх джерел пошуку.
+- `src/data/remote/googleBooksProxyClient.ts` — клієнт до нової функції, той самий
+  try/catch-у-`null`, ніколи-не-кидає-в-UI патерн, що й `isbndbProxyClient.ts`.
+
+**Змінено:**
+- `src/data/providers/GoogleBooksProvider.ts` — більше не читає
+  `EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY` і не додає ключ до жодного прямого клієнтського запиту.
+  Два шляхи: проксі задеплоєно й увімкнено (`EXPO_PUBLIC_GOOGLE_BOOKS_PROXY_ENABLED=1`) — виклик
+  через `googleBooksProxyClient.ts`; проксі не налаштовано — прямий анонімний виклик без ключа
+  (той самий компроміс, що діяв і раніше). `isEnabled` лишається завжди `true`.
+- `.env.example` — `EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY` замінено на
+  `EXPO_PUBLIC_GOOGLE_BOOKS_PROXY_ENABLED` (не секрет, "0"/"1" power-switch, семантика вимкненого
+  стану навмисно інша, ніж у ISBNdb-прапорця — докладний коментар у файлі).
+- `docs/SECURITY.md`, `docs/BOOK_PROVIDERS.md` — оновлено під нову архітектуру; нова знахідка
+  🟡→⚪ і новий розділ "Оновлення (2026-09-13)".
+
+**OWNER ACTION REQUIRED (не виконано в цій сесії — немає доступу до Supabase CLI/credentials
+з хмарного середовища):** `supabase functions deploy google-books-proxy` і опційний
+`supabase secrets set GOOGLE_BOOKS_API_KEY=...` — докладні кроки в
+`supabase/functions/google-books-proxy/README.md`.
+
 ## POLYTSIA V1.6.1, Фаза 3 — централізована spoiler-safe policy: закрито 6 реальних витоків спойлерів
 
 **Дата:** 2026-09-13

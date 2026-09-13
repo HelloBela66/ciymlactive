@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createLogger } from '@/lib/logger';
 import { isFetchAborted } from '@/lib/isFetchAborted';
+import { GoogleBooksProxyClient, isGoogleBooksProxyConfigured, type GoogleBooksProxyBook } from '@/data/remote/googleBooksProxyClient';
 import type { NormalizedBookDraft } from '@/types/bookDraft';
 import type { BookMetadataProvider, RawProviderBook } from './BookMetadataProvider';
 
@@ -8,17 +9,33 @@ const log = createLogger('providers/googleBooks');
 
 const API_BASE = 'https://www.googleapis.com/books/v1/volumes';
 
-/** Необов'язковий безключовий → з ключем перехід (докладніше — `.env.example`,
- * `docs/BOOK_PROVIDERS.md`). Реальне тестування на пристрої показало: анонімні запити без
- * ключа мають дуже маленьку квоту й ловлять HTTP 429 навіть за акуратного використання —
- * ключ (безкоштовний у Google Cloud Console) знімає це майже повністю. Без ключа все одно
- * працює як і раніше — ключ лише додається до URL, якщо він є. */
-const API_KEY = process.env.EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY;
-
-function withApiKey(url: string): string {
-  if (!API_KEY) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(API_KEY)}`;
-}
+/**
+ * POLYTSIA V1.6.1, Фаза 4 (`docs/SECURITY.md`, знахідка 🟡 "Ключ Google Books іде прямо в
+ * клієнтський білд", `docs/V1_6_FULL_AUDIT_REPORT.md` розділ 26/32) — цей провайдер БІЛЬШЕ НЕ
+ * читає `EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY` і ніколи не додає жодного ключа до прямого
+ * клієнтського запиту. Замість цього — ДВА шляхи, обидва без секрету в клієнті:
+ *
+ * 1. **Проксі задеплоєно й увімкнено** (`isGoogleBooksProxyConfigured()`) — усі три методи
+ *    (`searchBooks`/`lookupByISBN`/`getEdition`) ідуть через
+ *    `supabase/functions/google-books-proxy/` (`GoogleBooksProxyClient`), де сервер сам додає
+ *    ключ (якщо власник продукту його поставив як Supabase secret) — той самий "вищий рівень
+ *    сервісу, ключ ніколи не в бандлі" підхід, що й `ISBNdbProvider.ts`.
+ * 2. **Проксі ще НЕ налаштовано** (типовий стан одразу після цієї фази, доки власник продукту не
+ *    виконав кроки з `supabase/functions/google-books-proxy/README.md`) — прямий анонімний
+ *    виклик до Google Books (нижче), БЕЗ жодного ключа. Це свідомо НЕ "провайдер вимкнено" (на
+ *    відміну від `ISBNdbProvider.isEnabled = isIsbndbProxyConfigured()`): Google Books —
+ *    core-джерело пошуку (`docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 19, "core loop"), і застосунок
+ *    не повинен ламати пошук книг для власника продукту, який ще не встиг задеплоїти цю функцію
+ *    (`docs/V1_6_1_FINAL_REPORT.md`, принцип "DO NOT SILENTLY CHANGE PRODUCT BEHAVIOR" — жодна
+ *    заміна архітектури тут не повинна робити гірше, ніж було до фікса). Анонімна квота нижча за
+ *    квоту з ключем, але це ТОЙ САМИЙ компроміс, що застосунок уже документував і приймав ще ДО
+ *    появи `EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY` — просто тепер це єдиний шлях без проксі, а не
+ *    "деградація без ключа" поруч із "нормальний режим із ключем у бандлі".
+ *
+ * `isEnabled` лишається завжди `true` (обидва шляхи вище завжди дають робочий результат,
+ * щонайменше анонімний) — на відміну від ISBNdb, де без проксі провайдер структурно не може
+ * працювати взагалі (платний сервіс).
+ */
 
 /** Навмисно "м'яка" схема (усе, крім title, опційне) — зовнішній JSON (п.19/ARCHITECTURE.md
  * "Ніколи не довіряємо `any` з мережі"), але Google Books у бойових відповідях реально не
@@ -63,6 +80,22 @@ function toRawBook(volume: z.infer<typeof VolumeSchema>): RawProviderBook {
   };
 }
 
+function proxyBookToRaw(book: GoogleBooksProxyBook): RawProviderBook {
+  return {
+    externalId: book.externalId,
+    title: book.title,
+    authors: book.authors,
+    isbn10: book.isbn10,
+    isbn13: book.isbn13,
+    publisher: book.publisher,
+    publicationDate: book.publicationDate,
+    pageCount: book.pageCount,
+    language: book.language,
+    description: book.description,
+    coverUrl: book.coverUrl,
+  };
+}
+
 /** Один HTTP-запит з м'яким degradation: будь-яка помилка мережі/парсингу — порожній
  * результат ([] чи null), НІКОЛИ не кидає далі в UI (docs/BOOK_PROVIDERS.md, "Технічні
  * ризики": rate limit чи зміна контракту не повинні ламати пошук — лишається manual entry).
@@ -71,18 +104,19 @@ function toRawBook(volume: z.infer<typeof VolumeSchema>): RawProviderBook {
  * React Query позначив запит "cancelled", а не "error" (і не залогувало його як помилку).
  * Детектор скасування — `isFetchAborted` (`src/lib/isFetchAborted.ts`), НЕ голий
  * `error.name === 'AbortError'`: на iOS/Expo Go нативний fetch кидає власний
- * `FetchRequestCanceledException` без цього імені — реальна знахідка з логів пристрою. */
-async function fetchVolumes(
+ * `FetchRequestCanceledException` без цього імені — реальна знахідка з логів пристрою.
+ *
+ * ФАЗА 4 V1.6.1 — БЕЗ жодного ключа (докладніше — коментар над файлом): цей прямий шлях тепер
+ * лише fallback, коли проксі не налаштовано, завжди анонімний.
+ */
+async function fetchVolumesDirect(
   query: string,
   signal?: AbortSignal,
   langRestrict?: string,
 ): Promise<z.infer<typeof VolumeSchema>[]> {
   try {
     const langParam = langRestrict ? `&langRestrict=${encodeURIComponent(langRestrict)}` : '';
-    const response = await fetch(
-      withApiKey(`${API_BASE}?q=${encodeURIComponent(query)}&maxResults=20${langParam}`),
-      { signal },
-    );
+    const response = await fetch(`${API_BASE}?q=${encodeURIComponent(query)}&maxResults=20${langParam}`, { signal });
     if (!response.ok) {
       log.warn('Google Books відповів не-OK статусом', { status: response.status });
       return [];
@@ -114,19 +148,31 @@ export const GoogleBooksProvider: BookMetadataProvider = {
     // (`filterUkrainianBooks` у `useProviderSearch`) лишається як страхувальний другий шар,
     // бо мовна мітка від самого джерела подекуди буває недостовірною (реальний приклад з
     // ISBNdb, який спричинив цю зміну).
-    const volumes = await fetchVolumes(query, signal, 'uk');
+    if (isGoogleBooksProxyConfigured()) {
+      const books = await GoogleBooksProxyClient.search(query, 'uk', signal);
+      return books.map(proxyBookToRaw);
+    }
+    const volumes = await fetchVolumesDirect(query, signal, 'uk');
     return volumes.map(toRawBook);
   },
 
   async lookupByISBN(isbn) {
-    const volumes = await fetchVolumes(`isbn:${isbn}`);
+    if (isGoogleBooksProxyConfigured()) {
+      const book = await GoogleBooksProxyClient.lookupByIsbn(isbn);
+      return book ? proxyBookToRaw(book) : null;
+    }
+    const volumes = await fetchVolumesDirect(`isbn:${isbn}`);
     const first = volumes[0];
     return first ? toRawBook(first) : null;
   },
 
   async getEdition(externalId) {
+    if (isGoogleBooksProxyConfigured()) {
+      const book = await GoogleBooksProxyClient.getEdition(externalId);
+      return book ? proxyBookToRaw(book) : null;
+    }
     try {
-      const response = await fetch(withApiKey(`${API_BASE}/${encodeURIComponent(externalId)}`));
+      const response = await fetch(`${API_BASE}/${encodeURIComponent(externalId)}`);
       if (!response.ok) return null;
       const json: unknown = await response.json();
       const parsed = VolumeSchema.safeParse(json);
