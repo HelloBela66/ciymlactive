@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AppText } from '@/components/ui/AppText';
+import { CardPreviewText } from '@/components/ui/CardPreviewText';
 import { useTheme } from '@/design/ThemeProvider';
 import { BADGE_META } from '@/lib/readingFingerprint';
 import type { BadgeId } from '@/lib/readingFingerprint';
@@ -20,9 +20,9 @@ function FingerprintCardFooter() {
       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: theme.spacing.sm }}
     >
       <Ionicons name="bookmark" size={10} color={theme.colors.textTertiary} />
-      <AppText variant="micro" color="tertiary">
+      <CardPreviewText variant="micro" color="tertiary">
         Полиця · читацький відбиток
-      </AppText>
+      </CardPreviewText>
     </View>
   );
 }
@@ -54,9 +54,9 @@ function BadgeTile({ badgeId }: { badgeId: BadgeId }) {
       >
         <Ionicons name={meta.icon} size={16} color={theme.colors.accent} />
       </View>
-      <AppText variant="caption" style={{ flex: 1, fontWeight: '600' }} numberOfLines={2}>
+      <CardPreviewText variant="caption" style={{ flex: 1, fontWeight: '600' }} numberOfLines={2}>
         {meta.label}
-      </AppText>
+      </CardPreviewText>
     </View>
   );
 }
@@ -73,6 +73,10 @@ export interface FingerprintCardPreviewProps {
  * 4:5) тут рівно ОДИН фіксований формат — ТЗ Фази 15 не згадує вибір формату взагалі, лише
  * кількісне обмеження бейджів (`selectShareCardBadges`, `src/lib/readingFingerprint.ts`),
  * тож єдина "точка вибору" тут — сам набір бейджів, порахований заздалегідь хуком.
+ *
+ * Увесь текст усередині — `CardPreviewText`, не `AppText` (POLYTSIA V1.6.1, Фаза 22,
+ * `docs/A11Y_LARGE_TEXT_AUDIT.md`): картка фіксованого `aspectRatio` з `overflow: 'hidden'` —
+ * системне масштабування шрифту тут обрізало б цілі секції композиції, а не один рядок.
  */
 export function FingerprintCardPreview({ badges }: FingerprintCardPreviewProps) {
   const theme = useTheme();
@@ -95,12 +99,12 @@ export function FingerprintCardPreview({ badges }: FingerprintCardPreviewProps) 
       </View>
       <View style={{ flex: 1, padding: theme.spacing.lg, gap: theme.spacing.md }}>
         <View style={{ alignItems: 'center', gap: 2 }}>
-          <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+          <CardPreviewText variant="micro" color="accent" style={{ fontWeight: '700' }}>
             МІЙ ЧИТАЦЬКИЙ ВІДБИТОК
-          </AppText>
+          </CardPreviewText>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs }}>
             <Ionicons name="finger-print-outline" size={22} color={theme.colors.accent} />
-            <AppText variant="title">Полиця</AppText>
+            <CardPreviewText variant="title">Полиця</CardPreviewText>
           </View>
           <SectionRule color={theme.colors.accent} />
         </View>

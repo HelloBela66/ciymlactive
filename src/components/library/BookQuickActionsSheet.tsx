@@ -6,6 +6,7 @@ import { AppText } from '@/components/ui/AppText';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { useTheme } from '@/design/ThemeProvider';
+import { useReducedMotionAnimationType } from '@/lib/useReducedMotionAnimationType';
 import { userBookStatusLabels, type UserBookStatus } from '@/design/i18n-labels';
 import { useToggleFavorite, useUpdateUserBookStatus, useRemoveFromLibrary } from '@/features/library/useUpdateUserBook';
 import type { UserBookWithDetails } from '@/types/userBook';
@@ -35,6 +36,7 @@ export function BookQuickActionsSheet({
   const toggleFavorite = useToggleFavorite();
   const updateStatus = useUpdateUserBookStatus();
   const removeFromLibrary = useRemoveFromLibrary();
+  const animationType = useReducedMotionAnimationType('slide');
 
   const visible = !!userBook;
 
@@ -58,7 +60,7 @@ export function BookQuickActionsSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType={animationType} onRequestClose={onClose}>
       <Pressable
         style={{ flex: 1, backgroundColor: theme.colors.overlay }}
         onPress={onClose}

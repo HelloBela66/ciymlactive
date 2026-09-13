@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '@/components/ui/AppText';
 import { Timeline, TIMELINE_MARKER_SIZE } from '@/components/ui/Timeline';
 import { useTheme } from '@/design/ThemeProvider';
+import { useReducedMotionAnimationType } from '@/lib/useReducedMotionAnimationType';
 import { useAllNoteCategories } from '@/features/notes/useNoteCategories';
 import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel';
 import { computeJournalTimelineMarkers, type TimelineMarker, type TimelineMarkerCategory } from '@/lib/journalTimeline';
@@ -41,6 +42,7 @@ export function JournalTimeline({ entries, pageCount, userBookId }: JournalTimel
   const { data: categories } = useAllNoteCategories(userBookId);
   const categoriesById = categoriesToMap(categories);
   const [openMarker, setOpenMarker] = useState<TimelineMarker | null>(null);
+  const animationType = useReducedMotionAnimationType('fade');
 
   const markers = computeJournalTimelineMarkers(entries, pageCount);
 
@@ -60,7 +62,7 @@ export function JournalTimeline({ entries, pageCount, userBookId }: JournalTimel
       <Modal
         visible={openMarker != null}
         transparent
-        animationType="fade"
+        animationType={animationType}
         onRequestClose={() => setOpenMarker(null)}
       >
         {/* Той самий backdrop-`Modal`-патерн, що й `ReactionToggle` (`src/components/journal/

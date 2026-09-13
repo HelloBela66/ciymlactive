@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText } from '@/components/ui/AppText';
 import { useTheme } from '@/design/ThemeProvider';
+import { useReducedMotionAnimationType } from '@/lib/useReducedMotionAnimationType';
 import type { LibrarySortOption } from '@/lib/libraryPreferenceStorage';
 
 const SORT_OPTIONS: { value: LibrarySortOption; label: string }[] = [
@@ -34,9 +35,10 @@ export function LibrarySortSheet({
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const animationType = useReducedMotionAnimationType('slide');
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType={animationType} onRequestClose={onClose}>
       <Pressable
         style={{ flex: 1, backgroundColor: theme.colors.overlay }}
         onPress={onClose}

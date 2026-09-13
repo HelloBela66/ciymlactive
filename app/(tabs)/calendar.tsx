@@ -25,6 +25,19 @@ function computeCoverSize(windowWidth: number, horizontalPadding: number): numbe
   return Math.round(Math.max(20, Math.min(34, cellWidth - 16)));
 }
 
+/**
+ * Обмеження масштабування дня-числа всередині круглих бейджів дня (POLYTSIA V1.6.1, Фаза 22,
+ * `docs/A11Y_LARGE_TEXT_AUDIT.md`) — на відміну від shareable-карток (`CardPreviewText`, повне
+ * вимкнення масштабування, бо це зображення фіксованого формату), тут звичайний живий екран:
+ * повне вимкнення зменшило б доступність без потреби. Бейдж — фіксоване коло (`width`/`height`
+ * рівні, щоб лишитись колом, не овалом при рості тексту) — 1-2-значне число саме по собі несе
+ * мало інформації для читача екрана (повна дата/інтенсивність/назва книги вже в
+ * `accessibilityLabel` клітинки), тож досить часткового обмеження (не повного вимкнення), яке
+ * лишає число читабельним, не даючи йому візуально вилізти за межі кола при найбільших
+ * системних розмірах шрифту.
+ */
+const DAY_BADGE_MAX_FONT_SCALE = 1.2;
+
 function intensityLabel(intensity: DayIntensityLevel): string {
   if (intensity === 0) return 'без читання';
   if (intensity === 1) return 'невелика активність читання';
@@ -156,7 +169,7 @@ export default function CalendarScreen() {
                       justifyContent: 'center',
                     }}
                   >
-                    <AppText variant="micro" color="secondary">
+                    <AppText variant="micro" color="secondary" maxFontSizeMultiplier={DAY_BADGE_MAX_FONT_SCALE}>
                       {day.date.getDate()}
                     </AppText>
                   </View>
@@ -175,6 +188,7 @@ export default function CalendarScreen() {
                   <AppText
                     variant="body"
                     color={day.isToday ? 'onAccent' : day.inCurrentMonth ? 'primary' : 'tertiary'}
+                    maxFontSizeMultiplier={DAY_BADGE_MAX_FONT_SCALE}
                   >
                     {day.date.getDate()}
                   </AppText>

@@ -321,8 +321,13 @@ function ReadingStatusChip({
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        height: theme.minTouchTarget,
+        // `minHeight`, не `height` (POLYTSIA V1.6.1, Фаза 22, `docs/A11Y_LARGE_TEXT_AUDIT.md`)
+        // — на відміну від сусіднього `HeaderIconButton` (лише іконка, жодного тексту, тож
+        // фіксований квадрат коректний), тут усередині живий `AppText`-лейбл: фіксована
+        // `height` обрізала б підпис статусу при великому системному розмірі шрифту.
+        minHeight: theme.minTouchTarget,
         paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.xs,
         borderRadius: theme.radius.lg,
         gap: 6,
         backgroundColor: selected ? theme.colors.accent : theme.colors.surface,

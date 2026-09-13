@@ -3,6 +3,7 @@ import { View, Pressable, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText } from '@/components/ui/AppText';
 import { useTheme } from '@/design/ThemeProvider';
+import { useReducedMotionAnimationType } from '@/lib/useReducedMotionAnimationType';
 import { REACTION_ORDER, REACTION_META, isReactionId, type ReactionId } from '@/design/reactions';
 
 /**
@@ -118,6 +119,7 @@ export function ReactionToggle({ value, onChange }: ReactionValueProps) {
   const theme = useTheme();
   const selected = normalizeValue(value);
   const [expanded, setExpanded] = useState(false);
+  const animationType = useReducedMotionAnimationType('fade');
 
   const trigger = selected ? REACTION_META[selected] : null;
 
@@ -143,7 +145,7 @@ export function ReactionToggle({ value, onChange }: ReactionValueProps) {
         />
       </Pressable>
 
-      <Modal visible={expanded} transparent animationType="fade" onRequestClose={() => setExpanded(false)}>
+      <Modal visible={expanded} transparent animationType={animationType} onRequestClose={() => setExpanded(false)}>
         {/* Напівпрозорий бекдроп на весь екран — тап поза карткою вибору закриває модалку.
          * Внутрішня картка — звичайний (не `Pressable`) `View`: тап десь у її "порожньому"
          * місці (не на самому чипі реакції) так само проходить крізь неї до бекдропу, що

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AppText } from '@/components/ui/AppText';
+import { CardPreviewText } from '@/components/ui/CardPreviewText';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { useTheme } from '@/design/ThemeProvider';
 import { formatDuration } from '@/lib/sessionTiming';
@@ -77,16 +77,16 @@ function SectionRule({ color }: { color: string }) {
 
 /** Велика лапка-орнамент — той самий "премій, але стримано" прийом, що й глянцева смужка на
  * `ReadingProgressBar` (імітація акценту без справжнього зображення/градієнта): один символ
- * `AppText`, збільшений через `style`, напівпрозорий, а не окрема іконка/картинка. */
+ * `CardPreviewText`, збільшений через `style`, напівпрозорий, а не окрема іконка/картинка. */
 function QuoteGlyph({ color }: { color: string }) {
   return (
-    <AppText
+    <CardPreviewText
       accessibilityElementsHidden
       importantForAccessibility="no"
       style={{ fontSize: 40, lineHeight: 36, fontWeight: '700', color, opacity: 0.45 }}
     >
       “
-    </AppText>
+    </CardPreviewText>
   );
 }
 
@@ -109,12 +109,12 @@ function StatBadgeTile({ icon, label, value }: { icon: IconName; label: string; 
       >
         <Ionicons name={icon} size={16} color={theme.colors.accent} />
       </View>
-      <AppText variant="caption" style={{ fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>
+      <CardPreviewText variant="caption" style={{ fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>
         {value}
-      </AppText>
-      <AppText variant="micro" color="tertiary" style={{ textAlign: 'center' }} numberOfLines={1}>
+      </CardPreviewText>
+      <CardPreviewText variant="micro" color="tertiary" style={{ textAlign: 'center' }} numberOfLines={1}>
         {label}
-      </AppText>
+      </CardPreviewText>
     </View>
   );
 }
@@ -135,9 +135,9 @@ function CardFooter() {
       }}
     >
       <Ionicons name="bookmark" size={10} color={theme.colors.textTertiary} />
-      <AppText variant="micro" color="tertiary">
+      <CardPreviewText variant="micro" color="tertiary">
         Полиця · читацький щоденник
-      </AppText>
+      </CardPreviewText>
     </View>
   );
 }
@@ -210,6 +210,10 @@ function pickFeaturedText(entries: JournalEntry[]): string | null {
  * усіх заготовлених шаблонів. Навмисно "тупий" презентаційний компонент без жодної
  * інтерактивності всередині (жодних Pressable) — Фаза 9 захоплюватиме його в PNG через ref,
  * тож будь-який інтерактивний елемент тут був би пасткою на знімку.
+ *
+ * Увесь текст усередині — `CardPreviewText`, не `AppText` (POLYTSIA V1.6.1, Фаза 22,
+ * `docs/A11Y_LARGE_TEXT_AUDIT.md`): картка фіксованого `aspectRatio` з `overflow: 'hidden'` —
+ * системне масштабування шрифту тут обрізало б цілі секції композиції, а не один рядок.
  */
 export function MemoryCardPreview({
   template,
@@ -257,13 +261,13 @@ export function MemoryCardPreview({
               borderRadius={theme.radius.md}
             />
             <View style={{ alignItems: 'center', gap: theme.spacing.xs }}>
-              <AppText variant="heading" style={{ textAlign: 'center' }} numberOfLines={2}>
+              <CardPreviewText variant="heading" style={{ textAlign: 'center' }} numberOfLines={2}>
                 {work.title}
-              </AppText>
+              </CardPreviewText>
               {work.authorNames.length > 0 ? (
-                <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+                <CardPreviewText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
                   {work.authorNames}
-                </AppText>
+                </CardPreviewText>
               ) : null}
               <SectionRule color={accentColor} />
             </View>
@@ -280,13 +284,13 @@ export function MemoryCardPreview({
                 }}
               >
                 <QuoteGlyph color={accentColor} />
-                <AppText
+                <CardPreviewText
                   variant="caption"
                   style={{ fontStyle: 'italic', textAlign: 'center', marginTop: -theme.spacing.sm }}
                   numberOfLines={4}
                 >
                   {reflection}
-                </AppText>
+                </CardPreviewText>
               </View>
             ) : null}
           </View>
@@ -307,13 +311,13 @@ export function MemoryCardPreview({
             >
               <QuoteGlyph color={accentColor} />
               {pickFeaturedText(entries) ? (
-                <AppText variant="title" style={{ textAlign: 'center', fontStyle: 'italic' }} numberOfLines={7}>
+                <CardPreviewText variant="title" style={{ textAlign: 'center', fontStyle: 'italic' }} numberOfLines={7}>
                   {pickFeaturedText(entries)}
-                </AppText>
+                </CardPreviewText>
               ) : (
-                <AppText variant="caption" color="tertiary" style={{ textAlign: 'center' }}>
+                <CardPreviewText variant="caption" color="tertiary" style={{ textAlign: 'center' }}>
                   Додай цитату чи нотатку до спогаду, щоб побачити її тут.
-                </AppText>
+                </CardPreviewText>
               )}
             </View>
             <View
@@ -334,13 +338,13 @@ export function MemoryCardPreview({
                 height={46}
               />
               <View style={{ flex: 1 }}>
-                <AppText variant="caption" numberOfLines={1}>
+                <CardPreviewText variant="caption" numberOfLines={1}>
                   {work.title}
-                </AppText>
+                </CardPreviewText>
                 {work.authorNames.length > 0 ? (
-                  <AppText variant="micro" color="secondary" numberOfLines={1}>
+                  <CardPreviewText variant="micro" color="secondary" numberOfLines={1}>
                     {work.authorNames}
-                  </AppText>
+                  </CardPreviewText>
                 ) : null}
               </View>
             </View>
@@ -359,13 +363,13 @@ export function MemoryCardPreview({
                 borderRadius={theme.radius.sm}
               />
               <View style={{ flex: 1, gap: 2 }}>
-                <AppText variant="heading" numberOfLines={2}>
+                <CardPreviewText variant="heading" numberOfLines={2}>
                   {work.title}
-                </AppText>
+                </CardPreviewText>
                 {work.authorNames.length > 0 ? (
-                  <AppText variant="caption" color="secondary" numberOfLines={1}>
+                  <CardPreviewText variant="caption" color="secondary" numberOfLines={1}>
                     {work.authorNames}
-                  </AppText>
+                  </CardPreviewText>
                 ) : null}
                 <SectionRule color={accentColor} />
               </View>
@@ -392,9 +396,9 @@ export function MemoryCardPreview({
             </View>
             <View style={{ flex: 1, justifyContent: 'center' }}>
               {reflection ? (
-                <AppText variant="caption" style={{ fontStyle: 'italic', textAlign: 'center' }} numberOfLines={3}>
+                <CardPreviewText variant="caption" style={{ fontStyle: 'italic', textAlign: 'center' }} numberOfLines={3}>
                   «{reflection}»
-                </AppText>
+                </CardPreviewText>
               ) : null}
             </View>
           </View>
@@ -411,13 +415,13 @@ export function MemoryCardPreview({
               borderRadius={theme.radius.md}
             />
             <View style={{ alignItems: 'center', gap: theme.spacing.xs }}>
-              <AppText variant="title" style={{ textAlign: 'center' }} numberOfLines={2}>
+              <CardPreviewText variant="title" style={{ textAlign: 'center' }} numberOfLines={2}>
                 {work.title}
-              </AppText>
+              </CardPreviewText>
               {work.authorNames.length > 0 ? (
-                <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
+                <CardPreviewText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
                   {work.authorNames}
-                </AppText>
+                </CardPreviewText>
               ) : null}
               <SectionRule color={accentColor} />
             </View>
@@ -435,9 +439,9 @@ export function MemoryCardPreview({
                 height={94}
                 borderRadius={theme.radius.sm}
               />
-              <AppText variant="heading" style={{ textAlign: 'center' }} numberOfLines={2}>
+              <CardPreviewText variant="heading" style={{ textAlign: 'center' }} numberOfLines={2}>
                 {work.title}
-              </AppText>
+              </CardPreviewText>
               <SectionRule color={accentColor} />
             </View>
             <View style={{ flex: 1, gap: theme.spacing.sm, justifyContent: 'center' }}>
@@ -449,17 +453,17 @@ export function MemoryCardPreview({
                   gap: 2,
                 }}
               >
-                <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+                <CardPreviewText variant="micro" color="accent" style={{ fontWeight: '700' }}>
                   ДО
-                </AppText>
+                </CardPreviewText>
                 {beforeText ? (
-                  <AppText variant="caption" style={{ fontStyle: 'italic' }} numberOfLines={3}>
+                  <CardPreviewText variant="caption" style={{ fontStyle: 'italic' }} numberOfLines={3}>
                     «{beforeText}»
-                  </AppText>
+                  </CardPreviewText>
                 ) : (
-                  <AppText variant="micro" color="tertiary">
+                  <CardPreviewText variant="micro" color="tertiary">
                     Ще не заповнено на Book Details.
-                  </AppText>
+                  </CardPreviewText>
                 )}
               </View>
               <View
@@ -471,17 +475,17 @@ export function MemoryCardPreview({
                   gap: 2,
                 }}
               >
-                <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+                <CardPreviewText variant="micro" color="accent" style={{ fontWeight: '700' }}>
                   ПІСЛЯ
-                </AppText>
+                </CardPreviewText>
                 {reflection ? (
-                  <AppText variant="caption" style={{ fontStyle: 'italic' }} numberOfLines={3}>
+                  <CardPreviewText variant="caption" style={{ fontStyle: 'italic' }} numberOfLines={3}>
                     «{reflection}»
-                  </AppText>
+                  </CardPreviewText>
                 ) : (
-                  <AppText variant="micro" color="tertiary">
+                  <CardPreviewText variant="micro" color="tertiary">
                     Ще нічого не написано.
-                  </AppText>
+                  </CardPreviewText>
                 )}
               </View>
             </View>

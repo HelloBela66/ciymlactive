@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AppText } from '@/components/ui/AppText';
+import { CardPreviewText } from '@/components/ui/CardPreviewText';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { useTheme } from '@/design/ThemeProvider';
 import { SEASON_META } from '@/design/season';
@@ -47,13 +47,13 @@ function SectionRule({ color }: { color: string }) {
 
 function QuoteGlyph({ color }: { color: string }) {
   return (
-    <AppText
+    <CardPreviewText
       accessibilityElementsHidden
       importantForAccessibility="no"
       style={{ fontSize: 32, lineHeight: 30, fontWeight: '700', color, opacity: 0.45 }}
     >
       “
-    </AppText>
+    </CardPreviewText>
   );
 }
 
@@ -73,12 +73,12 @@ function StatBadge({ icon, label, value }: { icon: IconName; label: string; valu
       >
         <Ionicons name={icon} size={15} color={theme.colors.accent} />
       </View>
-      <AppText variant="caption" style={{ fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>
+      <CardPreviewText variant="caption" style={{ fontWeight: '600', textAlign: 'center' }} numberOfLines={1}>
         {value}
-      </AppText>
-      <AppText variant="micro" color="tertiary" style={{ textAlign: 'center' }} numberOfLines={1}>
+      </CardPreviewText>
+      <CardPreviewText variant="micro" color="tertiary" style={{ textAlign: 'center' }} numberOfLines={1}>
         {label}
-      </AppText>
+      </CardPreviewText>
     </View>
   );
 }
@@ -90,9 +90,9 @@ function SeasonCardFooter() {
       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: theme.spacing.sm }}
     >
       <Ionicons name="bookmark" size={10} color={theme.colors.textTertiary} />
-      <AppText variant="micro" color="tertiary">
+      <CardPreviewText variant="micro" color="tertiary">
         Полиця · читацький сезон
-      </AppText>
+      </CardPreviewText>
     </View>
   );
 }
@@ -113,6 +113,10 @@ export interface SeasonCardPreviewProps {
  * (чотири обираних шаблони), тут рівно ОДИН шаблон — ТЗ прямо каже "Не додавай complex image
  * editor", тож єдина точка вибору лишена користувачу — це формат (`format` вище), а не
  * композиція самої картки.
+ *
+ * Увесь текст усередині — `CardPreviewText`, не `AppText` (POLYTSIA V1.6.1, Фаза 22,
+ * `docs/A11Y_LARGE_TEXT_AUDIT.md`): картка фіксованого `aspectRatio` з `overflow: 'hidden'` —
+ * системне масштабування шрифту тут обрізало б цілі секції композиції, а не один рядок.
  */
 export function SeasonCardPreview({ format, data }: SeasonCardPreviewProps) {
   const theme = useTheme();
@@ -143,14 +147,14 @@ export function SeasonCardPreview({ format, data }: SeasonCardPreviewProps) {
       </View>
       <View style={{ flex: 1, padding: theme.spacing.lg, gap: theme.spacing.md }}>
         <View style={{ alignItems: 'center', gap: 2 }}>
-          <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+          <CardPreviewText variant="micro" color="accent" style={{ fontWeight: '700' }}>
             МІЙ ЧИТАЦЬКИЙ СЕЗОН
-          </AppText>
+          </CardPreviewText>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs }}>
             <Ionicons name={meta.icon} size={22} color={theme.colors.accent} />
-            <AppText variant="title">
+            <CardPreviewText variant="title">
               {meta.label} {data.year}
-            </AppText>
+            </CardPreviewText>
           </View>
           <SectionRule color={theme.colors.accent} />
         </View>
@@ -218,12 +222,12 @@ export function SeasonCardPreview({ format, data }: SeasonCardPreviewProps) {
               height={46}
             />
             <View style={{ flex: 1 }}>
-              <AppText variant="micro" color="accent" style={{ fontWeight: '700' }}>
+              <CardPreviewText variant="micro" color="accent" style={{ fontWeight: '700' }}>
                 {data.favoriteBook.isFavorite ? 'УЛЮБЛЕНА КНИГА' : 'НАЙКРАЩА ОЦІНКА'}
-              </AppText>
-              <AppText variant="caption" numberOfLines={1}>
+              </CardPreviewText>
+              <CardPreviewText variant="caption" numberOfLines={1}>
                 {data.favoriteBook.userBook.work.title}
-              </AppText>
+              </CardPreviewText>
             </View>
           </View>
         ) : null}
@@ -231,16 +235,16 @@ export function SeasonCardPreview({ format, data }: SeasonCardPreviewProps) {
         {data.journalHighlight ? (
           <View style={{ backgroundColor: theme.colors.accentSoft, borderRadius: theme.radius.md, padding: theme.spacing.sm }}>
             <QuoteGlyph color={theme.colors.accent} />
-            <AppText variant="caption" style={{ fontStyle: 'italic', marginTop: -theme.spacing.sm }} numberOfLines={3}>
+            <CardPreviewText variant="caption" style={{ fontStyle: 'italic', marginTop: -theme.spacing.sm }} numberOfLines={3}>
               {data.journalHighlight.text}
-            </AppText>
+            </CardPreviewText>
           </View>
         ) : null}
 
         {captionParts.length > 0 ? (
-          <AppText variant="micro" color="tertiary" style={{ textAlign: 'center' }}>
+          <CardPreviewText variant="micro" color="tertiary" style={{ textAlign: 'center' }}>
             {captionParts.join(' · ')}
-          </AppText>
+          </CardPreviewText>
         ) : null}
 
         <SeasonCardFooter />

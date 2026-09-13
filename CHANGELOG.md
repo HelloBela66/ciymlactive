@@ -1,5 +1,40 @@
 # Changelog
 
+## POLYTSIA V1.6.1, Фаза 22 — Accessibility fixes
+
+**Дата:** 2026-09-13
+
+Три незалежні частини: (1) `reduceMotionEnabled` (`ThemeProvider.tsx`, з Milestone 8) досі
+нічого не вимикав — жоден компонент його не читав; (2) `ReadingProgressBar` без
+`accessibilityRole="progressbar"`/`accessibilityValue`; (3) перевірка large text (Dynamic Type/
+Android font scaling) на семи названих екранах — знайдено й виправлено три реальні ризики
+клипання тексту при великому системному розмірі шрифту. Повне обґрунтування, включно з повним
+переліком того, що перевірено й визнано безпечним — `docs/A11Y_LARGE_TEXT_AUDIT.md`.
+
+**Додано:**
+- `src/lib/useReducedMotionAnimationType.ts` — новий хук, повертає `'none'` замість заданого
+  типу переходу `Modal`, коли `theme.reduceMotionEnabled`; підключено до всіх чотирьох
+  `Modal`-переходів застосунку (`LibrarySortSheet`/`BookQuickActionsSheet`/`ReactionPicker`/
+  `JournalTimeline`) — єдиного нетривіального руху в усьому коді (перевірено `grep`;
+  `CollapsibleSection` навмисно вже синхронний, `react-native-reanimated` — невикористана
+  залежність, поза скоупом).
+- `src/components/ui/ReadingProgressBar.tsx` — `accessible`/`accessibilityRole="progressbar"`/
+  `accessibilityValue={{min: 0, max: 100, now, text}}` на зовнішньому `View`.
+- `app/(tabs)/library/index.tsx` — `ReadingStatusChip`: `height` → `minHeight` (текстовий
+  лейбл статусу міг клипатись при великому шрифті у фіксованій 44px висоті).
+- `app/(tabs)/calendar.tsx` — `maxFontSizeMultiplier={1.2}` на номері дня в обох круглих
+  бейджах (частковий ліміт, не повне вимкнення — компонент живий, не captured-зображення;
+  повна дата вже в `accessibilityLabel` клітинки).
+- `src/components/ui/CardPreviewText.tsx` (новий) — `AppText`-дублікат з жорстко вимкненим
+  `allowFontScaling`, застосований усюди в трьох shareable-картках фіксованого формату
+  (`MemoryCardPreview`/`SeasonCardPreview`/`FingerprintCardPreview` — captured у PNG через
+  `react-native-view-shot`; системне масштабування могло б обрізати цілі секції композиції).
+  Єдиний свідомий виняток із правила "увесь текст масштабується" в усьому застосунку.
+- `docs/A11Y_LARGE_TEXT_AUDIT.md` (нове).
+- 0 нових тестів (771 без змін) — нові хук/компонент тонкі обгортки над `useTheme`/`AppText`
+  (той самий клас коду, що й `useOnboardingHint`, для якого так само немає окремого тесту),
+  решта змін — розмітка/стилі екранів.
+
 ## POLYTSIA V1.6.1, Фаза 21 — Backup privacy UX
 
 **Дата:** 2026-09-13

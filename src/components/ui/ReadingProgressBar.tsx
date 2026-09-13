@@ -28,15 +28,32 @@ interface ReadingProgressBarProps {
  * "reading"/"rereading" (`app/(tabs)/library/index.tsx`) — обидва місця самі рахують `percent`
  * через `computeProgressPercent` (`src/lib/progressPercent.ts`) і не рендерять компонент
  * узагалі, коли видання не має відомої кількості сторінок.
+ *
+ * `accessibilityRole="progressbar"` + `accessibilityValue` (POLYTSIA V1.6.1, Фаза 22,
+ * `docs/A11Y_LARGE_TEXT_AUDIT.md`) — на зовнішній `View`, з `accessible` (групує трек/маркер/
+ * відсотковий чіп в один вузол для читача екрана, замість того, щоб "72%"-підпис праворуч
+ * озвучувався окремим, другим кроком). Компонентний рівень фіксу — у поточних викликах
+ * (Home/Бібліотека/Полиця) сам ряд-картка вже несе власний `accessibilityLabel` з відсотком
+ * (наприклад, `${title}, прочитано ${percent}%`) і, будучи `Pressable`, сам стає єдиним вузлом
+ * доступності — тож ця розмітка тут не змінює те, що вже озвучується в цих конкретних місцях
+ * сьогодні, але робить сам компонент коректним з власної точки зору для будь-якого поточного чи
+ * майбутнього виклику, де він НЕ загорнутий у такий батьківський `accessible`-елемент.
  */
 export function ReadingProgressBar({ percent, height = 8, showLabel = true }: ReadingProgressBarProps) {
   const theme = useTheme();
   const clamped = Math.max(0, Math.min(percent, 100));
+  const roundedPercent = Math.round(clamped);
   const thumbSize = height + 8;
   const iconSize = Math.max(8, Math.round(thumbSize * 0.55));
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel="Прогрес читання"
+      accessibilityValue={{ min: 0, max: 100, now: roundedPercent, text: `${roundedPercent}%` }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}
+    >
       <View
         style={{
           flex: 1,
@@ -99,7 +116,7 @@ export function ReadingProgressBar({ percent, height = 8, showLabel = true }: Re
           }}
         >
           <AppText variant="micro" color="accent" style={{ minWidth: 22, textAlign: 'center' }}>
-            {Math.round(clamped)}%
+            {roundedPercent}%
           </AppText>
         </View>
       ) : null}
