@@ -765,3 +765,197 @@ describe('ReadingSessionRepository.start — статус книги узгод�
     expect(bookIsReading).toBe(true);
   });
 });
+
+/**
+ * POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE) — `listRecentCompleted`/`listByStartedDayKey`/
+ * `listDistinctActiveDayKeys`/`getLifetimeCompletedTotals`/`getLifetimePaceTotals`: нові
+ * bounded/SQL-агрегатні методи, що замінили `listAllCompleted(db)` + JS-обчислення в
+ * `useOnePicker.ts`/`useStatistics.ts`/`useTbrReality.ts`/`useTomorrowRecommendation.ts`.
+ * Пряма SQL-вставка `reading_session` (як і `seedSession` в інших тестових файлах цього
+ * репозиторію) — жоден repository-метод не приймає довільний `startedAt`/`durationSeconds`,
+ * `start()`/`finish()` завжди пишуть `now()`.
+ */
+describe('ReadingSessionRepository — bounded/агрегатні запити (#168)', () => {
+  let sessionCounter = 0;
+
+  async function seedCompletedSessionAt(
+    db: SQLiteDatabase,
+    params: { userBookId: string; startedAt: string; startPage?: number; endPage?: number | null; durationSeconds?: number | null },
+  ): Promise<void> {
+    sessionCounter += 1;
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
+         start_page, end_page, duration_seconds, mood_note, reading_experience, is_edited,
+         created_at, updated_at, reading_run_id
+       ) VALUES (?, ?, ?, ?, NULL, '[]', ?, ?, ?, NULL, NULL, 0, ?, ?, NULL)`,
+      [
+        `test-agg-session-${sessionCounter}`,
+        params.userBookId,
+        params.startedAt,
+        params.startedAt, // ended_at — довільний, не NULL (лише завершені сесії видно нижче)
+        params.startPage ?? 0,
+        params.endPage ?? null,
+        params.durationSeconds ?? null,
+        now,
+        now,
+      ],
+    );
+  }
+
+  describe('listRecentCompleted', () => {
+    it('порожня таблиця — порожній масив', async () => {
+      const db = await openMigratedTestDb();
+      expect(await ReadingSessionRepository.listRecentCompleted(db, 5)).toEqual([]);
+    });
+
+    it('повертає лише останні `limit` сесій, найновіші перші — той самий порядок, що ручне сортування+slice', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-recent1' });
+      for (let i = 1; i <= 8; i += 1) {
+        await seedCompletedSessionAt(db, { userBookId: 'ub-recent1', startedAt: `2026-01-0${i}T10:00:00.000Z` });
+      }
+
+      const result = await ReadingSessionRepository.listRecentCompleted(db, 5);
+
+      expect(result.map((s) => s.startedAt)).toEqual([
+        '2026-01-08T10:00:00.000Z',
+        '2026-01-07T10:00:00.000Z',
+        '2026-01-06T10:00:00.000Z',
+        '2026-01-05T10:00:00.000Z',
+        '2026-01-04T10:00:00.000Z',
+      ]);
+    });
+
+    it('менше сесій, ніж `limit` — повертає всі наявні, без падіння', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-recent2' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-recent2', startedAt: '2026-01-01T10:00:00.000Z' });
+
+      const result = await ReadingSessionRepository.listRecentCompleted(db, 5);
+
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('listByStartedDayKey', () => {
+    it('повертає лише сесії того самого UTC-дня (перші 10 символів started_at)', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-day1' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-05T08:00:00.000Z' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-05T21:59:00.000Z' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-06T00:00:00.000Z' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-04T23:59:59.000Z' });
+
+      const result = await ReadingSessionRepository.listByStartedDayKey(db, '2026-03-05');
+
+      expect(result).toHaveLength(2);
+      expect(result.map((s) => s.startedAt)).toEqual(['2026-03-05T08:00:00.000Z', '2026-03-05T21:59:00.000Z']);
+    });
+
+    it('немає жодної сесії того дня — порожній масив', async () => {
+      const db = await openMigratedTestDb();
+      expect(await ReadingSessionRepository.listByStartedDayKey(db, '2026-03-05')).toEqual([]);
+    });
+  });
+
+  describe('listDistinctActiveDayKeys', () => {
+    it('порожня таблиця — порожній масив', async () => {
+      const db = await openMigratedTestDb();
+      expect(await ReadingSessionRepository.listDistinctActiveDayKeys(db)).toEqual([]);
+    });
+
+    it('дедуплікує кілька сесій того самого дня, повертає відсортовані ключі', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-days1' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-03T08:00:00.000Z' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-03T20:00:00.000Z' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-01T08:00:00.000Z' });
+
+      const result = await ReadingSessionRepository.listDistinctActiveDayKeys(db);
+
+      expect(result).toEqual(['2026-02-01', '2026-02-03']);
+    });
+  });
+
+  describe('getLifetimeCompletedTotals — та сама конвенція округлення хвилин, що й sumSessionMinutes', () => {
+    it('порожня таблиця — усі нулі, не помилка на SUM(NULL)', async () => {
+      const db = await openMigratedTestDb();
+      expect(await ReadingSessionRepository.getLifetimeCompletedTotals(db)).toEqual({
+        totalMinutes: 0,
+        totalPages: 0,
+        totalSessions: 0,
+      });
+    });
+
+    it('округлює КОЖНУ сесію окремо, тоді сумує (SQL ROUND, не SUM/60) — включно з рівно X.5 межею', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-total1' });
+      // 90с → round(1.5) = 2; 30с → round(0.5) = 1 — той самий приклад, що й
+      // readingAggregates.test.ts#sumSessionMinutes, тепер перевірений через SQL ROUND.
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total1', startedAt: '2026-01-01T10:00:00.000Z', durationSeconds: 90 });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total1', startedAt: '2026-01-02T10:00:00.000Z', durationSeconds: 30 });
+
+      const result = await ReadingSessionRepository.getLifetimeCompletedTotals(db);
+
+      expect(result.totalMinutes).toBe(3); // 2 + 1, НЕ round((90+30)/60) = 2
+      expect(result.totalSessions).toBe(2);
+    });
+
+    it('сторінки — додатна дельта endPage-startPage, обрізана знизу нулем; null endPage — 0', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-total2' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total2', startedAt: '2026-01-01T10:00:00.000Z', startPage: 10, endPage: 25 });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total2', startedAt: '2026-01-02T10:00:00.000Z', startPage: 50, endPage: 40 }); // від'ємна дельта
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total2', startedAt: '2026-01-03T10:00:00.000Z', startPage: 5, endPage: null });
+
+      const result = await ReadingSessionRepository.getLifetimeCompletedTotals(db);
+
+      expect(result.totalPages).toBe(15); // 15 + 0 + 0
+    });
+
+    it('null durationSeconds не ламає суму (трактується як 0 хвилин)', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-total3' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total3', startedAt: '2026-01-01T10:00:00.000Z', durationSeconds: null });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-total3', startedAt: '2026-01-02T10:00:00.000Z', durationSeconds: 600 });
+
+      const result = await ReadingSessionRepository.getLifetimeCompletedTotals(db);
+
+      expect(result.totalMinutes).toBe(10);
+      expect(result.totalSessions).toBe(2);
+    });
+  });
+
+  describe('getLifetimePaceTotals — СИРА конвенція (без округлення на сесію), для computeRollingPace-lifetime', () => {
+    it('порожня таблиця — нулі', async () => {
+      const db = await openMigratedTestDb();
+      expect(await ReadingSessionRepository.getLifetimePaceTotals(db)).toEqual({ totalMinutes: 0, totalPages: 0 });
+    });
+
+    it('сумує сирі секунди/60 БЕЗ округлення на кожну сесію (на відміну від getLifetimeCompletedTotals)', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-pace1' });
+      // 90с (1.5хв) + 30с (0.5хв) = 120с = 2хв рівно — жодного округлення на сесію, тож
+      // результат ІНШИЙ за getLifetimeCompletedTotals (там був би 2+1=3, не 2).
+      await seedCompletedSessionAt(db, { userBookId: 'ub-pace1', startedAt: '2026-01-01T10:00:00.000Z', durationSeconds: 90 });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-pace1', startedAt: '2026-01-02T10:00:00.000Z', durationSeconds: 30 });
+
+      const result = await ReadingSessionRepository.getLifetimePaceTotals(db);
+
+      expect(result.totalMinutes).toBe(2);
+    });
+
+    it('сторінки — та сама формула, що й getLifetimeCompletedTotals', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-pace2' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-pace2', startedAt: '2026-01-01T10:00:00.000Z', startPage: 10, endPage: 25 });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-pace2', startedAt: '2026-01-02T10:00:00.000Z', startPage: 50, endPage: 40 });
+
+      const result = await ReadingSessionRepository.getLifetimePaceTotals(db);
+
+      expect(result.totalPages).toBe(15);
+    });
+  });
+});

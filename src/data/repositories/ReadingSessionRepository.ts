@@ -441,10 +441,21 @@ export const ReadingSessionRepository = {
   },
 
   /**
-   * Усі завершені сесії за весь час — основа для загальної статистики та streaks
-   * (Milestone 5, `useStatistics.ts`/`streaks.ts`). Дані одного локального користувача,
-   * тож повна вибірка без пагінації лишається дешевою; якщо це стане проблемою — перше
-   * природне місце для SQL SUM/COUNT замість вибірки в JS.
+   * Усі завершені сесії за весь час — Milestone 5, споконвічно основа для загальної статистики
+   * та streaks (`useStatistics.ts`/`streaks.ts`).
+   *
+   * POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE): коментар цього методу довгий час прямо
+   * казав "якщо це стане проблемою — перше природне місце для SQL SUM/COUNT замість вибірки в
+   * JS" — ця фаза саме це й зробила для найгарячіших/найбільш марнотратних викликів: див.
+   * `getLifetimeCompletedTotals`/`getLifetimePaceTotals`/`listDistinctActiveDayKeys`/
+   * `listByStartedDayKey`/`listRecentCompleted` нижче. Метод лишається — досі єдине коректне
+   * джерело, коли реально потрібен повний РЯДКОВИЙ набір (не просто сума/лічильник), і надалі
+   * використовується двома фічами, де це виправдано (`useReadingFingerprint`/
+   * `useReadingProfile` — локальна погодинна "коли ти читаєш" потребує сирих `started_at` по
+   * КОЖНІЙ сесії; `docs/PERFORMANCE_AUDIT.md` §"Перевірено й свідомо НЕ додано" уже
+   * підтвердив бенчмарком, що індексація/обмеження самого запиту тут не дає реального виграшу
+   * — марнотратним був не сам SQL, а спосіб, яким ЦІ конкретні п'ять викликів
+   * (onePicker/statistics/tbrReality/tomorrow) його використовували).
    *
    * Навмисно НЕ використовується там, де відомий вузький діапазон дат (`listStartedBetween`
    * вище) — саме таке некероване використання (повна вибірка + `.filter()` по періоду в JS)
@@ -455,6 +466,125 @@ export const ReadingSessionRepository = {
       `SELECT * FROM reading_session WHERE deleted_at IS NULL AND ended_at IS NOT NULL ORDER BY started_at ASC`,
     );
     return rows.map(mapRow);
+  },
+
+  /**
+   * Останні `limit` завершених сесій, найновіші перші — POLYTSIA V1.6.2, #168. Замінює
+   * `listAllCompleted(db)` там, де насправді використовується лише "останні N" (найчастіший
+   * приклад — `useOnePicker.ts`'s `computeRollingPace` за замовчуванням: `DEFAULT_ROLLING_WINDOW`
+   * сесій, `src/lib/readingPace.ts`). Раніше цей виклик тягнув геть УСЮ історію сесій
+   * користувача (потенційно тисячі рядків), сортував і лишав перші `DEFAULT_ROLLING_WINDOW` —
+   * `ORDER BY ... LIMIT` нижче повертає рівно ті самі рядки (той самий `started_at`-порядок,
+   * що й ручне сортування в `computeRollingPace`), без матеріалізації решти.
+   */
+  async listRecentCompleted(db: SQLiteDatabase, limit: number): Promise<ReadingSession[]> {
+    const rows = await db.getAllAsync<ReadingSessionRow>(
+      `SELECT * FROM reading_session WHERE deleted_at IS NULL AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT ?`,
+      [limit],
+    );
+    return rows.map(mapRow);
+  },
+
+  /**
+   * Завершені сесії ОДНОГО конкретного `started_at`-дня — POLYTSIA V1.6.2, #168. Замінює
+   * `listAllCompleted(db).filter(s => s.startedAt.slice(0,10) === dayKey)`, який досі був у
+   * `useStatistics.ts`'s обчисленні "сьогодні" (`today.minutes`/`today.pages`): SQLite `substr`
+   * побайтово ідентичний JS `.slice(0,10)` на тому самому ISO-рядку, тож `dayKey` тут — рівно
+   * той самий рядок, що й раніше порівнювався в JS (навмисно НЕ переписано на діапазон
+   * `started_at >= X AND < Y` — це змінило б семантику: `dayKey` тут навмисно може бути
+   * "сьогодні" за ЛОКАЛЬНИМ часом пристрою (`date-fns format(new Date(), 'yyyy-MM-dd')` у
+   * виклику), тоді як `started_at` у БД — UTC ISO; substr-порівняння відтворює точно ту саму,
+   * вже наявну поведінку байт-в-байт, а не намагається "виправити" часовий пояс мовчки заразом
+   * із цією фазою).
+   */
+  async listByStartedDayKey(db: SQLiteDatabase, dayKey: string): Promise<ReadingSession[]> {
+    const rows = await db.getAllAsync<ReadingSessionRow>(
+      `SELECT * FROM reading_session
+       WHERE substr(started_at, 1, 10) = ? AND deleted_at IS NULL AND ended_at IS NOT NULL
+       ORDER BY started_at ASC`,
+      [dayKey],
+    );
+    return rows.map(mapRow);
+  },
+
+  /**
+   * УНІКАЛЬНІ `started_at`-дні (UTC, `substr(started_at,1,10)`), коли була хоч одна завершена
+   * сесія — POLYTSIA V1.6.2, #168. Замінює `listAllCompleted(db).map(s =>
+   * s.startedAt.slice(0,10))` у `useStatistics.ts` (streaks/`activeDaysCount`):
+   * `computeStreaks`/`Set`-розмір потребують лише УНІКАЛЬНІ рядки-ключі днів, не повні рядки
+   * сесій — `SELECT DISTINCT` повертає рівно ту множину, яку раніше рахував JS `new
+   * Set(dayKeys)`, лише без передачі й мапінгу кожного повного рядка сесії через міст.
+   */
+  async listDistinctActiveDayKeys(db: SQLiteDatabase): Promise<string[]> {
+    const rows = await db.getAllAsync<{ day_key: string }>(
+      `SELECT DISTINCT substr(started_at, 1, 10) AS day_key FROM reading_session
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL
+       ORDER BY day_key ASC`,
+    );
+    return rows.map((row) => row.day_key);
+  },
+
+  /**
+   * Підсумки за ВЕСЬ час одним SQL-агрегатом — POLYTSIA V1.6.2, #168. Замінює
+   * `sumSessionMinutes(sessions)`/`sumSessionPages(sessions)`/`sessions.length`
+   * (`src/lib/readingAggregates.ts`) над результатом `listAllCompleted` у `useStatistics.ts`.
+   *
+   * `totalMinutes` — СВІДОМО `SUM(ROUND(duration_seconds / 60.0))`, не `SUM(duration_seconds) /
+   * 60.0`: `sumSessionMinutes` округлює КОЖНУ сесію окремо, тоді сумує (той самий контракт, що
+   * й решта застосунку) — сирий `SUM/60` округлив би раз в кінці, даючи інше число. Емпірично
+   * перевірено (`node:sqlite`, той самий рушій, що й `expo-sqlite`/`better-sqlite3`, той самий
+   * підхід верифікації, що й `docs/PERFORMANCE_AUDIT.md`): SQLite `ROUND()` і JS `Math.round()`
+   * узгоджені на межових `X.5` значеннях (округлення вгору, не "до парного"), тож підстановка
+   * тут безпечна — перевірено на кількох межових мс/60 значеннях, включно з рівно `X.5`.
+   * `totalPages` — той самий `MAX(0, end_page - start_page)` вираз, що й `sumSessionPages`,
+   * лише як SQL `CASE`. `COALESCE(...,0)` — порожня таблиця (новий користувач) дає `SUM = NULL`
+   * в SQLite, а не `0`.
+   */
+  async getLifetimeCompletedTotals(
+    db: SQLiteDatabase,
+  ): Promise<{ totalMinutes: number; totalPages: number; totalSessions: number }> {
+    const row = await db.getFirstAsync<{ total_minutes: number; total_pages: number; total_sessions: number }>(
+      `SELECT
+         COALESCE(SUM(ROUND(duration_seconds / 60.0)), 0) AS total_minutes,
+         COALESCE(SUM(CASE WHEN end_page IS NOT NULL THEN MAX(0, end_page - start_page) ELSE 0 END), 0) AS total_pages,
+         COUNT(*) AS total_sessions
+       FROM reading_session
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL`,
+    );
+    return {
+      totalMinutes: row?.total_minutes ?? 0,
+      totalPages: row?.total_pages ?? 0,
+      totalSessions: row?.total_sessions ?? 0,
+    };
+  },
+
+  /**
+   * Підсумки за ВЕСЬ час для lifetime-темпу читання (`src/lib/readingPace.ts`'s
+   * `computeRollingPace(sessions, sessions.length)`) — POLYTSIA V1.6.2, #168. Використовують
+   * `useTbrReality.ts`/`useTomorrowRecommendation.ts` — обидва свідомо рахують темп за ВЕСЬ
+   * наявний час (не rolling-вікно, на відміну від `useOnePicker.ts`/`listRecentCompleted` вище),
+   * і жоден із них не читає `minutesPerActiveDay` з результату `computeRollingPace` — тож тут
+   * досить `{ totalMinutes, totalPages }`, без окремого підрахунку активних днів.
+   *
+   * СВІДОМО ІНША конвенція округлення, ніж `getLifetimeCompletedTotals` вище:
+   * `computeRollingPace` рахує хвилини СИРО (`durationSeconds / 60`, без округлення на сесію
+   * перед сумою) — на відміну від `sumSessionMinutes`. Тому тут `SUM(duration_seconds) / 60.0`
+   * (без `ROUND`) — підміна на округлену конвенцію дала б інше число для `pagesPerMinute`. Два
+   * різні "хвилини" в цій кодовій базі — навмисно різні методи, а не один спільний з
+   * прапорцем.
+   */
+  async getLifetimePaceTotals(db: SQLiteDatabase): Promise<{ totalMinutes: number; totalPages: number }> {
+    const row = await db.getFirstAsync<{ total_duration_seconds: number; total_pages: number }>(
+      `SELECT
+         COALESCE(SUM(duration_seconds), 0) AS total_duration_seconds,
+         COALESCE(SUM(CASE WHEN end_page IS NOT NULL THEN MAX(0, end_page - start_page) ELSE 0 END), 0) AS total_pages
+       FROM reading_session
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL`,
+    );
+    return {
+      totalMinutes: (row?.total_duration_seconds ?? 0) / 60,
+      totalPages: row?.total_pages ?? 0,
+    };
   },
 
   /**

@@ -13,7 +13,12 @@ export interface RollingPace {
   sessionsConsidered: number;
 }
 
-const DEFAULT_WINDOW = 5;
+/** POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE): експортовано (раніше — приватна константа
+ * файлу) так, щоб `ReadingSessionRepository.listRecentCompleted` (SQL-запит, що замінив
+ * `listAllCompleted` у `useOnePicker.ts`) міг попросити рівно стільки рядків, скільки
+ * `computeRollingPace` за замовчуванням і так візьме — одне джерело істини для цього числа
+ * замість двох синхронізованих вручну "5". */
+export const DEFAULT_ROLLING_WINDOW = 5;
 
 /** ~30 стор/год — розумне припущення на випадок, коли реальної історії читання ще немає
  * взагалі (нема жодної завершеної сесії, з якої порахувати темп). Єдине джерело цього числа —
@@ -28,7 +33,7 @@ export const FALLBACK_PAGES_PER_MINUTE = 0.5;
  * сесій за `started_at`, щоб прогноз реагував на те, як людина читає ОСТАННІМ часом, а не на
  * середнє за весь час знайомства з книгою (яке може тягнути давню паузу в кілька місяців).
  */
-export function computeRollingPace(sessions: PaceSessionInput[], windowSize: number = DEFAULT_WINDOW): RollingPace {
+export function computeRollingPace(sessions: PaceSessionInput[], windowSize: number = DEFAULT_ROLLING_WINDOW): RollingPace {
   const sorted = [...sessions].sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
   const recent = sorted.slice(0, windowSize);
 
@@ -49,4 +54,18 @@ export function computeRollingPace(sessions: PaceSessionInput[], windowSize: num
     minutesPerActiveDay: activeDayKeys.size > 0 ? totalMinutes / activeDayKeys.size : 0,
     sessionsConsidered: recent.length,
   };
+}
+
+/**
+ * `pagesPerMinute`-частина `computeRollingPace` вище, узята з уже готових ПІДСУМКІВ (не сирих
+ * сесій) — POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE). `useTbrReality.ts`/
+ * `useTomorrowRecommendation.ts` рахують `computeRollingPace(sessions, sessions.length)` — тобто
+ * `windowSize` = усі сесії, справжнього "вікна" тут нема — весь цикл функції вище зводиться
+ * рівно до цього одного виразу над двома лічильниками. Обидва хука тепер отримують ці два
+ * лічильники напряму SQL-агрегатом (`ReadingSessionRepository.getLifetimePaceTotals`) замість
+ * сирих рядків усієї історії сесій — ця функція лишає формулу "0, якщо ділити нема на що" в
+ * ОДНОМУ місці, а не дублює `totalMinutes > 0 ? totalPages / totalMinutes : 0` у двох хуках.
+ */
+export function pagesPerMinuteFromTotals(totalPages: number, totalMinutes: number): number {
+  return totalMinutes > 0 ? totalPages / totalMinutes : 0;
 }

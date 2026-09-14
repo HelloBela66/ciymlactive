@@ -11,7 +11,7 @@ import {
 import { EditionRepository } from '@/data/repositories/EditionRepository';
 import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { RecommendationRepository } from '@/data/repositories/RecommendationRepository';
-import { computeRollingPace, FALLBACK_PAGES_PER_MINUTE } from '@/lib/readingPace';
+import { FALLBACK_PAGES_PER_MINUTE, pagesPerMinuteFromTotals } from '@/lib/readingPace';
 import {
   buildSearchQueries,
   estimatePageBudget,
@@ -116,14 +116,19 @@ export function useTomorrowRecommendation() {
     mutationFn: async ({ genreId, genreNameUk, purpose, timeBudget }) => {
       const db = await getDatabase();
 
-      const [sessions, ownedKeys, shownKeys] = await Promise.all([
-        ReadingSessionRepository.listAllCompleted(db),
+      // POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE): раніше `listAllCompleted(db)` (уся
+      // історія сесій користувача) + `computeRollingPace(sessions, sessions.length)` — той
+      // самий "windowSize = усі сесії" lifetime-темп, що й TBR reality check
+      // (`useTbrReality.ts`). `getLifetimePaceTotals` рахує ті самі два числа одним SQL-
+      // агрегатом, без передачі жодного рядка сесії через міст.
+      const [{ totalPages, totalMinutes }, ownedKeys, shownKeys] = await Promise.all([
+        ReadingSessionRepository.getLifetimePaceTotals(db),
         EditionRepository.listAllIsbnKeys(db),
         RecommendationRepository.listShownKeys(db, genreId, purpose),
       ]);
 
-      const pace = computeRollingPace(sessions, sessions.length);
-      const pagesPerMinute = pace.pagesPerMinute > 0 ? pace.pagesPerMinute : FALLBACK_PAGES_PER_MINUTE;
+      const lifetimePagesPerMinute = pagesPerMinuteFromTotals(totalPages, totalMinutes);
+      const pagesPerMinute = lifetimePagesPerMinute > 0 ? lifetimePagesPerMinute : FALLBACK_PAGES_PER_MINUTE;
       const minutesMid = TIME_BUDGET_OPTIONS.find((option) => option.value === timeBudget)?.minutesMid ?? 270;
       const pageBudget = estimatePageBudget(minutesMid, pagesPerMinute);
 

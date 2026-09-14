@@ -158,6 +158,24 @@ ORDER BY started_at DESC
   умові тут нічого не пришвидшить) і `listAllCompleted` (свідомо БЕЗ `LIMIT`, розділ 29.1
   аудиту — сканує все незалежно від індексів, індекс на `ended_at` не рятує від матеріалізації
   всього набору перед сортуванням) — жоден реальний виграш.
+
+  **Уточнення, POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE)**: висновок вище стосувався
+  ІНДЕКСУ на сам запит `listAllCompleted` — і лишається правильним, індексація тут справді не
+  рятує. Проблемою, яку виявила #168, був не сам запит, а ЯК п'ять фіч-хуків
+  (`useOnePicker`/`useStatistics`/`useTbrReality`/`useTomorrowRecommendation`) його
+  використовували: `useOnePicker.ts` тягнув геть усю історію лише щоб лишити останні 5 сесій;
+  `useStatistics.ts` тягнув усе, щоб ЗНОВУ відфільтрувати "сьогодні" в JS (той самий клас
+  марнотратності, що `ReadingGoalRepository.getProgress` уже мав і виправив у Фазі 15);
+  `useTbrReality.ts`/`useTomorrowRecommendation.ts` тягнули усе лише заради двох чисел
+  (`totalPages`/`totalMinutes`). Нові bounded/SQL-агрегатні методи
+  (`ReadingSessionRepository.listRecentCompleted`/`listByStartedDayKey`/
+  `listDistinctActiveDayKeys`/`getLifetimeCompletedTotals`/`getLifetimePaceTotals`) прибирають
+  саме цю зайву передачу рядків через RN-міст — не через індекс, а через те, що кожен з цих
+  чотирьох викликів тепер повертає РІВНО те, що йому реально потрібно. `listAllCompleted` сам
+  лишився без змін і досі коректно використовується там, де справді потрібен повний рядковий
+  набір (`useReadingFingerprint`/`useReadingProfile` — локальна погодинна "коли ти читаєш"
+  вимагає сирих `started_at` по кожній сесії; свідомо НЕ переписано на SQL цієї фази — докладніше
+  доккоментар `listAllCompleted`).
 - **`deleted_at` (soft-delete) на жодній таблиці** (аудит, розділ 30.3, п.5) — низька
   вибірковість (видалених рядків завжди мало відносно живих), overhead на запис не виправданий
   для одного користувача. Свідомо НЕ перевірено бенчмарком окремо — сам аудит уже дав достатнє

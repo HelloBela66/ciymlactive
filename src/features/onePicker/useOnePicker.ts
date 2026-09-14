@@ -5,7 +5,7 @@ import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepo
 import { GenreRepository } from '@/data/repositories/GenreRepository';
 import { SeriesRepository } from '@/data/repositories/SeriesRepository';
 import { OwnedBookRepository } from '@/data/repositories/OwnedBookRepository';
-import { computeRollingPace, FALLBACK_PAGES_PER_MINUTE } from '@/lib/readingPace';
+import { computeRollingPace, DEFAULT_ROLLING_WINDOW, FALLBACK_PAGES_PER_MINUTE } from '@/lib/readingPace';
 import { TIME_BUDGET_OPTIONS, estimatePageBudget } from '@/lib/tomorrowRecommendation';
 import {
   TBR_SCOPE_STATUSES,
@@ -67,7 +67,11 @@ export function useOnePicker() {
         GenreRepository.listByWorkIds(db, workIds),
         SeriesRepository.listWorkIdsInSeries(db, workIds),
         OwnedBookRepository.listOwnedEditionIds(db, editionIds),
-        ReadingSessionRepository.listAllCompleted(db),
+        // POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE): раніше `listAllCompleted(db)` — уся
+        // історія сесій користувача — лише щоб `computeRollingPace` нижче лишила з неї
+        // останні `DEFAULT_ROLLING_WINDOW`. `listRecentCompleted` повертає рівно ці рядки
+        // напряму (`ORDER BY started_at DESC LIMIT`), без матеріалізації решти.
+        ReadingSessionRepository.listRecentCompleted(db, DEFAULT_ROLLING_WINDOW),
       ]);
 
       const candidates: PickerCandidate[] = userBooks.map((ub) => {
@@ -87,14 +91,13 @@ export function useOnePicker() {
       const filtered = filterCandidates(candidates, filters);
       if (filtered.length === 0) return null;
 
-      // Темп читання — СПРАВЖНІЙ rolling pace (лише останні `DEFAULT_WINDOW` (5) сесій,
-      // `computeRollingPace` без явного `windowSize`), той самий фолбек на нестачу історії, що
-      // й «Що почитати завтра?»/TBR reality check — АЛЕ НЕ той самий вибір вікна: обидві ті
-      // фічі свідомо передають `sessions.length` як `windowSize`, тобто рахують lifetime-
-      // середнє, а не rolling (аудит V1.6.1, §18 — CODE VERIFIED розбіжність, задокументована
-      // явно, а не мовчки лишена; `docs/NEXT_READ.md` §"Темп читання" Фази 14). Попередня версія
-      // цього коментаря хибно стверджувала "той самий rolling pace... що й Tomorrow/TBR" —
-      // виправлено тут, поведінка НЕ змінена жодною з трьох фіч.
+      // Темп читання — СПРАВЖНІЙ rolling pace (лише останні `DEFAULT_ROLLING_WINDOW` (5) сесій,
+      // `computeRollingPace` без явного `windowSize` — `sessions` уже й так рівно ці 5 рядків,
+      // `listRecentCompleted` вище), той самий фолбек на нестачу історії, що й «Що почитати
+      // завтра?»/TBR reality check — АЛЕ НЕ той самий вибір вікна: обидві ті фічі свідомо рахують
+      // lifetime-середнє (`getLifetimePaceTotals`, ТЗ §168), не rolling (аудит V1.6.1, §18 —
+      // CODE VERIFIED розбіжність, задокументована явно, а не мовчки лишена; `docs/NEXT_READ.md`
+      // §"Темп читання" Фази 14).
       const pace = computeRollingPace(
         sessions.map((s) => ({
           startPage: s.startPage,
