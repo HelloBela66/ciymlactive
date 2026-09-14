@@ -476,6 +476,79 @@ describe('BackupRepository — round-trip (Фаза 4, п.44/Backup Reliability)
   });
 });
 
+/**
+ * PROGRESS UX FIX (POLYTSIA V1.6.2, Фаза 3) — `restoreAll` тепер приймає опційний `onProgress`
+ * (докладніше — коментар над самою функцією в `BackupRepository.ts`), покликаний вирішити
+ * задокументований UX-борг (`docs/V1_6_1_FULL_AUDIT_REPORT.md` §87/§91/§92): без chunking'у
+ * рядок-за-рядком restore на великій бібліотеці міг виглядати "завислим". Тести нижче — на сам
+ * контракт колбека (порядок/повнота викликів, поведінка без нього, поведінка при відкоті), не
+ * на конкретну кількість таблиць (внутрішня деталь `BACKUP_TABLE_ORDER`, навмисно не імпортована
+ * сюди — той самий принцип "тест через публічний контракт", що й в решті цього файлу).
+ */
+describe('BackupRepository.restoreAll — прогрес відновлення (POLYTSIA V1.6.2, Фаза 3)', () => {
+  it('викликає onProgress по одному разу на кожну таблицю, done зростає без пропусків/дублів, останній виклик — done === total', async () => {
+    const sourceDb = await openMigratedTestDb();
+    await seedRepresentativeDatabase(sourceDb);
+    const exported = await BackupRepository.exportAll(sourceDb);
+
+    const targetDb = await openMigratedTestDb();
+    const calls: { done: number; total: number }[] = [];
+    await BackupRepository.restoreAll(targetDb, exported, (done, total) => calls.push({ done, total }));
+
+    expect(calls.length).toBeGreaterThan(0);
+    const total = calls[0]?.total ?? 0;
+    expect(total).toBeGreaterThan(0);
+    expect(calls.every((c) => c.total === total)).toBe(true); // total незмінний у кожному виклику
+    expect(calls.map((c) => c.done)).toEqual(Array.from({ length: total }, (_, i) => i + 1)); // 1,2,3...total, без пропусків
+    expect(calls[calls.length - 1]).toEqual({ done: total, total });
+  });
+
+  it('onProgress не передано — restoreAll усе одно працює як раніше (опційний параметр, не breaking change)', async () => {
+    const sourceDb = await openMigratedTestDb();
+    await seedRepresentativeDatabase(sourceDb);
+    const exported = await BackupRepository.exportAll(sourceDb);
+
+    const targetDb = await openMigratedTestDb();
+    await expect(BackupRepository.restoreAll(targetDb, exported)).resolves.toBeUndefined();
+
+    const reExported = await BackupRepository.exportAll(targetDb);
+    expectSameBackupData(reExported, exported);
+  });
+
+  it('помилка посеред вставки — onProgress не встигає дійти до останньої таблиці (транзакція відкочується цілком, той самий сценарій, що й тест атомарності вище)', async () => {
+    const sourceDb = await openMigratedTestDb();
+    await seedRepresentativeDatabase(sourceDb);
+    const exported = await BackupRepository.exportAll(sourceDb);
+
+    // Дізнаємось реальний `total` із завідомо успішного restore в окрему БД — той самий total,
+    // що передається в кожен виклик onProgress (фіксована кількість таблиць бекапу), без
+    // імпорту внутрішньої константи репозиторію напряму.
+    const referenceDb = await openMigratedTestDb();
+    let total = 0;
+    await BackupRepository.restoreAll(referenceDb, exported, (_done, t) => {
+      total = t;
+    });
+    expect(total).toBeGreaterThan(0);
+
+    const targetDb = await openMigratedTestDb();
+    const broken: BackupData = {
+      ...exported,
+      work_author: [{ work_id: 'work-1', author_id: 'does-not-exist', role: 'author' }],
+    };
+
+    const calls: { done: number; total: number }[] = [];
+    await expect(
+      BackupRepository.restoreAll(targetDb, broken, (done, t) => calls.push({ done, total: t })),
+    ).rejects.toThrow();
+
+    // work_author падає задовго до останньої таблиці списку (напр. app_settings) — INSERT
+    // кидає ДО виклику onProgress для цієї конкретної таблиці, тож калбек просто не встигає
+    // дійти до total, а вся транзакція відкочується цілком незалежно від того, скільки
+    // onProgress-викликів устигло статись до збою.
+    expect(calls.length).toBeLessThan(total);
+  });
+});
+
 describe('backup schemaVersion відповідає реальній схемі БД (Фаза 4 — "Підтримуй schemaVersion")', () => {
   it('MIN_COMPATIBLE_BACKUP_SCHEMA_VERSION ніколи не перевищує LATEST_SCHEMA_VERSION', () => {
     // Захист від майбутньої помилки: якби хтось підняв MIN_COMPATIBLE вище за LATEST, це

@@ -3,6 +3,8 @@ import Constants from 'expo-constants';
 import { format } from 'date-fns';
 import { getDatabase, LATEST_SCHEMA_VERSION } from '@/data/db';
 import { BackupRepository } from '@/data/repositories/BackupRepository';
+import { DataIntegrityRepository } from '@/data/repositories/DataIntegrityRepository';
+import type { DataIntegrityReport } from '@/domain/dataIntegrityDoctor';
 import {
   serializeBackup,
   parseBackupJson,
@@ -94,6 +96,21 @@ export function usePickBackupFile() {
   });
 }
 
+export interface RestoreBackupVariables {
+  envelope: BackupEnvelope;
+  /** PROGRESS UX FIX (POLYTSIA V1.6.2, Фаза 3) — прокидається без змін у
+   * `BackupRepository.restoreAll` (докладніше — коментар там-таки); опційний, щоб не ламати
+   * можливих майбутніх викликів без потреби в прогресі. */
+  onProgress?: (done: number, total: number) => void;
+}
+
+export interface RestoreBackupResult {
+  /** POST-RESTORE DATA DOCTOR FIX (POLYTSIA V1.6.2, Фаза 3) — `null`, лише якщо сама перевірка
+   * впала (докладніше — коментар над викликом нижче); ніколи не `null` через "нема проблем" —
+   * для цього є `report.hasIssues === false`. */
+  integrityReport: DataIntegrityReport | null;
+}
+
 /** Сам запис — replace-all в одній транзакції (`BackupRepository.restoreAll`) — якщо щось
  * впаде посеред запису, транзакція відкочується і бібліотека лишається такою, якою була до
  * спроби відновлення (звідси конкретний текст повідомлення нижче — це не загальне "щось
@@ -107,9 +124,9 @@ export function useRestoreBackup() {
     'Не вдалося відновити дані з резервної копії. Бібліотека лишилась незмінною — спробуй ще раз.',
   );
   return useMutation({
-    mutationFn: async (envelope: BackupEnvelope) => {
+    mutationFn: async ({ envelope, onProgress }: RestoreBackupVariables): Promise<RestoreBackupResult> => {
       const db = await getDatabase();
-      await BackupRepository.restoreAll(db, envelope.data);
+      await BackupRepository.restoreAll(db, envelope.data, onProgress);
       // POLYTSIA V1.6.1, Фаза 27 — `restoreAll` щойно вставила рядки файлу як є: якщо файл
       // зроблено ДО Фази 6 (`reading_run` тоді ще не існувала й не входила в
       // `BACKUP_TABLE_ORDER` — реальна прогалина, знайдена й закрита саме цією фазою), щойно
@@ -142,6 +159,25 @@ export function useRestoreBackup() {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      // POST-RESTORE DATA DOCTOR FIX (POLYTSIA V1.6.2, Фаза 3) — replace-all restore може
+      // принести дані з файлу, зробленого на іншому пристрої/у старішій версії застосунку, чи
+      // взагалі пошкодженого стороннім редагуванням JSON — рівно той сценарій, для якого
+      // Data Integrity Doctor (`DataIntegrityRepository.runCheck`, `app/data-doctor.tsx`)
+      // існує, лише досі запускався ЛИШЕ вручну з Профілю. Той самий "best-effort, збій не
+      // позначає весь restore невдалим" підхід, що й два кроки вище: сама перевірка НІЧОГО не
+      // пише в БД (лише читає), тож її збій не ризикує щойно відновленими даними — просто UI
+      // не покаже звіт. НЕ автозапуск на кожен вхід у Профіль (той принцип, що й досі, ТЗ
+      // Фази 5) — це разова перевірка одразу після replace-all, найризикованішої операції з
+      // усіх, де раптова суперечність даних найімовірніша.
+      let integrityReport: DataIntegrityReport | null = null;
+      try {
+        integrityReport = await DataIntegrityRepository.runCheck(db);
+      } catch (error) {
+        log.error('Не вдалося перевірити цілісність даних після відновлення', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return { integrityReport };
     },
     onSuccess: () => {
       queryClient.invalidateQueries();

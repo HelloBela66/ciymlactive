@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Alert, Switch } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, router, type Href } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { uk } from 'date-fns/locale';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
@@ -12,8 +12,11 @@ import { useExportBackup, usePickBackupFile, useRestoreBackup } from '@/features
 import { useBackupHealth } from '@/features/backup/useBackupHealth';
 import { useAutoBackupSettings, useSetAutoBackupEnabled } from '@/features/backup/useAutoBackup';
 import { useExportLibraryCsv } from '@/features/library-io/useExportLibraryCsv';
+import { pluralizeUk } from '@/lib/pluralizeUk';
 
 const DATE_LABEL_FORMAT = 'd MMMM yyyy, HH:mm';
+
+const ISSUE_FORMS = ['проблему', 'проблеми', 'проблем'] as const;
 
 /**
  * Backup/restore (`docs/BACKUP_FORMAT.md`, Milestone 6). Export пише JSON у файл і одразу
@@ -47,6 +50,13 @@ export default function BackupScreen() {
   const setAutoBackupEnabled = useSetAutoBackupEnabled();
   const backupHealth = useBackupHealth();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // PROGRESS UX FIX (POLYTSIA V1.6.2, Фаза 3, `docs/V1_6_1_FULL_AUDIT_REPORT.md` §87/§91/§92)
+  // — `restoreAll` тепер повідомляє прогрес по завершених таблицях (`useRestoreBackup`,
+  // `RestoreBackupVariables.onProgress`); тримаємо як просте число-відсоток, а не назву
+  // таблиці — 38 технічних імен таблиць користувачу нічого не скажуть, а "58%" одразу
+  // зрозуміло. `null` — restore ще не почався, замість 0%, щоб кнопка не блимала "0%" на
+  // старті ще до першого колбека.
+  const [restoreProgressPercent, setRestoreProgressPercent] = useState<number | null>(null);
 
   const runExport = () => {
     setStatusMessage(null);
@@ -120,10 +130,49 @@ export default function BackupScreen() {
               text: 'Замінити дані',
               style: 'destructive',
               onPress: () => {
-                restoreBackup.mutate(envelope, {
-                  onSuccess: () => setStatusMessage('Дані відновлено з резервної копії.'),
-                  onError: () => setStatusMessage('Не вдалося відновити дані — попередній стан не змінено.'),
-                });
+                setRestoreProgressPercent(0);
+                restoreBackup.mutate(
+                  {
+                    envelope,
+                    onProgress: (done, total) => setRestoreProgressPercent(Math.round((done / total) * 100)),
+                  },
+                  {
+                    onSuccess: ({ integrityReport }) => {
+                      setRestoreProgressPercent(null);
+                      // POST-RESTORE DATA DOCTOR FIX (POLYTSIA V1.6.2, Фаза 3) — `integrityReport`
+                      // може бути `null` лише якщо сама перевірка впала (best-effort, докладніше —
+                      // коментар у `useRestoreBackup`) — тоді НЕ кажемо "без зауважень" (це
+                      // означало б "перевірено й чисто", а насправді перевірку взагалі не вдалось
+                      // провести): лишаємось на нейтральному "відновлено", без згадки перевірки.
+                      // restore і так уже успішний, а перевірку завжди можна повторити вручну з
+                      // Профілю.
+                      if (integrityReport == null) {
+                        setStatusMessage('Дані відновлено з резервної копії.');
+                      } else if (integrityReport.hasIssues) {
+                        const count = integrityReport.issues.length;
+                        Alert.alert(
+                          'Дані відновлено',
+                          `Перевірка після відновлення знайшла ${count} ${pluralizeUk(count, ISSUE_FORMS)} — ` +
+                            'варто подивитись, що саме.',
+                          [
+                            { text: 'Пізніше', style: 'cancel' },
+                            {
+                              text: 'Перевірити дані',
+                              onPress: () => router.push('/data-doctor' as unknown as Href),
+                            },
+                          ],
+                        );
+                        setStatusMessage('Дані відновлено з резервної копії.');
+                      } else {
+                        setStatusMessage('Дані відновлено з резервної копії. Перевірка цілісності — без зауважень.');
+                      }
+                    },
+                    onError: () => {
+                      setRestoreProgressPercent(null);
+                      setStatusMessage('Не вдалося відновити дані — попередній стан не змінено.');
+                    },
+                  },
+                );
               },
             },
           ],
@@ -265,7 +314,15 @@ export default function BackupScreen() {
               замінюються без явної згоди.
             </AppText>
             <Button
-              label={pickFile.isPending || restoreBackup.isPending ? 'Обробляю…' : 'Обрати файл'}
+              label={
+                restoreBackup.isPending
+                  ? restoreProgressPercent != null
+                    ? `Відновлюю… ${restoreProgressPercent}%`
+                    : 'Відновлюю…'
+                  : pickFile.isPending
+                    ? 'Обробляю…'
+                    : 'Обрати файл'
+              }
               variant="secondary"
               onPress={handlePickFile}
               disabled={pickFile.isPending || restoreBackup.isPending}

@@ -128,14 +128,33 @@ export const BackupRepository = {
   /**
    * Replace-all restore (`docs/BACKUP_FORMAT.md` §Restore, крок 5 — merge не в V1), в одній
    * транзакції: якщо щось падає посеред вставки — повний rollback, БД лишається такою, якою
-   * була до restore.
+   * була до restore. Атомарність тут уже підтверджена прямим тестом ("помилка посеред вставки
+   * не лишає БД у частково перезаписаному стані", група тестів "round-trip" нижче) — не
+   * теоретична гарантія коментаря, а перевірена.
+   *
+   * PROGRESS UX FIX (POLYTSIA V1.6.2, Фаза 3 — задокументований UX-борг, не вигаданий: аудит
+   * `docs/V1_6_1_FULL_AUDIT_REPORT.md` §87/§91/§92 прямо називає відсутність прогрес-індикатора
+   * тут конкретним ризиком "користувач може подумати, що застосунок завис" на великій
+   * бібліотеці — рядок-за-рядком `INSERT`, без batching, реалістично десятки тисяч викликів
+   * в одній транзакції на 5-річному горизонті даних). Опційний `onProgress` — викликається
+   * ПІСЛЯ кожної завершеної таблиці (не рядка): `BACKUP_TABLE_ORDER` — фіксований, невеликий
+   * список (38 таблиць), тож ця гранулярність достатня, щоб UI показав "не завис, працює" без
+   * накладних витрат виклику React-стану на кожен окремий `INSERT`. `done`/`total` — індекс/
+   * кількість ТАБЛИЦЬ, не рядків: UI рахує з цього простий відсоток, не показує самі технічні
+   * назви таблиць.
    */
-  async restoreAll(db: SQLiteDatabase, data: BackupData): Promise<void> {
+  async restoreAll(
+    db: SQLiteDatabase,
+    data: BackupData,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<void> {
+    const total = BACKUP_TABLE_ORDER.length;
     await db.withTransactionAsync(async () => {
       for (const table of [...BACKUP_TABLE_ORDER].reverse()) {
         await db.runAsync(`DELETE FROM ${table}`);
       }
 
+      let done = 0;
       for (const table of BACKUP_TABLE_ORDER) {
         const rows = data[table] ?? [];
         for (const row of rows) {
@@ -145,6 +164,8 @@ export const BackupRepository = {
           const values = columns.map((column) => toBindValue(row[column]));
           await db.runAsync(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`, values);
         }
+        done += 1;
+        onProgress?.(done, total);
       }
     });
   },
