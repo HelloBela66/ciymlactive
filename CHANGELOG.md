@@ -77,6 +77,150 @@ Library.
 чіпався (поза скоупом "не альтерувати `ReadingRun`-lifecycle"). Докладніше —
 `docs/CALENDAR_VISUAL_REDESIGN_REPORT.md` §"Відомі обмеження".
 
+## POLYTSIA V1.6.2, #170 — Versioning, npm audit review, CI annotation triage
+
+**Дата:** 2026-09-14
+
+Документаційна фаза, продуктового коду не змінено. Версія (`package.json`/`app.config.ts`
+`0.1.0`) лишається без змін — вже задокументоване, свідоме рішення власника продукту
+(`docs/V1_6_FULL_AUDIT_REPORT.md` §"Версіонування", повторно підтверджено
+`docs/V1_6_1_FULL_AUDIT_REPORT.md`), не прогалина цієї фази.
+
+**npm audit — реальний прогін (не гіпотеза).** 20 moderate severity vulnerabilities, два
+незалежних ланцюжки: `decode-uri-component` (через `query-string`/`@react-navigation`/
+`expo-router`, фіксу немає) і `uuid <11.1.1` (через `@expo/ngrok`/`xcode`, "фікс" тягне мажорний
+відкат Expo SDK 57 → 46 — той самий клас ризику, через який `npm audit fix --force` заборонено
+в цьому репозиторії правилом, не лише конвенцією). Обидва — build/dev-tooling, не шлях обробки
+даних користувача; CI-крок `npm audit --audit-level=high` (`continue-on-error: true`) коректно
+не падає (moderate, не high). Докладніше — `docs/SECURITY.md` §3.
+
+**CI "зелено, але з анотацією" — джерело знайдено.** Раніше незакрита гіпотеза
+(`docs/V1_6_1_FULL_AUDIT_REPORT.md`) тепер підтверджена предметно на прогоні #95: анотація —
+виключно з `expo-doctor` (`continue-on-error: true`), не з `npm audit`. Причина — реальна й
+специфічна для проєкту: нативні теки (`android/`/`ios/`, Prebuild) присутні одночасно з
+нативними полями в `app.config.ts`, які EAS Build не синхронізує, доки ці теки існують.
+Архітектурне рішення проєкту, не регрес — коду не змінено. Докладніше — `docs/SECURITY.md` §3a.
+
+**Знайдено (неприбраний код):** `zustand` (`package.json`) — жодного імпорту в `src/`/`app/`
+(уже раніше зауважено як невирішене питання в `docs/V1_6_FULL_AUDIT_REPORT.md`, розділ 58,
+повторено в `docs/V1_6_1_FULL_AUDIT_REPORT.md`). Прибрано з `package.json`.
+
+**Знайдена й закрита прогалина цього CHANGELOG:** жодного запису для V1.6.2 не було, попри те
+що #165-169 і три фази `docs/READING_RUN.md`/`docs/BACKUP_FORMAT.md` вже реально відвантажені —
+записи нижче цю прогалину закривають.
+
+## POLYTSIA V1.6.2, #169 — Home context suppression + Book Details IA polish
+
+**Дата:** 2026-09-14
+
+**Book Details:** нова, статус-незалежна картка "Переглянути мою пам'ять про цю книгу"
+(`app/work/[workId].tsx`, `LibrarySection`) — показується завжди, коли в книги вже Є капсула
+(`useBookCapsule`), незалежно від поточного статусу. До цієї фази єдиний шлях до Капсули/Book
+Memory з Book Details ішов через кнопку "Переглянути підсумок читання", доступну лише для
+`finished`/`rereading` — книга, що зараз активно читається, але вже має капсулу з попереднього
+завершеного прочитання, не мала жодного шляху назад до неї (код-підтверджена прогалина, аудит
+V1.6.1 §29/§101). Докладніше — `docs/MEMORY_HUB.md` §"Оновлено #169".
+
+**Home:** кожна з п'яти контекстних карток (`src/components/home/HomeContextCard.tsx`) отримала
+кнопку "×" — приховати ЦЮ КОНКРЕТНУ картку до завтра (`getHomeContextCardSuppressionKey`/
+`selectVisibleHomeContextCard`, `src/lib/homeContext.ts`; `expo-secure-store`,
+`src/lib/homeContextSuppressionStorage.ts`). До цієї фази жоден з п'яти типів не мав способу
+"не зараз" — найпоказовіше `tbr_suggestion`, здатна показуватись ідентичною необмежено довго.
+Прихована картка "провалюється" до наступної за пріоритетом, не лишає порожній слот; сама
+пріоритезація (`selectHomeContextCard`) не змінена. Докладніше — `docs/HOME_REDESIGN.md`
+§"Оновлено #169".
+
+**Тести:** `src/lib/homeContext.test.ts` — нове покриття `getHomeContextCardSuppressionKey`/
+`nullifyHomeContextCandidate`/`selectVisibleHomeContextCard`.
+
+## POLYTSIA V1.6.2, #168 — Analytics performance
+
+**Дата:** 2026-09-14
+
+`ReadingSessionRepository.listAllCompleted` (уся історія завершених сесій користувача, без
+`LIMIT`) використовувалась 6 хуками лише заради невеликого зрізу/агрегату. 4 з 6 перевірено й
+переведено на нові вузькі/агрегатні методи репозиторію — `listRecentCompleted`,
+`listByStartedDayKey`, `listDistinctActiveDayKeys`, `getLifetimeCompletedTotals`,
+`getLifetimePaceTotals` (`useOnePicker`, `useOverallStatistics`, `useTbrReality`,
+`useTomorrowRecommendation`); 2 свідомо лишені без змін (`useReadingFingerprint`/
+`useReadingProfile` — обом потрібні сирі `startedAt` для локального time-of-day бакетингу,
+`docs/PERFORMANCE_AUDIT.md` уже мав бенчмарк без реального виграшу для цього запиту). SQL
+`ROUND()`-конвенція хвилин на сесію звірена з JS `Math.round()` на межах `.5` (`node:sqlite`,
+той самий рушій SQLite) перед застосуванням до нового `getLifetimeCompletedTotals`.
+
+**Тести:** `ReadingSessionRepository.test.ts` (нові групи для 5 нових методів, включно з
+межовими випадками округлення), `src/lib/readingPace.test.ts` (новий файл).
+
+## POLYTSIA V1.6.2, #167 — Reading Seasons redefinition
+
+**Дата:** 2026-09-14
+
+Сезони (`app/seasons/[seasonKey].tsx`) — редизайн з дашборду статистики на "емоційну пам'ять"
+сезону (явно санкціонований ТЗ як продуктова зміна, не лише баг-фікс), плюс 3 реальні виправлення
+попутно: джерело "яка книга належить сезону" тепер через `ReadingRun` (не
+`UserBook.status`, що змінюється поза сезоном), витяг журналу в спільну картку сезону більше не
+витікає приватний текст щоденника в зображення для поширення, зимова мітка року тепер
+"Зима 2026/27" (був некоректний "Зима 2027" для сезону, що охоплює межу року).
+
+**Додано:** `src/lib/season.ts` (перероблено)/`.test.ts`, `src/lib/readingAggregates.ts`
+(`computeActiveDays`/`computeDominantReadingExperience`)/`.test.ts`,
+`src/features/seasons/useReadingSeason.ts` — новий стандалон `fetchReadingSeasonData` + тонка
+хук-обгортка, перший тест у `src/features/*.test.ts` у проєкті.
+
+## POLYTSIA V1.6.2, #165 — Repository test coverage matrix
+
+**Дата:** 2026-09-14
+
+Перший систематичний прохід по всіх 14 репозиторіях `src/data/repositories/` без жодного
+`.test.ts` до цієї фази — класифікація за ризиком (шанс тихого пошкодження даних × складність
+логіки), не за розміром файлу. **P0 (єдиний, закритий):** `bookDraftRepository.ts` — єдиний
+багатотабличний транзакційний write-шлях у всій базі, нульове покриття попри власний коментар
+файлу, що прямо вимагає атомарності. Нові тести: щасливий шлях з усіма опційними полями,
+дедублікація автора/серії/видавництва/перекладача за іменем, два сценарії відкату (падіння в
+`EditionRepository.create`/`TranslatorRepository.linkToEdition`) — жодного "наполовину доданого"
+рядка після падіння. P1/P2 (нетривіальна логіка, але нижчий ризик) — свідомо відкладені,
+класифікація й обґрунтування — `docs/TESTING.md` §"Repository test coverage matrix".
+
+## POLYTSIA V1.6.2, Фаза 3 — Progress UX + post-restore Data Doctor fix
+
+**Дата:** 2026-09-14
+
+Два задокументовані UX-борги (`docs/V1_6_1_FULL_AUDIT_REPORT.md` §87/§91/§92), закриті разом:
+`BackupRepository.restoreAll` тепер приймає `onProgress(done, total)` (по завершеній таблиці,
+не рядку — 38 таблиць достатньо гранулярні), `app/backup.tsx` показує реальний відсоток замість
+невизначеного індикатора. Одразу після replace-all (найризикованіша операція) —
+`DataIntegrityRepository.runCheck` тепер прогоняється автоматично ОДИН РАЗ (лише читає БД,
+нічого не пише); знайдені проблеми показуються `Alert.alert` з переходом на `/data-doctor`.
+НЕ робить перевірку автоматичною на кожен вхід у Профіль — лише на сам restore.
+
+## POLYTSIA V1.6.2, Фаза 2 — Reading Run cancel/discard fix
+
+**Дата:** 2026-09-14
+
+P0-фікс Фази 1 нижче зробив видимою суміжну, раніше безнаслідкову прогалину: скасування сесії
+(`discard()`, "Скасувати сесію" на активному екрані читання) чіпало лише саму сесію — run, який
+щойно створив/відновив `start()`, лишався `in_progress` назавжди, а тепер (Фаза 1) ще й лишав
+книгу видимо позначеною "Читаю"/"Перечитую" без способу це відмінити з UI. Фікс —
+`computeStatusAfterRunRemoval()`, дзеркальна логіка до `inferStatusForSessionStart()`: скасована
+щойно-створена спроба (run без жодної іншої живої сесії, ще ніколи не завершувався) тепер
+м'яко видаляє й сам run, і повертає статус книги туди, де він мав би бути, якби цього run не
+існувало (за найновішим живим run, що лишився, або `want_to_read`, якщо такого нема). Реальна
+історія (run з іншими живими сесіями, або вже завершений) — не чіпається.
+
+## POLYTSIA V1.6.2, Фаза 1 — Reading Run start P0 fix
+
+**Дата:** 2026-09-14
+
+Реальний, не лише теоретичний дефект: кнопка "Почати читання" (єдиний шлях `ReadingControls`/
+`SessionLaunchScreen`) залишала книгу з активним `reading_run`, але статусом `want_to_read`/
+`finished`/`did_not_finish`, що йому суперечить (`dataIntegrityDoctor.ts`,
+`legacy_contradictory_status`). `ReadingSessionRepository.start()` тепер атомарно, в тій самій
+транзакції, виставляє й статус (`inferStatusForSessionStart`): продовження проходу — без змін;
+відсутність активного run — старт нового проходу: `finished` → `rereading`, `did_not_finish` →
+`reading` (рішення власника продукту — книга ще жодного разу не дочитана, це не перечитування),
+інакше → `reading`. `UserBookRepository.updateStatus` лишається окремим, незміненим шляхом для
+явної зміни статусу через чіп.
+
 ## POLYTSIA V1.6.1 — незалежний повний пост-імплементаційний аудит
 
 **Дата:** 2026-09-14
