@@ -3,6 +3,7 @@ import { generateId } from '@/lib/uuid';
 import { nowIso } from '@/lib/dateUtils';
 import { computeElapsedMs, isCurrentlyPaused } from '@/lib/sessionTiming';
 import type { PausedInterval, ReadingSession } from '@/types/readingSession';
+import type { UserBookStatus } from '@/types/userBook';
 import { UserBookRepository } from './UserBookRepository';
 import { ReadingProgressRepository } from './ReadingProgressRepository';
 import { ReadingRunRepository } from './ReadingRunRepository';
@@ -55,6 +56,45 @@ function mapRow(row: ReadingSessionRow): ReadingSession {
 }
 
 /**
+ * P0 FIX (POLYTSIA V1.6.2, Фаза 1 — підтверджений дефект, ТЗ V1.6.2 розділи 5-6): визначає,
+ * яким має стати `user_book.status`, коли користувач тисне "Почати читання"
+ * (`ReadingControls`/`SessionLaunchScreen`, обидва йдуть через `ReadingSessionRepository.start`
+ * нижче, НІКОЛИ через `UserBookRepository.updateStatus`). До цієї фази `start()` створювала
+ * run+сесію, узагалі не чіпаючи статус — книгу можна було "почати читати" з натиснутої кнопки,
+ * лишаючи `status = 'want_to_read'`, або перечитати вже `finished`/`did_not_finish` книгу, не
+ * переводячи її в `rereading` — рівно той "примарний" стан (активний run, але статус йому
+ * суперечить), який `dataIntegrityDoctor.ts` (`legacy_contradictory_status`) уже вміє знаходити,
+ * хибно вважаючи це можливим лише для даних ДО Фази 7.
+ *
+ * Правило: уже "читацький" статус (`reading`/`rereading`) лишається БЕЗ ЗМІН завжди — навіть
+ * якщо активного run ЧОМУСЬ немає (аномалія даних): книга й так каже "це читання/перечитування",
+ * `start()` лише гарантує їй run (окрема гілка нижче), не вигадує інший статус. Інакше: якщо для
+ * книги вже є активний run (`hasActiveRun`) — це ПРОДОВЖЕННЯ вже триваючого проходу (типово —
+ * відновлення з ручного `status = 'paused'`) — новий статус визначається самим типом цього run
+ * (`runNumber > 1` → це повторне прочитання). Якщо активного run немає — це СТАРТ НОВОГО проходу:
+ * `finished` → `rereading` (той самий цільовий статус, що вже виставляє чіп "Перечитати",
+ * `handleStatusChange('rereading')` у `app/work/[workId].tsx` — книга вже раз дочитана, це
+ * свідомий ПОВТОРНИЙ прохід). `did_not_finish` → `reading`, НЕ `rereading` (рішення власника
+ * продукту): це не перечитування — книга ще жодного разу не була дочитана, це продовження ТОГО
+ * САМОГО, ще не завершеного, читацького наміру з місця, де його покинули (`startPage` й так
+ * підставляється з `currentPage`, докладніше — `ReadingControls`/`SessionLaunchScreen`, кнопка
+ * там показує "Дочитати" саме для цього статусу). Будь-який інший стан (найчастіше
+ * `want_to_read`) → `reading`, перший старт.
+ */
+function inferStatusForSessionStart(
+  currentStatus: UserBookStatus,
+  hasActiveRun: boolean,
+  activeRunNumber: number | null,
+): UserBookStatus {
+  if (currentStatus === 'reading' || currentStatus === 'rereading') return currentStatus;
+  if (hasActiveRun) {
+    return activeRunNumber != null && activeRunNumber > 1 ? 'rereading' : 'reading';
+  }
+  if (currentStatus === 'finished') return 'rereading';
+  return 'reading';
+}
+
+/**
  * Сесії читання (п.12 ТЗ — критичний core loop). Ключове архітектурне рішення: сесія
  * записується в SQLite ОДРАЗУ при старті (не тримається в пам'яті доти, доки користувач не
  * натисне "завершити") — тому force-quit/краш під час читання не втрачає прогрес. Живий
@@ -87,14 +127,22 @@ export const ReadingSessionRepository = {
    * REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — нова сесія ЗАВЖДИ належить якомусь
    * `ReadingRun`. "Graceful" підхід, той самий принцип, що й `getActiveSession` вище /
    * `ReadingRunRepository.getActiveByUserBookId`: активний run шукається запитом, а не жорстким
-   * UNIQUE. Основний шлях створення run — перехід `user_book.status` у 'reading'/'rereading'
-   * (`UserBookRepository.updateStatus`, підключено тією самою Фазою 7) — на момент старту сесії
-   * активний run уже майже завжди існує. Але старт сесії й зміна статусу — свідомо незалежні дії
-   * (`ReadingControls`/`SessionLaunchScreen` ніколи не викликають `updateStatus`, книгу можна
-   * почати читати, лишаючи статус 'want_to_read'), тож без запасного "створити, якщо немає" тут
-   * сесія могла б лишитись без run у цілком легітимному сценарії. Цей фолбек НЕ чіпає
-   * `user_book.status` — лишає його свідомо незмінним, як і раніше (не розширює обсяг цієї фази
-   * на UX перемикання статусу). Обидва записи (можливе створення run + сама сесія) — в одній
+   * UNIQUE. Якщо активного run немає — створює новий сама (той самий "запасний" фолбек, що й
+   * раніше: `ReadingControls`/`SessionLaunchScreen` викликають САМЕ цей метод, не
+   * `UserBookRepository.updateStatus`).
+   *
+   * P0 FIX (POLYTSIA V1.6.2, Фаза 1 — див. `inferStatusForSessionStart` вище): на відміну від
+   * попередньої поведінки ("фолбек НЕ чіпає user_book.status", свідомо поза обсягом Фази 7),
+   * тепер `start()` САМА виставляє коректний `user_book.status` за тим самим правилом, що й
+   * `UserBookRepository.updateStatus` для явної зміни статусу — інакше кнопка "Почати читання"
+   * могла лишити книгу з активним прочитанням, але статусом `want_to_read`/`finished`/
+   * `did_not_finish`, що суперечить (`dataIntegrityDoctor.ts`, `legacy_contradictory_status`).
+   * `started_at` виставляється лише якщо ще не було (той самий захист від "стрибка" дати, що й
+   * у `updateStatus`) — `finished_at` тут навмисно НЕ чіпається: цільовий статус зі списку вище
+   * ніколи не `finished`/`did_not_finish`, тож старе поле лишається як є (той самий "заморожений
+   * `finished_at`" принцип, що документує `docs/READING_RUN.md`).
+   *
+   * Усі записи (можливе оновлення статусу + можливе створення run + сама сесія) — в одній
    * транзакції: `ReadingRunRepository.start`/`finish` не відкривають власних транзакцій, тож
    * безпечно викликати їх усередині цієї.
    */
@@ -107,6 +155,7 @@ export const ReadingSessionRepository = {
 
     const existingActiveRun = await ReadingRunRepository.getActiveByUserBookId(db, params.userBookId);
     let readingRunId = existingActiveRun?.id ?? null;
+    const userBook = await UserBookRepository.getById(db, params.userBookId);
 
     await db.withTransactionAsync(async () => {
       if (!readingRunId) {
@@ -115,6 +164,22 @@ export const ReadingSessionRepository = {
           startedAt: now,
         });
         readingRunId = newRun.id;
+      }
+
+      if (userBook) {
+        const targetStatus = inferStatusForSessionStart(
+          userBook.status,
+          existingActiveRun != null,
+          existingActiveRun?.runNumber ?? null,
+        );
+        if (targetStatus !== userBook.status) {
+          await db.runAsync(`UPDATE user_book SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`, [
+            targetStatus,
+            userBook.startedAt ?? now,
+            now,
+            params.userBookId,
+          ]);
+        }
       }
 
       await db.runAsync(

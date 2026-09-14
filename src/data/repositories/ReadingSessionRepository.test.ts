@@ -488,8 +488,11 @@ describe('ReadingSessionRepository.setReadingExperience (Фаза 9)', () => {
 /**
  * REREADING MODEL, Фаза 7 (`docs/READING_RUN.md`) — `start()` тепер ЗАВЖДИ прив'язує сесію до
  * якогось `ReadingRun`: або до вже активного (зазвичай створеного переходом статусу,
- * `UserBookRepository.updateStatus`, Фаза 7), або, якщо активного немає, створює новий сама
- * (graceful-фолбек — старт сесії й зміна статусу свідомо незалежні дії в цьому застосунку).
+ * `UserBookRepository.updateStatus`, Фаза 7), або, якщо активного немає, створює новий сама.
+ *
+ * P0 FIX (POLYTSIA V1.6.2, Фаза 1) — з цієї фази `start()` ТАКОЖ виставляє коректний
+ * `user_book.status` (`inferStatusForSessionStart`, коментар у самому репозиторії), а не лишає
+ * його незмінним, як раніше. Група тестів нижче ("статус книги...") перевіряє саме це.
  */
 describe("ReadingSessionRepository.start — прив'язка до reading_run (Фаза 7)", () => {
   it('активний run уже існує → сесія прив\'язується до нього, новий НЕ створюється', async () => {
@@ -532,13 +535,99 @@ describe("ReadingSessionRepository.start — прив'язка до reading_run 
     expect(runs).toHaveLength(1);
   });
 
-  it('створення run-фолбеком не чіпає user_book.status (свідомо поза обсягом цієї фази)', async () => {
+  it('P0 FIX (V1.6.2): "want_to_read" → "reading" разом зі стартом нового run, started_at виставляється', async () => {
     const db = await openMigratedTestDb();
     await seedUserBook(db, { id: 'ub-run4', status: 'want_to_read' });
 
     await ReadingSessionRepository.start(db, { userBookId: 'ub-run4', startPage: 0 });
 
     const userBook = await UserBookRepository.getById(db, 'ub-run4');
-    expect(userBook?.status).toBe('want_to_read');
+    expect(userBook?.status).toBe('reading');
+    expect(userBook?.startedAt).not.toBeNull();
+  });
+});
+
+describe('ReadingSessionRepository.start — статус книги узгоджується з run (P0 FIX, POLYTSIA V1.6.2, Фаза 1)', () => {
+  it('"finished" → "rereading" (новий run, старт після завершеного прочитання = перечитування)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-p0-1', status: 'finished' });
+    await ReadingRunRepository.start(db, { userBookId: 'ub-p0-1' });
+    await ReadingRunRepository.finish(db, (await ReadingRunRepository.getActiveByUserBookId(db, 'ub-p0-1'))!.id, {
+      status: 'finished',
+    });
+
+    const session = await ReadingSessionRepository.start(db, { userBookId: 'ub-p0-1', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-p0-1');
+    expect(userBook?.status).toBe('rereading');
+    const run = await ReadingRunRepository.getById(db, session.readingRunId as string);
+    expect(run?.runNumber).toBe(2);
+  });
+
+  it('"did_not_finish" → "reading", НЕ "rereading" (продовження, не перечитування — рішення власника продукту), новий run все одно створюється', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-p0-2', status: 'did_not_finish' });
+
+    const session = await ReadingSessionRepository.start(db, { userBookId: 'ub-p0-2', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-p0-2');
+    expect(userBook?.status).toBe('reading');
+    const run = await ReadingRunRepository.getById(db, session.readingRunId as string);
+    expect(run?.runNumber).toBe(1); // перший run цієї книги — DNF ще не мав жодного завершеного run до цього
+  });
+
+  it('вже "reading" з активним run — статус не міняється, started_at не перезаписується (без "стрибка" дати)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-p0-3', status: 'reading' });
+    const run = await ReadingRunRepository.start(db, { userBookId: 'ub-p0-3', startedAt: '2020-01-01T00:00:00.000Z' });
+    await db.runAsync(`UPDATE user_book SET started_at = ? WHERE id = ?`, ['2020-01-01T00:00:00.000Z', 'ub-p0-3']);
+
+    await ReadingSessionRepository.start(db, { userBookId: 'ub-p0-3', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-p0-3');
+    expect(userBook?.status).toBe('reading');
+    expect(userBook?.startedAt).toBe('2020-01-01T00:00:00.000Z');
+    const runs = await ReadingRunRepository.listByUserBookId(db, 'ub-p0-3');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.id).toBe(run.id);
+  });
+
+  it('"paused" з активним run №1 — відновлюється в "reading" (не "rereading")', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-p0-4', status: 'paused' });
+    await ReadingRunRepository.start(db, { userBookId: 'ub-p0-4' });
+
+    await ReadingSessionRepository.start(db, { userBookId: 'ub-p0-4', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-p0-4');
+    expect(userBook?.status).toBe('reading');
+  });
+
+  it('"paused" з активним run №2+ — відновлюється в "rereading" (це вже повторне прочитання)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-p0-5', status: 'paused' });
+    const firstRun = await ReadingRunRepository.start(db, { userBookId: 'ub-p0-5' });
+    await ReadingRunRepository.finish(db, firstRun.id, { status: 'finished' });
+    await ReadingRunRepository.start(db, { userBookId: 'ub-p0-5' }); // run_number=2, in_progress
+
+    await ReadingSessionRepository.start(db, { userBookId: 'ub-p0-5', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-p0-5');
+    expect(userBook?.status).toBe('rereading');
+  });
+
+  it('дані з "легасі-суперечністю" (finished, але вже DataIntegrityDoctor знайшов би invariant-порушення) більше не виникають після старту сесії', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-p0-6', status: 'want_to_read' });
+
+    await ReadingSessionRepository.start(db, { userBookId: 'ub-p0-6', startPage: 0 });
+
+    const userBook = await UserBookRepository.getById(db, 'ub-p0-6');
+    const activeRun = await ReadingRunRepository.getActiveByUserBookId(db, 'ub-p0-6');
+    // Той самий "суперечність" тест, що runDataIntegrityCheck робить для legacy_contradictory_status:
+    // активний run І "читацький" статус мають узгоджуватись, а не суперечити одне одному.
+    const bookIsReading = userBook?.status === 'reading' || userBook?.status === 'rereading';
+    expect(activeRun).not.toBeNull();
+    expect(bookIsReading).toBe(true);
   });
 });

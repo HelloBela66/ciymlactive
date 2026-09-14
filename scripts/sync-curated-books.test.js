@@ -52,7 +52,9 @@ describe('readEnvFile', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'catalog-import-env-'));
   });
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay — той самий захист від транзієнтного Windows EBUSY, що й
+    // scripts/catalog-import/report.test.js (докладніше — коментар там).
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('парсить KEY=value рядки, ігнорує # коментарі й порожні рядки', () => {
@@ -85,7 +87,9 @@ describe('loadSupabaseConfig', () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay — той самий захист від транзієнтного Windows EBUSY, що й
+    // scripts/catalog-import/report.test.js (докладніше — коментар там).
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     process.env = { ...originalEnv };
   });
 
@@ -120,7 +124,9 @@ describe('readCsvFile', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'catalog-import-csvfile-'));
   });
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay — той самий захист від транзієнтного Windows EBUSY, що й
+    // scripts/catalog-import/report.test.js (докладніше — коментар там).
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('валідний CSV з правильним header — rowNumber рахується від 2 (рядок 1 — header)', () => {
@@ -245,7 +251,9 @@ describe('CLI end-to-end — ідемпотентність (mock Supabase, ре
   });
 
   afterEach(async () => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay — той самий захист від транзієнтного Windows EBUSY, що й
+    // scripts/catalog-import/report.test.js (докладніше — коментар там).
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     await new Promise((resolve) => server.close(resolve));
   });
 

@@ -148,7 +148,10 @@ describe('writeReportFiles', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // maxRetries/retryDelay — Windows інколи тримає щойно записаний файл коротко залоченим
+    // (антивірус/індексатор), rmSync тоді падає з EBUSY навіть при force:true; Node сама
+    // документує ці два параметри як штатний спосіб пережити саме такий транзієнтний лок.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('пише і .json, і .txt файли, іменовані batchId, директорія створюється, якщо не існує', () => {

@@ -629,8 +629,13 @@ export function runDataIntegrityCheck(snapshot: DataIntegritySnapshot): DataInte
       }
     }
 
-    // Застаріла суперечність (до реального "підключення" статусу книги до run, Фаза 7):
-    // найновіший run книги каже одне, `user_book.status` — протилежне.
+    // Суперечність між найновішим run книги й `user_book.status`. Коментар історично називав це
+    // "застарілим" станом, можливим лише в даних ДО Фази 7 (`UserBookRepository.updateStatus`) —
+    // це виявилось НЕ так: до P0 FIX (POLYTSIA V1.6.2, Фаза 1) `ReadingSessionRepository.start()`
+    // (єдиний шлях кнопки "Почати читання") створювала run, узагалі не чіпаючи статус, тож саме
+    // цей стан міг виникати й у щойно записаних даних. Після Фази 1 нові дані більше не мали б
+    // породжувати цю суперечність — перевірка лишається як safety net (старі дані до фікса,
+    // ручне редагування БД, майбутні шляхи запису, що можуть обійти `start()`/`updateStatus`).
     const latestRun = bySequence[bySequence.length - 1];
     if (userBook && latestRun) {
       const bookIsReading = userBook.status === 'reading' || userBook.status === 'rereading';

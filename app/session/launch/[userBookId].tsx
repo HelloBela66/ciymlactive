@@ -56,6 +56,12 @@ export default function SessionLaunchScreen() {
 
   const isThisBookActive = !!activeSession && activeSession.userBookId === userBookId;
 
+  // P0 FIX (POLYTSIA V1.6.2, Фаза 1) — той самий "Дочитати" замість "Почати читання" для
+  // "Не дочитав", що й `ReadingControls` на Book Details (`app/work/[workId].tsx`): та сама
+  // дія, той самий цільовий статус 'reading' (не 'rereading' — книга ще ЖОДНОГО разу не
+  // дочитана), просто чесніша назва.
+  const isResumingDnf = data?.status === 'did_not_finish';
+
   // Сесія для ЦІЄЇ книги вже триває (наприклад, розпочата раніше й застосунок просто
   // перезапущено) — одразу на повний екран сесії, без проміжного "почати читання" тут:
   // користувач і так тапнув книгу, щоб продовжити читати, а не щоб побачити форму старту ще
@@ -85,7 +91,7 @@ export default function SessionLaunchScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          title: 'Почати читання',
+          title: isResumingDnf ? 'Дочитати' : 'Почати читання',
           headerStyle: { backgroundColor: theme.colors.bg },
           headerTintColor: theme.colors.textPrimary,
           headerShadowVisible: false,
@@ -156,7 +162,7 @@ export default function SessionLaunchScreen() {
                 </View>
               </View>
               <Button
-                label={startSession.isPending ? 'Починаю…' : 'Почати читання'}
+                label={startSession.isPending ? (isResumingDnf ? 'Дочитую…' : 'Починаю…') : isResumingDnf ? 'Дочитати' : 'Почати читання'}
                 onPress={handleStart}
                 disabled={startSession.isPending}
               />

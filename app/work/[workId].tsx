@@ -1015,9 +1015,15 @@ function ReadingControls({ userBook }: { userBook: UserBook }) {
     );
   }
 
+  // P0 FIX (POLYTSIA V1.6.2, Фаза 1) — для "Не дочитав" ця сама дія (той самий
+  // `ReadingSessionRepository.start`, той самий цільовий статус 'reading', не 'rereading' —
+  // рішення власника продукту: це ще ЖОДНОГО разу не дочитана книга, тож "Дочитати", не
+  // "Перечитати") заслуговує на чесну, окрему назву кнопки, а не загальне "Почати читання".
+  const isResumingDnf = userBook.status === 'did_not_finish';
+
   return (
     <Button
-      label={startSession.isPending ? 'Починаю…' : 'Почати читання'}
+      label={startSession.isPending ? (isResumingDnf ? 'Дочитую…' : 'Починаю…') : isResumingDnf ? 'Дочитати' : 'Почати читання'}
       onPress={() =>
         startSession.mutate(
           { userBookId: userBook.id, startPage: userBook.currentPage },
