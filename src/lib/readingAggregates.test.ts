@@ -4,6 +4,9 @@ import {
   computeBusiestMonth,
   filterFinishedInRange,
   computeTopGenreAmong,
+  computeActiveDays,
+  computeDominantReadingExperience,
+  MIN_SESSIONS_FOR_READING_EXPERIENCE,
 } from './readingAggregates';
 
 describe('sumSessionMinutes', () => {
@@ -113,5 +116,85 @@ describe('computeTopGenreAmong', () => {
   it('книга без жанрів (порожній список) не ламає підрахунок', () => {
     const result = computeTopGenreAmong([[], ['Наука'], ['Наука']]);
     expect(result).toEqual({ name: 'Наука', count: 2 });
+  });
+});
+
+/** POLYTSIA V1.6.2, #167 — READING SEASONS, ТЗ §44: "активні дні" сезону. */
+describe('computeActiveDays', () => {
+  it('немає сесій — 0', () => {
+    expect(computeActiveDays([])).toBe(0);
+  });
+
+  it('кілька сесій того самого UTC-дня рахуються як один день', () => {
+    const result = computeActiveDays([
+      { startedAt: '2026-07-01T08:00:00.000Z' },
+      { startedAt: '2026-07-01T21:00:00.000Z' },
+    ]);
+    expect(result).toBe(1);
+  });
+
+  it('сесії різних днів рахуються окремо', () => {
+    const result = computeActiveDays([
+      { startedAt: '2026-07-01T08:00:00.000Z' },
+      { startedAt: '2026-07-02T08:00:00.000Z' },
+      { startedAt: '2026-07-10T08:00:00.000Z' },
+    ]);
+    expect(result).toBe(3);
+  });
+});
+
+/** POLYTSIA V1.6.2, #167 — READING SEASONS, ТЗ §50: "Як читалося" — insight, який може чесно
+ * мовчати, якщо сесій із розпізнаним значенням замало (`MIN_SESSIONS_FOR_READING_EXPERIENCE`). */
+describe('computeDominantReadingExperience', () => {
+  it('немає сесій — null', () => {
+    expect(computeDominantReadingExperience([])).toBeNull();
+  });
+
+  it(`менше за ${MIN_SESSIONS_FOR_READING_EXPERIENCE} розпізнаних сесій — null, навіть з одностайною відповіддю`, () => {
+    const sessions = Array.from({ length: MIN_SESSIONS_FOR_READING_EXPERIENCE - 1 }, () => ({
+      readingExperience: 'engaging',
+    }));
+    expect(computeDominantReadingExperience(sessions)).toBeNull();
+  });
+
+  it(`рівно ${MIN_SESSIONS_FOR_READING_EXPERIENCE} розпізнаних сесій — рахує домінантне значення`, () => {
+    const sessions = Array.from({ length: MIN_SESSIONS_FOR_READING_EXPERIENCE }, () => ({
+      readingExperience: 'calm',
+    }));
+    expect(computeDominantReadingExperience(sessions)).toBe('calm');
+  });
+
+  it('нерозпізнане/null значення не рахується в поріг вибірки', () => {
+    const sessions = [
+      { readingExperience: 'engaging' },
+      { readingExperience: 'engaging' },
+      { readingExperience: 'engaging' },
+      { readingExperience: null },
+      { readingExperience: 'not-a-real-value' },
+    ];
+    // лише 3 розпізнані сесії — менше порогу, навіть якщо вхідний масив довший.
+    expect(computeDominantReadingExperience(sessions)).toBeNull();
+  });
+
+  it('рівність — перемагає значення, що зустрілось першим у вхідному масиві', () => {
+    const sessions = [
+      { readingExperience: 'engaging' },
+      { readingExperience: 'calm' },
+      { readingExperience: 'engaging' },
+      { readingExperience: 'calm' },
+      { readingExperience: 'difficult' },
+    ];
+    expect(computeDominantReadingExperience(sessions)).toBe('engaging');
+  });
+
+  it('чітка більшість серед розпізнаних сесій — повертає її', () => {
+    const sessions = [
+      { readingExperience: 'engaging' },
+      { readingExperience: 'engaging' },
+      { readingExperience: 'engaging' },
+      { readingExperience: 'calm' },
+      { readingExperience: 'calm' },
+    ];
+    expect(computeDominantReadingExperience(sessions)).toBe('engaging');
   });
 });

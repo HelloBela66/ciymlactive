@@ -4,6 +4,8 @@ import {
   parseSeasonKey,
   currentSeasonKey,
   adjacentSeasonKey,
+  formatSeasonLabel,
+  formatSeasonHeroTitle,
   type SeasonKey,
 } from './season';
 
@@ -120,5 +122,39 @@ describe('adjacentSeasonKey', () => {
     for (let i = 0; i < 4; i += 1) key = adjacentSeasonKey(key, 'next');
     for (let i = 0; i < 4; i += 1) key = adjacentSeasonKey(key, 'prev');
     expect(key).toEqual(start);
+  });
+});
+
+/**
+ * POLYTSIA V1.6.2, #167 — `formatSeasonLabel` фіксує баг, який `seasonDateRange` уже рахував
+ * правильно, але текст підпису показував лише пізніший рік БЕЗ діапазону ("Зима 2027" замість
+ * "Зима 2026/27") — розбіжність була лише в рядку показу, не в самій даті. Тести нижче
+ * перевіряють кілька РІЗНИХ років для зими (не лише один випадковий приклад), щоб довести, що
+ * рахується саме різниця років (`year - 1` / `slice(2)`), а не захардкожений рядок.
+ */
+describe('formatSeasonLabel', () => {
+  it('зима — діапазон років через слеш ("<рік-1>/<останні 2 цифри року>")', () => {
+    expect(formatSeasonLabel('winter', 2027)).toBe('Зима 2026/27');
+  });
+
+  it('інші три сезони — просто "<Назва> <рік>", без діапазону', () => {
+    expect(formatSeasonLabel('spring', 2026)).toBe('Весна 2026');
+    expect(formatSeasonLabel('summer', 2026)).toBe('Літо 2026');
+    expect(formatSeasonLabel('autumn', 2026)).toBe('Осінь 2026');
+  });
+
+  it('зимовий рік-суфікс коректний для різних років — не лише випадково збігається для 2027', () => {
+    expect(formatSeasonLabel('winter', 2020)).toBe('Зима 2019/20');
+    expect(formatSeasonLabel('winter', 2000)).toBe('Зима 1999/00');
+    expect(formatSeasonLabel('winter', 2101)).toBe('Зима 2100/01');
+  });
+});
+
+describe('formatSeasonHeroTitle', () => {
+  it('"<Назва сезону> твого читання" — довша емоційна форма, окремо від короткого formatSeasonLabel', () => {
+    expect(formatSeasonHeroTitle('summer')).toBe('Літо твого читання');
+    expect(formatSeasonHeroTitle('winter')).toBe('Зима твого читання');
+    expect(formatSeasonHeroTitle('spring')).toBe('Весна твого читання');
+    expect(formatSeasonHeroTitle('autumn')).toBe('Осінь твого читання');
   });
 });

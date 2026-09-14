@@ -243,4 +243,33 @@ export const ReadingRunRepository = {
     );
     return rows.map((row) => row.user_book_id);
   },
+
+  /**
+   * Run'и, що ЗАВЕРШИЛИСЬ (`status IN ('finished', 'did_not_finish')`) у діапазоні
+   * `[startIso, endIso)` — POLYTSIA V1.6.2, #167 (READING SEASONS — PRODUCT REDEFINITION, ТЗ
+   * §39: "Use ReadingRun finish date. Не current UserBook `finished_at`, якщо ReadingRun
+   * available"). До цієї фази сезон визначав "прочитані книги" через
+   * `UserBookRepository.listByStatus(db, 'finished')` — поточний СТАТУС книги, а не факт
+   * завершення run у вікні сезону: книга, що завершилась улітку, а потім перечитувалась і зараз
+   * має статус `'rereading'`, випадала б із літнього сезону повністю (`listByStatus('finished')`
+   * бачить лише книги, чий ПОТОЧНИЙ статус — `'finished'`), і повторне завершення в межах ТОГО
+   * САМОГО сезону було б взагалі непомітним (`user_book` — один рядок на книгу, не на прохід).
+   * `run_number > 1` на кожному рядку результату — вже готовий сигнал "це перечитування" (ТЗ
+   * §39: "small indicator: «Перечитано»"), без окремого запиту.
+   *
+   * Той самий `JOIN user_book ... deleted_at IS NULL` soft-delete guard, що й
+   * `listStartedOrFinishedBetween` вище (та сама причина — див. коментар там).
+   */
+  async listFinishedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingRun[]> {
+    const rows = await db.getAllAsync<ReadingRunRow>(
+      `SELECT rr.* FROM reading_run rr
+       JOIN user_book ub ON ub.id = rr.user_book_id
+       WHERE rr.deleted_at IS NULL AND ub.deleted_at IS NULL
+         AND rr.status IN ('finished', 'did_not_finish')
+         AND rr.finished_at >= ? AND rr.finished_at < ?
+       ORDER BY rr.finished_at ASC`,
+      [startIso, endIso],
+    );
+    return rows.map(mapRow);
+  },
 };

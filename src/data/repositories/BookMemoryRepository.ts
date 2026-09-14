@@ -187,4 +187,29 @@ export const BookMemoryRepository = {
   async remove(db: SQLiteDatabase, id: string): Promise<void> {
     await db.runAsync(`UPDATE book_memory SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
   },
+
+  /**
+   * Пакетний вибір спогадів ЗА RUN'АМИ (не за книгами) — POLYTSIA V1.6.2, #167 (READING
+   * SEASONS — PRODUCT REDEFINITION, ТЗ §49: "Якщо season includes completed books with Book
+   * Memory: можна показати 1 короткий reflection preview"). Навмисно за `readingRunId`, а не
+   * `getCurrent`/новий `getCurrentByUserBookIds`-аналог: сезон уже знає RUN, що завершився В
+   * МЕЖАХ САМЕ ЦЬОГО сезону (`ReadingRunRepository.listFinishedBetween`) — спогад має належати
+   * ЙОМУ, а не просто "найновішому прочитанню книги взагалі" (`getCurrent`), яке могло завершитись
+   * уже ПІСЛЯ сезону (перечитування, що вийшло за межі вікна). Той самий "один IN-запит замість N"
+   * підхід, що й `RatingRepository.listByUserBookIds`/`GenreRepository.listByWorkIds`.
+   */
+  async listByReadingRunIds(db: SQLiteDatabase, readingRunIds: string[]): Promise<Map<string, BookMemory>> {
+    const result = new Map<string, BookMemory>();
+    if (readingRunIds.length === 0) return result;
+
+    const placeholders = readingRunIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<BookMemoryRow>(
+      `SELECT * FROM book_memory WHERE reading_run_id IN (${placeholders}) AND deleted_at IS NULL`,
+      readingRunIds,
+    );
+    for (const row of rows) {
+      if (row.reading_run_id) result.set(row.reading_run_id, mapRow(row));
+    }
+    return result;
+  },
 };

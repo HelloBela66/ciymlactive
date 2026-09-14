@@ -1,3 +1,6 @@
+import type { ReadingExperienceId } from '@/design/readingExperience';
+import { isReadingExperienceId } from '@/design/readingExperience';
+
 /**
  * Спільні domain-calculator'и для аналітичних "підсумків за період" (POLYTSIA V1.6.1, Фаза 15
  * — ANALYTICS HIERARCHY, `docs/MY_READING.md`). Аудит V1.6.1 (§"Пара 4") зафіксував: п'ять
@@ -111,6 +114,68 @@ export function computeTopGenreAmong(genreNamesByBook: string[][]): TopGenreAmon
   let result: TopGenreAmong | null = null;
   for (const [name, count] of genreCounts) {
     if (!result || count > result.count) result = { name, count };
+  }
+  return result;
+}
+
+export interface ActiveDayInput {
+  startedAt: string;
+}
+
+/** Кількість УНІКАЛЬНИХ календарних днів (за `startedAt.slice(0, 10)`) серед переданих сесій —
+ * POLYTSIA V1.6.2, #167 (READING SEASONS — PRODUCT REDEFINITION, ТЗ §44: "Distinct local
+ * calendar days with completed reading activity. Timezone safe"). Той самий `Set<string>`-підхід,
+ * що вже є в `rereadComparison.ts#computeRunReadingStats` (там — на рівні одного run, тут — на
+ * рівні періоду), і той самий UTC-based `.slice(0,10)`, яким рахує календарний день УСЯ решта
+ * застосунку (`useWrappedYear.ts`, `season.ts`) — жодне місце в кодовій базі не робить
+ * конверсію в локальний часовий пояс (свідомий вибір застосунку, задокументований у
+ * `season.ts`). ТЗ буквально вимагає "local calendar days" — цей рядок навмисно лишається на
+ * тому самому UTC-дні, що й решта застосунку, а не вводить локальну конверсію лише для Сезонів:
+ * розбіжність з UTC можлива тільки для сесій, що почались близько до півночі UTC, і зміна цього
+ * ОДНОГО місця зробила б "активні дні" сезону несумісними з тим, як день рахується всюди інде
+ * (Wrapped/Calendar/reread-порівняння) без окремого продуктового рішення для всього застосунку. */
+export function computeActiveDays(sessions: ActiveDayInput[]): number {
+  return new Set(sessions.map((s) => s.startedAt.slice(0, 10))).size;
+}
+
+/** Мінімум сесій із заповненим `reading_experience` у періоді, перш ніж "Як читалося" (ТЗ §50)
+ * взагалі рахує домінантне значення — той самий "insight, який може чесно мовчати" принцип, що
+ * й `readingProfile.ts#MIN_BOOKS_FOR_TOP_GENRE`/`MIN_SESSIONS_FOR_AVG_DURATION`: 1-2 випадкові
+ * позначки не повинні видавати категоричне "Це літо читалось напружено" на весь сезон. */
+export const MIN_SESSIONS_FOR_READING_EXPERIENCE = 5;
+
+export interface ReadingExperienceInput {
+  readingExperience: string | null;
+}
+
+/** Домінантне значення "як читалося" серед сесій періоду — та сама vote-count+"перша зустрінута
+ * перемагає нічию" механіка, що й `rereadComparison.ts#computeRunReadingStats.dominantExperience`
+ * (там — рівно один run, тут — довільний період), піднята сюди окремою функцією, а не імпортом
+ * звідти: та функція повертає одразу ЦІЛИЙ `RunReadingStats` (тривалість/дні/сесії run) — інший
+ * контракт, непотрібний тут. `null`, якщо сесій із розпізнаним значенням менше за
+ * `MIN_SESSIONS_FOR_READING_EXPERIENCE` (поріг, якого немає в `computeRunReadingStats` — там
+ * порогу вибірки свідомо нема, бо порівняння run завжди показує "що записано", навіть якщо це
+ * одна сесія; тут же — саме "insight", який має право чесно мовчати за замовчуванням, ТЗ §50). */
+export function computeDominantReadingExperience(sessions: ReadingExperienceInput[]): ReadingExperienceId | null {
+  const recognized = sessions.filter(
+    (s): s is { readingExperience: string } => s.readingExperience != null && isReadingExperienceId(s.readingExperience),
+  );
+  if (recognized.length < MIN_SESSIONS_FOR_READING_EXPERIENCE) return null;
+
+  const counts = new Map<ReadingExperienceId, number>();
+  for (const s of recognized) {
+    const id = s.readingExperience as ReadingExperienceId;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  let result: ReadingExperienceId | null = null;
+  let bestCount = 0;
+  for (const s of recognized) {
+    const id = s.readingExperience as ReadingExperienceId;
+    const count = counts.get(id) ?? 0;
+    if (count > bestCount) {
+      bestCount = count;
+      result = id;
+    }
   }
   return result;
 }

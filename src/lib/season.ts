@@ -1,4 +1,4 @@
-import { SEASON_ORDER } from '@/design/season';
+import { SEASON_ORDER, SEASON_META } from '@/design/season';
 import type { SeasonId } from '@/design/season';
 
 /** Межі сезону в UTC — `start` включно, `end` виключно (той самий контракт, що й
@@ -97,4 +97,32 @@ export function adjacentSeasonKey({ seasonId, year }: SeasonKey, direction: 'pre
   if (direction === 'prev' && seasonId === 'winter') nextYear = year - 1;
 
   return { seasonId: nextSeasonId, year: nextYear };
+}
+
+/** Рік у відображуваному підписі сезону. Зима — єдиний сезон, що перетинає межу календарного
+ * року (`seasonDateRange`/`currentSeasonKey` вище прив'язують її ДО пізнішого року, тут лише
+ * форматується підпис для читача, сама дата/рік не змінюються): "Зима 2026/27" для періоду
+ * грудень 2026 — лютий 2027 (`year` тут — 2027, той самий пізніший рік). Інші три сезони не
+ * перетинають межу року — простий рядок року, без діапазону. */
+function formatSeasonYearSuffix(seasonId: SeasonId, year: number): string {
+  if (seasonId !== 'winter') return String(year);
+  return `${year - 1}/${String(year).slice(2)}`;
+}
+
+/**
+ * POLYTSIA V1.6.2, #167 (READING SEASONS — PRODUCT REDEFINITION, ТЗ §64) — канонічний короткий
+ * підпис сезону, "<Назва> <рік>" (напр. "Літо 2026", "Зима 2026/27"). Єдине місце, де рік
+ * перетворюється на рядок для показу — раніше навігаційний заголовок/hero/картка кожен окремо
+ * конкатенували `meta.label + ' ' + key.year`, тож зимовий сезон завжди показував лише пізніший
+ * рік БЕЗ діапазону ("Зима 2027" замість "Зима 2026/27", хоча сама дата вже коректно рахувалась
+ * від грудня попереднього року — розбіжність була лише в тексті підпису, не в даних). */
+export function formatSeasonLabel(seasonId: SeasonId, year: number): string {
+  return `${SEASON_META[seasonId].label} ${formatSeasonYearSuffix(seasonId, year)}`;
+}
+
+/** «Х твого читання» (ТЗ §35/37) — емоційна hero-фраза сезону, окремо від короткого
+ * `formatSeasonLabel` (навігаційний заголовок і компактна картка лишаються короткими "Літо
+ * 2026" — hero-заголовок на самому екрані отримує цю довшу, особисту форму). */
+export function formatSeasonHeroTitle(seasonId: SeasonId): string {
+  return `${SEASON_META[seasonId].label} твого читання`;
 }
