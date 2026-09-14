@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { LabeledInput } from '@/components/ui/LabeledInput';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useJournalEntries, useJournalFavorites } from '@/features/journal/useJournal';
@@ -149,8 +150,17 @@ export default function BookCapsuleEditScreen() {
   // Той самий "обране спершу, з фолбеком на все" патерн, що й `BookMemorySection`
   // (`app/completion/[workId].tsx`) — консистентний вибір джерела для пов'язаного моменту, тепер
   // над уже відфільтрованими списками.
-  const pickerEntries = visibleFavorites.length > 0 ? visibleFavorites : visibleAllEntries;
   const usingAllAsFallback = visibleFavorites.length === 0 && visibleAllEntries.length > 0;
+  // POLYTSIA V1.6.2, #166 — ЯКА гілка (обране/фолбек) активна вирішує ЛИШЕ відфільтрований
+  // стан (`usingAllAsFallback` вище), незалежно від `spoilerRevealed` — інакше перемикання
+  // reveal могло б стрибати між гілками (і між двома різними підказками над пікером) щоразу,
+  // заплутуючи, а не допомагаючи. `spoilerRevealed` лише міняє ВМІСТ уже обраної гілки —
+  // фільтрований чи сирий.
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
+  const activeFilteredEntries = usingAllAsFallback ? visibleAllEntries : visibleFavorites;
+  const activeRawEntries = usingAllAsFallback ? allEntries ?? [] : favorites ?? [];
+  const hiddenPickerCount = activeRawEntries.length - activeFilteredEntries.length;
+  const pickerEntries = spoilerRevealed ? activeRawEntries : activeFilteredEntries;
 
   // Навмисно НЕ з `visibleAllEntries` — це лише для `journalEntryKind` при збереженні
   // (`handleSave` нижче), не для показу тексту. Якби тут теж фільтрувати, ЗБЕРЕЖЕННЯ вже
@@ -324,10 +334,16 @@ export default function BookCapsuleEditScreen() {
                 <AppText variant="caption" color="secondary">
                   Момент щоденника, до якого хочеш повернутися
                 </AppText>
-                {pickerEntries.length === 0 ? (
+                {pickerEntries.length === 0 && hiddenPickerCount === 0 ? (
                   <AppText variant="caption" color="tertiary">
                     У щоденнику цієї книги ще немає жодного запису.
                   </AppText>
+                ) : pickerEntries.length === 0 ? (
+                  <SpoilerHiddenNotice
+                    hiddenCount={hiddenPickerCount}
+                    revealed={spoilerRevealed}
+                    onToggleReveal={() => setSpoilerRevealed((v) => !v)}
+                  />
                 ) : (
                   <>
                     <AppText variant="caption" color="tertiary">
@@ -393,6 +409,11 @@ export default function BookCapsuleEditScreen() {
                         );
                       })}
                     </View>
+                    <SpoilerHiddenNotice
+                      hiddenCount={hiddenPickerCount}
+                      revealed={spoilerRevealed}
+                      onToggleReveal={() => setSpoilerRevealed((v) => !v)}
+                    />
                   </>
                 )}
               </View>

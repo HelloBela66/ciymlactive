@@ -18,6 +18,7 @@ import { journalEntryTypeLabels } from '@/design/i18n-labels';
 import { REACTION_ORDER, REACTION_META, REACTION_COUNT_FORMS, type ReactionId } from '@/design/reactions';
 import { ReactionToggle } from '@/components/journal/ReactionPicker';
 import { RevisitLaterToggle } from '@/components/journal/RevisitLaterToggle';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { getDatabase } from '@/data/db';
 import { WorkRepository, type WorkSearchResult } from '@/data/repositories/WorkRepository';
 import { queryKeys } from '@/lib/queryKeys';
@@ -615,6 +616,14 @@ export default function JournalScreen() {
 
   const entries = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
   const rows = useMemo(() => buildFeedRows(entries), [entries]);
+  // POLYTSIA V1.6.2, #166 — "N приховано" індикатор: сума по вже завантажених сторінках
+  // (`listFeedPage.hiddenCount` — лічильник у межах ОДНІЄЇ сторінки, докладніше — коментар у
+  // репозиторії), не оцінка всього щоденника — той самий "лише те, що вже підвантажено"
+  // принцип, що й сам keyset-скрол цього екрана.
+  const hiddenCount = useMemo(
+    () => data?.pages.reduce((sum, page) => sum + page.hiddenCount, 0) ?? 0,
+    [data],
+  );
 
   const renderItem = useCallback(({ item }: { item: FeedRow }) => {
     if (item.rowKind === 'header') {
@@ -680,10 +689,17 @@ export default function JournalScreen() {
           }
           ListHeaderComponentStyle={{ marginBottom: theme.spacing.lg }}
           ListFooterComponent={
-            isFetchingNextPage ? (
-              <AppText variant="caption" color="tertiary" style={{ textAlign: 'center', paddingVertical: theme.spacing.lg }}>
-                Завантажую…
-              </AppText>
+            isFetchingNextPage || hiddenCount > 0 ? (
+              <View style={{ gap: theme.spacing.xs, paddingVertical: theme.spacing.lg }}>
+                {hiddenCount > 0 ? (
+                  <SpoilerHiddenNotice hiddenCount={hiddenCount} style={{ textAlign: 'center' }} />
+                ) : null}
+                {isFetchingNextPage ? (
+                  <AppText variant="caption" color="tertiary" style={{ textAlign: 'center' }}>
+                    Завантажую…
+                  </AppText>
+                ) : null}
+              </View>
             ) : null
           }
           onEndReachedThreshold={0.4}

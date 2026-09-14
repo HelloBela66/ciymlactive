@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { BookHero } from '@/components/ui/BookHero';
 import { MemorySection } from '@/components/ui/MemorySection';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useRating } from '@/features/book-details/useRating';
@@ -98,6 +99,12 @@ export default function RecallScreen() {
 
   const [memoryText, setMemoryText] = useState('');
   const [revealed, setRevealed] = useState(false);
+  // POLYTSIA V1.6.2, #166 — НАЗВА НАВМИСНО ІНША за `revealed` вище: той `revealed`/`setRevealed`
+  // — уже наявний Recall-механізм ("порівняй свою пам'ять із капсулою", `handleSubmit`/рядок
+  // "Що ти пам'ятаєш зараз?"), а не про spoiler-safe взагалі. `spoilerRevealed` — окремий,
+  // не пов'язаний перемикач ЛИШЕ для тимчасового ручного показу того, що приховав spoiler-safe
+  // режим, і скидається щоразу заново при вході на екран (не персиститься).
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
 
   // SPOILER-SAFE MODE — див. коментар над екраном: капсула/recall лишаються доступні й під час
   // повторного читання тієї самої книги, тож усе, що показує реальний текст запису, іде через
@@ -107,9 +114,17 @@ export default function RecallScreen() {
     : false;
   const currentPage = data?.userBook?.currentPage ?? null;
   const pageCount = data?.primaryEdition?.pageCount ?? null;
-  const visibleEntries = useMemo(
+  const filteredEntries = useMemo(
     () => filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, { currentPage, pageCount }),
     [allEntries, spoilerSafeActive, currentPage, pageCount],
+  );
+  const hiddenSpoilerCount = (allEntries?.length ?? 0) - filteredEntries.length;
+  // POLYTSIA V1.6.2, #166 — мемоїзовано окремо: без цього `allEntries ?? []` створював новий
+  // масив щорендеру, коли `spoilerRevealed` активний, інвалідуючи всі три useMemo нижче
+  // (linkedEntry/favoriteMoments/remainingEntries) на кожному рендері без потреби.
+  const visibleEntries = useMemo(
+    () => (spoilerRevealed ? allEntries ?? [] : filteredEntries),
+    [spoilerRevealed, allEntries, filteredEntries],
   );
 
   const linkedEntry = useMemo(() => {
@@ -306,6 +321,12 @@ export default function RecallScreen() {
                     ))}
                   </MemorySection>
                 ) : null}
+
+                <SpoilerHiddenNotice
+                  hiddenCount={hiddenSpoilerCount}
+                  revealed={spoilerRevealed}
+                  onToggleReveal={() => setSpoilerRevealed((v) => !v)}
+                />
 
                 <Button
                   label="До деталей книги"

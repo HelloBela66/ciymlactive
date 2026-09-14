@@ -104,7 +104,7 @@ describe('ActivityHistoryRepository.listRecent', () => {
     const db = await openMigratedTestDb();
     await seedTwoBooksAcrossAllEventTypes(db);
 
-    const events = await ActivityHistoryRepository.listRecent(db);
+    const { items: events } = await ActivityHistoryRepository.listRecent(db);
 
     expect(events).toHaveLength(10);
     expect(events.map((e) => e.type).sort()).toEqual(
@@ -141,7 +141,7 @@ describe('ActivityHistoryRepository.listRecent', () => {
     const db = await openMigratedTestDb();
     await seedTwoBooksAcrossAllEventTypes(db);
 
-    const events = await ActivityHistoryRepository.listRecent(db);
+    const { items: events } = await ActivityHistoryRepository.listRecent(db);
     const byType = new Map(events.map((e) => [e.type, e]));
 
     const session = byType.get('session_completed');
@@ -190,7 +190,7 @@ describe('ActivityHistoryRepository.listRecent', () => {
     const db = await openMigratedTestDb();
     await seedTwoBooksAcrossAllEventTypes(db);
 
-    const topThree = await ActivityHistoryRepository.listRecent(db, 3);
+    const { items: topThree } = await ActivityHistoryRepository.listRecent(db, 3);
     expect(topThree.map((e) => e.type)).toEqual(['shelf_addition', 'quote', 'rating_added']);
   });
 
@@ -199,7 +199,7 @@ describe('ActivityHistoryRepository.listRecent', () => {
     await seedTwoBooksAcrossAllEventTypes(db);
     await db.runAsync(`UPDATE user_book SET deleted_at = ? WHERE id = ?`, [SHELF_ADDED, 'user_book-1']);
 
-    const events = await ActivityHistoryRepository.listRecent(db);
+    const { items: events } = await ActivityHistoryRepository.listRecent(db);
     expect(events.every((e) => e.userBookId === 'user_book-2')).toBe(true);
     expect(events.map((e) => e.type).sort()).toEqual(['book_added', 'book_started', 'quote', 'shelf_addition'].sort());
   });
@@ -209,7 +209,7 @@ describe('ActivityHistoryRepository.listRecent', () => {
     await seedTwoBooksAcrossAllEventTypes(db);
     await db.runAsync(`UPDATE note SET deleted_at = ? WHERE id = ?`, [SHELF_ADDED, 'note-1']);
 
-    const events = await ActivityHistoryRepository.listRecent(db);
+    const { items: events } = await ActivityHistoryRepository.listRecent(db);
     expect(events.some((e) => e.type === 'journal_entry')).toBe(false);
     // Решта подій book-1 (додавання/старт/сесія/фініш/оцінка) лишаються на місці.
     expect(events.filter((e) => e.userBookId === 'user_book-1')).toHaveLength(5);
@@ -217,7 +217,8 @@ describe('ActivityHistoryRepository.listRecent', () => {
 
   it('без активності повертає порожній масив', async () => {
     const db = await openMigratedTestDb();
-    expect(await ActivityHistoryRepository.listRecent(db)).toEqual([]);
+    expect((await ActivityHistoryRepository.listRecent(db)).items).toEqual([]);
+    expect((await ActivityHistoryRepository.listRecent(db)).hiddenCount).toBe(0);
   });
 });
 
@@ -264,20 +265,24 @@ describe('ActivityHistoryRepository.listRecent — spoiler-safe фільтрац
     const db = await openMigratedTestDb();
     await seedOneBookWithAheadAndBehindEntries(db, 1);
 
-    const events = await ActivityHistoryRepository.listRecent(db);
+    const { items: events, hiddenCount } = await ActivityHistoryRepository.listRecent(db);
     const ids = events.map((e) => e.id);
     expect(ids).not.toContain('note-ahead');
     expect(ids).toContain('quote-behind');
+    // POLYTSIA V1.6.2, #166 — "N приховано" індикатор для Activity History: рівно
+    // `note-ahead` сховано.
+    expect(hiddenCount).toBe(1);
   });
 
   it('нічого не ховає, коли власник вимкнув прапорець для цієї книги', async () => {
     const db = await openMigratedTestDb();
     await seedOneBookWithAheadAndBehindEntries(db, 0);
 
-    const events = await ActivityHistoryRepository.listRecent(db);
+    const { items: events, hiddenCount } = await ActivityHistoryRepository.listRecent(db);
     const ids = events.map((e) => e.id);
     expect(ids).toContain('note-ahead');
     expect(ids).toContain('quote-behind');
+    expect(hiddenCount).toBe(0);
   });
 });
 

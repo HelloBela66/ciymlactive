@@ -398,7 +398,7 @@ export const JournalRepository = {
   async listFeedPage(
     db: SQLiteDatabase,
     options: Omit<JournalListPageOptions, 'userBookId' | 'sessionId'> = {},
-  ): Promise<{ items: JournalFeedEntry[]; nextCursor: JournalEntryCursor | null }> {
+  ): Promise<{ items: JournalFeedEntry[]; nextCursor: JournalEntryCursor | null; hiddenCount: number }> {
     const limit = options.limit ?? 50;
     const favoriteOnly = options.favoriteOnly ?? false;
     const revisitLaterOnly = options.revisitLaterOnly ?? false;
@@ -507,7 +507,7 @@ export const JournalRepository = {
       branches.push(sql);
     }
 
-    if (branches.length === 0) return { items: [], nextCursor: null };
+    if (branches.length === 0) return { items: [], nextCursor: null, hiddenCount: 0 };
 
     const sql = `${branches.join(' UNION ALL ')} ORDER BY created_at DESC, id DESC LIMIT ?`;
     params.push(limit + 1);
@@ -526,8 +526,14 @@ export const JournalRepository = {
     const lastRawRow = pageRows[pageRows.length - 1];
     const items = pageRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow);
     const nextCursor = hasMore && lastRawRow ? { createdAt: lastRawRow.created_at, id: lastRawRow.id } : null;
+    // POLYTSIA V1.6.2, #166 — "N приховано" індикатор для Global Journal (`app/journal/index.tsx`).
+    // Лічильник — ЛИШЕ для цієї сторінки (`pageRows`, вже завантажені в пам'ять рядки), не для
+    // всієї бібліотеки: keyset-пагінація тут не має дешевого способу порахувати "загалом", а
+    // рахувати саме видиму/приховану частину поточної сторінки не потребує жодного додаткового
+    // SQL-запиту — той самий рядок `pageRows`, що й так уже фільтрується вище.
+    const hiddenCount = pageRows.length - items.length;
 
-    return { items, nextCursor };
+    return { items, nextCursor, hiddenCount };
   },
 
   /**
@@ -550,9 +556,14 @@ export const JournalRepository = {
     db: SQLiteDatabase,
     query: string,
     limit = 10,
-  ): Promise<{ notes: JournalFeedEntry[]; quotes: JournalFeedEntry[] }> {
+  ): Promise<{
+    notes: JournalFeedEntry[];
+    quotes: JournalFeedEntry[];
+    hiddenNoteCount: number;
+    hiddenQuoteCount: number;
+  }> {
     const trimmed = query.trim();
-    if (trimmed.length === 0) return { notes: [], quotes: [] };
+    if (trimmed.length === 0) return { notes: [], quotes: [], hiddenNoteCount: 0, hiddenQuoteCount: 0 };
     const pattern = `%${trimmed}%`;
 
     const bookJoin = `
@@ -602,9 +613,16 @@ export const JournalRepository = {
     // результатів щоденника/цитат за spoiler-safe режимом книги). `searchFeed` без курсора/
     // пагінації (`limit=10`, "швидка знахідка", докладніше — коментар над методом) — фільтр тут
     // просто звужує масив, без нюансів `listFeedPage`'s keyset-курсора вище.
+    const notes = noteRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow);
+    const quotes = quoteRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow);
+    // POLYTSIA V1.6.2, #166 — "N приховано" для Personal Search. Той самий "лічильник у межах
+    // уже завантаженого `limit`-обмеженого пакету рядків", що й `listFeedPage.hiddenCount` —
+    // жодного додаткового запиту, `noteRows`/`quoteRows` уже в пам'яті до фільтра.
     return {
-      notes: noteRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow),
-      quotes: quoteRows.filter((row) => !isFeedRowSpoilerHidden(row)).map(mapFeedRow),
+      notes,
+      quotes,
+      hiddenNoteCount: noteRows.length - notes.length,
+      hiddenQuoteCount: quoteRows.length - quotes.length,
     };
   },
 

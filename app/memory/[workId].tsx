@@ -17,6 +17,7 @@ import { MemoryCardPreview } from '@/components/memory/MemoryCardPreview';
 import { JournalTimeline } from '@/components/memory/JournalTimeline';
 import { ReadingExperienceTimeline } from '@/components/memory/ReadingExperienceTimeline';
 import { ReadingRunsHistorySection } from '@/components/reading-runs/ReadingRunsHistorySection';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { memoryCardTemplateLabels, memoryCardTemplateDescriptions } from '@/design/i18n-labels';
 import { REACTION_META, isReactionId } from '@/design/reactions';
@@ -132,12 +133,21 @@ function RevisitLaterSection({
   const { data: rawEntries } = useJournalRevisitLater(userBookId);
   const { data: categories } = useAllNoteCategories(userBookId);
   const categoriesById = categoriesToMap(categories);
-  const entries = filterSpoilerSafeJournalEntries(rawEntries ?? [], spoilerContext.active, {
+  const filteredEntries = filterSpoilerSafeJournalEntries(rawEntries ?? [], spoilerContext.active, {
     currentPage: spoilerContext.currentPage,
     pageCount: spoilerContext.pageCount,
   });
+  // POLYTSIA V1.6.2, #166 — той самий "N приховано" + опційний reveal, що й `JournalTimeline`
+  // вище на цьому екрані; окремий локальний стан (не спільний з timeline-перемикачем) — той
+  // самий "маленький презентаційний блок без спільного стану" принцип, що й уже задокументований
+  // над цим компонентом вище для `RevisitLaterEntryLine`.
+  const [revealed, setRevealed] = useState(false);
+  const hiddenCount = (rawEntries?.length ?? 0) - filteredEntries.length;
+  const entries = revealed ? rawEntries ?? [] : filteredEntries;
 
-  if (entries.length === 0) return null;
+  // Раніше — тихий `null`, коли всі позначені записи приховані (ані секції, ані пояснення).
+  // Тепер секція лишається видимою, з поясненням+reveal, доки є ЩОСЬ — видиме чи приховане.
+  if (entries.length === 0 && hiddenCount === 0) return null;
 
   return (
     <MemorySection icon="bookmark" title="Повернутися до цих думок">
@@ -145,6 +155,7 @@ function RevisitLaterSection({
         {entries.map((entry) => (
           <RevisitLaterEntryLine key={entry.id} entry={entry} categoriesById={categoriesById} />
         ))}
+        <SpoilerHiddenNotice hiddenCount={hiddenCount} revealed={revealed} onToggleReveal={() => setRevealed((v) => !v)} />
       </View>
     </MemorySection>
   );
@@ -574,10 +585,19 @@ export default function MemoryCardScreen() {
     () => filterSpoilerSafeJournalEntries(selectedEntries, spoilerSafeActive, { currentPage, pageCount }),
     [selectedEntries, spoilerSafeActive, currentPage, pageCount],
   );
-  const visibleAllEntries = useMemo(
+  const filteredAllEntries = useMemo(
     () => filterSpoilerSafeJournalEntries(allEntries ?? [], spoilerSafeActive, { currentPage, pageCount }),
     [allEntries, spoilerSafeActive, currentPage, pageCount],
   );
+  // POLYTSIA V1.6.2, #166 — ручний reveal ЛИШЕ для шкали щоденника (`JournalTimeline`), не для
+  // `visibleSelectedEntries`: ті йдуть у `MemoryCardPreview`, яку `captureRef` перетворює на
+  // зображення для "Поділитися"/збереження в галерею — reveal, що впливає на вміст того
+  // зображення, міг би лишити спойлер у файлі, який користувач потім комусь надішле чи збереже
+  // назавжди, задовго після того, як сам перемикач тут забувся. Картка-спогад лишається
+  // спойлер-безпечною завжди, незалежно від цього перемикача.
+  const [timelineRevealed, setTimelineRevealed] = useState(false);
+  const hiddenTimelineCount = (allEntries?.length ?? 0) - filteredAllEntries.length;
+  const visibleAllEntries = timelineRevealed ? allEntries ?? [] : filteredAllEntries;
 
   const stats = computeBookStats({
     sessions,
@@ -784,6 +804,11 @@ export default function MemoryCardScreen() {
               entries={visibleAllEntries}
               pageCount={data.primaryEdition?.pageCount ?? null}
               userBookId={userBookId}
+            />
+            <SpoilerHiddenNotice
+              hiddenCount={hiddenTimelineCount}
+              revealed={timelineRevealed}
+              onToggleReveal={() => setTimelineRevealed((v) => !v)}
             />
 
             <RevisitLaterSection

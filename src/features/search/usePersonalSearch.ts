@@ -16,6 +16,9 @@ export interface PersonalSearchResult {
   quotes: JournalFeedEntry[];
   series: Series[];
   shelves: ShelfWithCount[];
+  /** POLYTSIA V1.6.2, #166 — "N приховано" індикатор для розділів «Щоденник»/«Цитати». */
+  hiddenNoteCount: number;
+  hiddenQuoteCount: number;
 }
 
 /**
@@ -43,7 +46,15 @@ export function usePersonalSearch(rawQuery: string) {
         SeriesRepository.search(db, query),
         ShelfRepository.search(db, query),
       ]);
-      return { books, notes: journal.notes, quotes: journal.quotes, series, shelves };
+      return {
+        books,
+        notes: journal.notes,
+        quotes: journal.quotes,
+        series,
+        shelves,
+        hiddenNoteCount: journal.hiddenNoteCount,
+        hiddenQuoteCount: journal.hiddenQuoteCount,
+      };
     },
     enabled: query.length > 0,
   });

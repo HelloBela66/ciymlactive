@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { OfflineNotice } from '@/components/ui/OfflineNotice';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { journalEntryTypeLabels } from '@/design/i18n-labels';
 import { useRecentWorks } from '@/features/search/useBookSearch';
@@ -320,7 +321,20 @@ function PersonalSearchSections({
   const quotes = result?.quotes ?? [];
   const series = result?.series ?? [];
   const shelves = result?.shelves ?? [];
-  const isEmpty = books.length === 0 && notes.length === 0 && quotes.length === 0 && series.length === 0 && shelves.length === 0;
+  // POLYTSIA V1.6.2, #166 — рахуємо приховані spoiler-safe режимом окремо від "справді немає
+  // нічого": розділ "Щоденник"/"Цитати" тепер показується й тоді, коли всі знайдені записи
+  // приховані (та сама 3-стороння різниця, що вже є на Book Details — увесь текст «Нічого не
+  // знайдено» був би оманливим, якби насправді щось знайшлось, просто заховане).
+  const hiddenNoteCount = result?.hiddenNoteCount ?? 0;
+  const hiddenQuoteCount = result?.hiddenQuoteCount ?? 0;
+  const isEmpty =
+    books.length === 0 &&
+    notes.length === 0 &&
+    quotes.length === 0 &&
+    series.length === 0 &&
+    shelves.length === 0 &&
+    hiddenNoteCount === 0 &&
+    hiddenQuoteCount === 0;
 
   if (isEmpty) {
     return (
@@ -339,18 +353,20 @@ function PersonalSearchSections({
           ))}
         </PersonalSection>
       ) : null}
-      {notes.length > 0 ? (
+      {notes.length > 0 || hiddenNoteCount > 0 ? (
         <PersonalSection title="Щоденник">
           {notes.map((entry) => (
             <JournalResultRow key={entry.id} entry={entry} />
           ))}
+          <SpoilerHiddenNotice hiddenCount={hiddenNoteCount} />
         </PersonalSection>
       ) : null}
-      {quotes.length > 0 ? (
+      {quotes.length > 0 || hiddenQuoteCount > 0 ? (
         <PersonalSection title="Цитати">
           {quotes.map((entry) => (
             <JournalResultRow key={entry.id} entry={entry} />
           ))}
+          <SpoilerHiddenNotice hiddenCount={hiddenQuoteCount} />
         </PersonalSection>
       ) : null}
       {series.length > 0 ? (

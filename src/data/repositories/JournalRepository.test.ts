@@ -288,6 +288,10 @@ describe('JournalRepository — spoiler-safe фільтрація багаток
     expect(ids).not.toContain('note-ahead');
     expect(ids).toContain('quote-behind');
     expect(ids).toContain('note-disabled-ahead');
+    // POLYTSIA V1.6.2, #166 — "N приховано" індикатор для Global Journal: рівно 1 рядок
+    // (`note-ahead`) сховано на цій сторінці, `note-disabled-ahead` НЕ рахується (прапорець
+    // вимкнено власником — той самий інваріант, що й видимість вище).
+    expect(feed.hiddenCount).toBe(1);
   });
 
   it('searchFeed (Особистий пошук): та сама фільтрація для notes/quotes окремо', async () => {
@@ -296,11 +300,15 @@ describe('JournalRepository — spoiler-safe фільтрація багаток
 
     const bySpoilerText = await JournalRepository.searchFeed(db, 'кінця');
     expect(bySpoilerText.notes).toEqual([]);
+    expect(bySpoilerText.hiddenNoteCount).toBe(1);
+    expect(bySpoilerText.hiddenQuoteCount).toBe(0);
 
     const byVisibleText = await JournalRepository.searchFeed(db, 'початку');
     expect(byVisibleText.quotes.map((q) => q.id)).toEqual(['quote-behind']);
+    expect(byVisibleText.hiddenQuoteCount).toBe(0);
 
     const byDisabledText = await JournalRepository.searchFeed(db, 'вимкнено власником');
     expect(byDisabledText.notes.map((n) => n.id)).toEqual(['note-disabled-ahead']);
+    expect(byDisabledText.hiddenNoteCount).toBe(0);
   });
 });

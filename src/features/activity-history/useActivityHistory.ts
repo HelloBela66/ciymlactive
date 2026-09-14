@@ -12,7 +12,7 @@ import type { ActivityEvent } from '@/types/activityEvent';
  * обгорткою над репозиторієм, без власної логіки.
  */
 export function useActivityHistory() {
-  return useQuery<ActivityEvent[]>({
+  return useQuery<{ items: ActivityEvent[]; hiddenCount: number }>({
     queryKey: queryKeys.activityHistory.recent,
     queryFn: async () => {
       const db = await getDatabase();

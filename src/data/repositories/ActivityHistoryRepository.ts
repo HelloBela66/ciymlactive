@@ -180,7 +180,7 @@ export const ActivityHistoryRepository = {
    * майбутньому (ТЗ не вимагає пагінації для Фази 12: "Це read-only history", без згадки
    * про підвантаження), і достатньо для будь-якої реалістичної активності одного користувача
    * за розумний період перегляду. */
-  async listRecent(db: SQLiteDatabase, limit = 300): Promise<ActivityEvent[]> {
+  async listRecent(db: SQLiteDatabase, limit = 300): Promise<{ items: ActivityEvent[]; hiddenCount: number }> {
     const rows = await db.getAllAsync<ActivityEventRow>(
       `SELECT * FROM (${ACTIVITY_UNION_SQL}) ORDER BY occurred_at DESC LIMIT ?`,
       [limit],
@@ -189,7 +189,14 @@ export const ActivityHistoryRepository = {
     // найновіших подій узагалі", не "скільки видимих" — той самий свідомий вибір, що й лічильник
     // на Book Details: приховані події й далі існують і стануть видимі пізніше, стрічка просто
     // трохи коротша за `limit`, доки читання не дожене приховані записи).
-    return rows.filter((row) => !isActivityRowSpoilerHidden(row)).map(mapRow);
+    const items = rows.filter((row) => !isActivityRowSpoilerHidden(row)).map(mapRow);
+    // POLYTSIA V1.6.2, #166 — "N приховано" індикатор для Activity History. На відміну від
+    // `listBetween`/`countSpoilerHiddenJournalBetween` нижче (де лічильник свідомо ОКРЕМИЙ метод,
+    // бо `listBetween` має ІНШОГО споживача — `useMonthSummary` — якому лічильник не потрібен, і
+    // зміна сигнатури зачепила б його без причини), `listRecent` має РІВНО одного споживача
+    // (`useActivityHistory`), тож тут дешевше й безпечніше повернути лічильник разом із самими
+    // подіями — `rows` уже в пам'яті, жодного другого SQL-запиту не додається.
+    return { items, hiddenCount: rows.length - items.length };
   },
 
   /**

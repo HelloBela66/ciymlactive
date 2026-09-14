@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { BookHero } from '@/components/ui/BookHero';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useJournalEntries } from '@/features/journal/useJournal';
@@ -65,10 +66,21 @@ export default function BookCapsuleScreen() {
     [allEntries, spoilerSafeActive, currentPage, pageCount],
   );
 
-  const linkedEntry = useMemo(() => {
+  // POLYTSIA V1.6.2, #166 — тут немає "списку" для лічильника (капсула несе НАЙБІЛЬШЕ один
+  // прив'язаний момент), тож приховане тут — бінарний стан: момент був закріплений
+  // (`capsule.journalEntryId` існує в `allEntries`), але фільтр його прибрав із видимого.
+  // `spoilerRevealed` — не персистований, скидається при вході на екран заново.
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
+  const rawLinkedEntry = useMemo(() => {
+    if (!capsule?.journalEntryId) return null;
+    return (allEntries ?? []).find((entry) => entry.id === capsule.journalEntryId) ?? null;
+  }, [capsule, allEntries]);
+  const filteredLinkedEntry = useMemo(() => {
     if (!capsule?.journalEntryId) return null;
     return visibleEntries.find((entry) => entry.id === capsule.journalEntryId) ?? null;
   }, [capsule, visibleEntries]);
+  const linkedEntryHidden = rawLinkedEntry !== null && filteredLinkedEntry === null;
+  const linkedEntry = spoilerRevealed ? rawLinkedEntry : filteredLinkedEntry;
 
   const handleEdit = () => {
     router.push({ pathname: '/capsule/[workId]/edit', params: { workId } } as unknown as Href);
@@ -169,6 +181,12 @@ export default function BookCapsuleScreen() {
                   {linkedEntry.text}
                 </AppText>
               </Card>
+            ) : linkedEntryHidden ? (
+              <SpoilerHiddenNotice
+                hiddenCount={1}
+                revealed={spoilerRevealed}
+                onToggleReveal={() => setSpoilerRevealed((v) => !v)}
+              />
             ) : null}
 
             {capsule.reopenAt ? (

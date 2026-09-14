@@ -104,7 +104,12 @@ describe('Global Personal Search (Фаза 6)', () => {
     expect(byQuoteText.quotes.map((q) => q.id)).toEqual(['quote-1']);
     expect(byQuoteText.notes).toEqual([]);
 
-    expect(await JournalRepository.searchFeed(db, 'щось, чого тут немає')).toEqual({ notes: [], quotes: [] });
+    expect(await JournalRepository.searchFeed(db, 'щось, чого тут немає')).toEqual({
+      notes: [],
+      quotes: [],
+      hiddenNoteCount: 0,
+      hiddenQuoteCount: 0,
+    });
   });
 
   it('WorkRepository.search — домен "Книги" поруч з новими доменами (поведінка не змінена)', async () => {

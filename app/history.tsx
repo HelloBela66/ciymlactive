@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
+import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { activityEventTypeLabels } from '@/design/i18n-labels';
 import { EVENT_ICON, eventDetail } from '@/design/activityEventDisplay';
@@ -95,7 +96,10 @@ export default function ActivityHistoryScreen() {
   const insets = useSafeAreaInsets();
   const { data, isLoading, isError, refetch } = useActivityHistory();
 
-  const sections: ActivityHistorySection[] = data ? groupActivityEventsByDate(data) : [];
+  const sections: ActivityHistorySection[] = data ? groupActivityEventsByDate(data.items) : [];
+  // POLYTSIA V1.6.2, #166 — "N приховано" індикатор (`docs/SPOILER_SAFE.md` §"Свідоме обмеження
+  // Фази 3 V1.6.1"): фільтрація тут уже давно тиха, просто не мала пояснення для користувача.
+  const hiddenCount = data?.hiddenCount ?? 0;
 
   // `ScreenContainer`'s `scroll={false}` (той самий проп/патерн, що й `app/journal/index.tsx`)
   // навмисно рендерить голий `View` без жодних відступів — екран сам відповідає за
@@ -165,6 +169,14 @@ export default function ActivityHistoryScreen() {
             stickySectionHeadersEnabled={false}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ ...contentPadding, flexGrow: 1 }}
+            ListFooterComponent={
+              hiddenCount > 0 ? (
+                <SpoilerHiddenNotice
+                  hiddenCount={hiddenCount}
+                  style={{ textAlign: 'center', paddingTop: theme.spacing.lg }}
+                />
+              ) : null
+            }
           />
         )}
       </ScreenContainer>
