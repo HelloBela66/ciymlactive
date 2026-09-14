@@ -72,6 +72,61 @@ test.ts` отримав два наскрізні сценарії: `seedV15Libr
 не лише міграція N сама по собі, а й "чи справді стара БД доживає до найновішої схеми в один
 прохід" — докладніше `docs/READING_RUN.md` §"Фаза 27".
 
+## Repository test coverage matrix (POLYTSIA V1.6.2, #165)
+
+До цієї фази 14 репозиторіїв у `src/data/repositories/` не мали жодного `.test.ts` — ніхто
+раніше не проходився по всій теці систематично, покриття зростало органічно разом з фічами,
+які найбільше "боліли". Ця фаза — перший систематичний прохід: класифікація всіх 14 за
+ризиком (шанс тихого пошкодження даних користувача × складність логіки, що реально там є —
+не розмір файлу), і нові тести для найризикованіших.
+
+**P0 (єдиний, закритий цією фазою):** `bookDraftRepository.ts` — єдиний
+багатотабличний транзакційний write-шлях у всій кодовій базі (Work + Edition + автори +
+серія + видавництво + перекладачі + book_source, усе в одній `withTransactionAsync`); нульове
+покриття до цієї фази, попри те що власний коментар файлу explicit називає атомарність
+вимогою. → **Тести додано** (`bookDraftRepository.test.ts`): щасливий шлях з усіма опційними
+полями, мінімальний драфт, дедублікація автора/серії/видавництва/перекладача за іменем,
+і два сценарії відкату (падіння в `EditionRepository.create` і в
+`TranslatorRepository.linkToEdition`) — жодного "наполовину доданого" рядка після падіння.
+
+**P1 (нетривіальна логіка дедуплікації/сортування/каскаду, поки без тестів):**
+
+| Репозиторій | Чому P1 |
+|---|---|
+| `AuthorRepository.ts` | find-or-create за іменем + `INSERT OR IGNORE`-дедуп зв'язку з твором; непрямо вправляється через новий `bookDraftRepository.test.ts`, але власного тесту (пакетний `listByWorkIds`, регістрочутливість) немає |
+| `WorkRepository.ts` | `search`/`listRecent` — кореляційний підзапит обкладинки + `DISTINCT` + пакетне підвантаження авторів; обчислення `coverFallbackColor` |
+| `TranslatorRepository.ts` | дзеркалить `AuthorRepository` 1:1 (той самий клас ризику) |
+| `GenreRepository.ts` | дедуп за `slug` (не за буквальним іменем!) — два різні написання можуть нормалізуватись в один slug, `ensureSeeded` має лишатись ідемпотентним при повторному запуску |
+| `ReminderRepository.ts` | `weekdays` серіалізується в JSON і парситься назад з `try/catch`-фолбеком на `null` — легко мовчки з'їсти биті дані |
+
+**P2 (однотабличний CRUD, низький ризик, поки без тестів):** `AppSettingsRepository.ts`
+(deprecated-методи теми, singleton upsert), `BookSourceRepository.ts` (один INSERT, без
+дедуплікації — непрямо вправляється через `bookDraftRepository.test.ts`),
+`JournalDraftRepository.ts` (один upsert-слот на книгу), `RecommendationRepository.ts` (проста
+історія показів, list/insert/delete за парою ключів), `TagRepository.ts` (спрощений варіант
+`GenreRepository` — без slug-дедупу, лише trim+точний збіг).
+
+**Свідомо відкладено після цієї фази:** усі P1/P2 вище — реальний ризик тихого пошкодження
+даних для них нижчий, ніж для P0 (жоден не бере участі в багатотабличній транзакції; найгірший
+сценарій — дублікат довідникового рядка чи застарілий JSON, не втрачена/пошкоджена книга
+користувача), а бюджет цієї фази — довести до тесту саме найризикованіше, а не "все підряд".
+Наступний кандидат за пріоритетом, якщо ця робота продовжиться — `GenreRepository.ts`
+(slug-дедуп найлегше зламати непомітно) і `WorkRepository.search` (найскладніший запит з усіх
+нетестованих).
+
+**Уже покриті до цієї фази** (для повноти картини, не потребували змін): `ActivityHistory`,
+`BackupRepository`, `BookCapsuleRepository`, `BookMemoryRepository`, `CapsuleRecallRepository`,
+`DataIntegrityRepository`, `DnfReflectionRepository`, `EditionRepository`, `JournalRepository`,
+`LoreEntityRepository`, `NoteRepository`, `OnThisDayRepository`, `PreReadingReflectionRepository`,
+`PublisherRepository`, `QuoteRepository`, `RatingRepository`, `ReadingGoalRepository`,
+`ReadingProgressRepository`, `ReadingRunRepository`, `ReadingSessionRepository`,
+`ShelfRepository`, `UserBookRepository` — плюс `SeriesRepository`, `NoteCategoryRepository`,
+`OwnedBookRepository`, додані щойно цією ж фазою поруч із `bookDraftRepository` (вибрані як
+наступні за пріоритетом після P0: усі три мають нетривіальну логіку — `ON CONFLICT DO UPDATE`
+з перерахунком трьох видів порядку в `SeriesRepository.addEntry`, скопований per-книга
+`sortOrder` у `NoteCategoryRepository.create`, дедуп-без-оновлення в `OwnedBookRepository.
+create` — і жодного тесту раніше).
+
 ## Що НЕ покривається юніт-тестами (свідомо)
 
 Верстка/анімації/жести — перевіряються вручну (single-user MVP, немає бюджету на E2E у V1);
