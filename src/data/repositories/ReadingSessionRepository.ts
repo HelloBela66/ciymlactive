@@ -4,6 +4,7 @@ import { nowIso } from '@/lib/dateUtils';
 import { computeElapsedMs, isCurrentlyPaused } from '@/lib/sessionTiming';
 import type { PausedInterval, ReadingSession } from '@/types/readingSession';
 import type { UserBookStatus } from '@/types/userBook';
+import type { ReadingRunStatus } from '@/types/readingRun';
 import { UserBookRepository } from './UserBookRepository';
 import { ReadingProgressRepository } from './ReadingProgressRepository';
 import { ReadingRunRepository } from './ReadingRunRepository';
@@ -92,6 +93,23 @@ function inferStatusForSessionStart(
   }
   if (currentStatus === 'finished') return 'rereading';
   return 'reading';
+}
+
+/**
+ * READING RUN CANCEL/DISCARD FIX (POLYTSIA V1.6.2, Фаза 2). Дзеркальна до
+ * `inferStatusForSessionStart` вище логіка — "яким має СТАТИ статус, якщо run, що його щойно
+ * вивів start(), тепер прибирається" (докладніше — `discard()` нижче). Обчислюється з
+ * НАЙНОВІШОГО з решти живих run книги (того, що лишається ПІСЛЯ видалення скасованого):
+ * немає жодного — книгу ще ЖОДНОГО разу реально не читали, це був відмінений перший старт ->
+ * `want_to_read`; найновіший `finished` -> `finished`; `did_not_finish` -> `did_not_finish`;
+ * `in_progress` (кілька сесій того самого проходу, одну з яких скасовують, а не останню) ->
+ * `reading`/`rereading` за тим самим правилом номера проходу, що й у `inferStatusForSessionStart`.
+ */
+function computeStatusAfterRunRemoval(latestRemainingRun: { status: ReadingRunStatus; runNumber: number } | null): UserBookStatus {
+  if (!latestRemainingRun) return 'want_to_read';
+  if (latestRemainingRun.status === 'finished') return 'finished';
+  if (latestRemainingRun.status === 'did_not_finish') return 'did_not_finish';
+  return latestRemainingRun.runNumber > 1 ? 'rereading' : 'reading';
 }
 
 /**
@@ -321,9 +339,71 @@ export const ReadingSessionRepository = {
     ]);
   },
 
-  /** Скасувати сесію без збереження (опція відновлення "осиротілої" сесії при relaunch). */
+  /**
+   * Скасувати сесію без збереження (опція відновлення "осиротілої" сесії при relaunch, і кнопка
+   * "Скасувати сесію" на активному екрані читання, `app/session/[sessionId].tsx`).
+   *
+   * READING RUN CANCEL/DISCARD FIX (POLYTSIA V1.6.2, Фаза 2 — прогалина, яку виявив і зробив
+   * реально видимою P0 FIX Фази 1): до цієї фази скасування сесії чіпало ЛИШЕ саму сесію — run,
+   * який ця сесія (можливо) щойно створила разом зі стартом (`start()` вище), лишався
+   * `in_progress` НАЗАВЖДИ, без жодної живої сесії всередині. Це вже було можливо й раніше
+   * (задокументована "graceful" властивість), але Фаза 1 зробила це видимим по-новому: тепер
+   * `start()` ще й змінює `user_book.status`, тож "тапнув 'Почати читання' не на ту книжку,
+   * одразу натиснув 'Скасувати сесію'" лишало книгу видимо позначеною "Читаю"/"Перечитую" в
+   * Бібліотеці й на Головній — назавжди, без реального способу це відмінити з UI.
+   *
+   * Правило: якщо ПІСЛЯ видалення цієї сесії її run не має ЖОДНОЇ іншої живої сесії, і сам run
+   * ще НІКОЛИ не завершувався (`finishedAt == null` — активний екран сесії й так показує лише
+   * незавершені сесії незавершеного run, тож це завжди так для реального виклику з UI, але
+   * перевіряємо явно, а не покладаємось на це) — це була відмінена спроба, а не реальна
+   * історія: сам run теж м'яко видаляється (`ReadingRunRepository.discard`), а
+   * `user_book.status` повертається до того, що диктує решта live-історії прочитань книги
+   * (`computeStatusAfterRunRemoval` вище — дзеркальна логіка до `inferStatusForSessionStart`).
+   * Якщо в run лишились інші живі сесії (звичайний "скасував ОДНУ сесію посеред багатосесійного
+   * читання") — run і статус НЕ чіпаються, той самий принцип "не вигадувати й не руйнувати
+   * реальну історію", що й усюди в цій сутності.
+   */
   async discard(db: SQLiteDatabase, id: string): Promise<void> {
-    await db.runAsync(`UPDATE reading_session SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
+    const session = await ReadingSessionRepository.getById(db, id);
+    if (!session) return;
+
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(`UPDATE reading_session SET deleted_at = ? WHERE id = ?`, [nowIso(), id]);
+
+      if (!session.readingRunId) return; // легасі сесія без run (до Фази 7) — прибирати більше нічого
+
+      const run = await ReadingRunRepository.getById(db, session.readingRunId);
+      if (!run || run.finishedAt) return; // run уже завершений — це реальна історія, не чіпаємо
+
+      const remaining = await db.getFirstAsync<{ count: number }>(
+        `SELECT COUNT(*) as count FROM reading_session WHERE reading_run_id = ? AND deleted_at IS NULL`,
+        [session.readingRunId],
+      );
+      if ((remaining?.count ?? 0) > 0) return; // у run лишились інші живі сесії — не чіпаємо
+
+      await ReadingRunRepository.discard(db, session.readingRunId);
+
+      const userBook = await UserBookRepository.getById(db, session.userBookId);
+      if (!userBook) return;
+
+      const latestRemainingRun = await ReadingRunRepository.getLatestByUserBookId(db, session.userBookId);
+      const fallbackStatus = computeStatusAfterRunRemoval(latestRemainingRun);
+      if (fallbackStatus === userBook.status) return;
+
+      // 'want_to_read' несумісний з непорожнім started_at (dataIntegrityDoctor.ts,
+      // want_to_read_with_started_at) — якщо відкочуємось аж до "ще не починали", started_at
+      // теж повертається в null. Це безпечно: єдиний спосіб опинитись тут із fallbackStatus
+      // 'want_to_read' — коли скасований run був ПЕРШИМ і ЄДИНИМ для книги, тож ДО start()
+      // started_at так і так був null (сама Фаза 1 виставляє його лише коли він ще не стояв).
+      const fallbackStartedAt = fallbackStatus === 'want_to_read' ? null : userBook.startedAt;
+
+      await db.runAsync(`UPDATE user_book SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`, [
+        fallbackStatus,
+        fallbackStartedAt,
+        nowIso(),
+        session.userBookId,
+      ]);
+    });
   },
 
   /** Історія читання конкретної книги, найновіші зверху — для Book Details. */

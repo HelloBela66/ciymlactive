@@ -378,6 +378,140 @@ describe('ReadingSessionRepository.discard (Фаза 5)', () => {
   });
 });
 
+/**
+ * READING RUN CANCEL/DISCARD FIX (POLYTSIA V1.6.2, Фаза 2) — прогалина, яку виявив і зробив
+ * реально видимою P0 FIX Фази 1 (`inferStatusForSessionStart`, група тестів вище): до цієї фази
+ * `discard()` чіпав ЛИШЕ саму сесію, а run і `user_book.status`, які щойно виставив `start()`,
+ * лишались "висіти" назавжди. Тести нижче — саме на нову поведінку: run і статус книги мають
+ * відкочуватись, коли скасована сесія була ЄДИНОЮ живою в своєму (ще не завершеному) run, і
+ * лишатись недоторканими в усіх інших випадках (реальна історія, а не помилковий старт).
+ */
+describe('ReadingSessionRepository.discard — відкат run і user_book.status (Фаза 2, V1.6.2)', () => {
+  it('скасував єдину сесію щойно створеного run на "want_to_read" → run видалено, статус і started_at повертаються назад', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-wtr', status: 'want_to_read' });
+
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-wtr', startPage: 0 });
+    const runId = s.readingRunId as string;
+    expect((await UserBookRepository.getById(db, 'ub-disc-wtr'))?.status).toBe('reading');
+
+    await ReadingSessionRepository.discard(db, s.id);
+
+    const userBook = await UserBookRepository.getById(db, 'ub-disc-wtr');
+    expect(userBook?.status).toBe('want_to_read');
+    expect(userBook?.startedAt).toBeNull();
+    expect(await ReadingRunRepository.getById(db, runId)).toBeNull();
+    expect(await ReadingRunRepository.getActiveByUserBookId(db, 'ub-disc-wtr')).toBeNull();
+  });
+
+  it('скасував єдину сесію run, створеного для перечитування на "finished" → run перечитування видалено, статус повертається в "finished" (не "want_to_read") завдяки попередньому завершеному run', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-fin', status: 'finished' });
+    // Реалістичний стан: "finished" книга ЗАВЖДИ має позаду реальний завершений run (той самий
+    // сетап, що й тест "фінішований → rereading" у групі P0 FIX вище) — інакше status='finished'
+    // без жодного run в історії суперечив би самій моделі (`legacy_contradictory_status`).
+    const firstRun = await ReadingRunRepository.start(db, { userBookId: 'ub-disc-fin' });
+    await ReadingRunRepository.finish(db, firstRun.id, { status: 'finished' });
+
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-fin', startPage: 0 });
+    expect((await UserBookRepository.getById(db, 'ub-disc-fin'))?.status).toBe('rereading');
+
+    await ReadingSessionRepository.discard(db, s.id);
+
+    const userBook = await UserBookRepository.getById(db, 'ub-disc-fin');
+    expect(userBook?.status).toBe('finished');
+    const runs = await ReadingRunRepository.listByUserBookId(db, 'ub-disc-fin');
+    expect(runs).toHaveLength(1); // лишився лише перший (реальний) run, скасований run №2 видалено
+    expect(runs[0]?.id).toBe(firstRun.id);
+  });
+
+  it('скасував єдину сесію run, відновленого з "did_not_finish" → run відновлення видалено, статус повертається в "did_not_finish" (не "reading") завдяки попередньому DNF-run', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-dnf', status: 'did_not_finish' });
+    const firstRun = await ReadingRunRepository.start(db, { userBookId: 'ub-disc-dnf' });
+    await ReadingRunRepository.finish(db, firstRun.id, { status: 'did_not_finish' });
+
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-dnf', startPage: 0 });
+    expect((await UserBookRepository.getById(db, 'ub-disc-dnf'))?.status).toBe('reading');
+
+    await ReadingSessionRepository.discard(db, s.id);
+
+    const userBook = await UserBookRepository.getById(db, 'ub-disc-dnf');
+    expect(userBook?.status).toBe('did_not_finish');
+    const runs = await ReadingRunRepository.listByUserBookId(db, 'ub-disc-dnf');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.id).toBe(firstRun.id);
+  });
+
+  it('"did_not_finish" БЕЗ жодного run в історії (нетиповий/легасі стан) — скасування єдиного новоствореного run відкочує аж до "want_to_read", а не залишає видуманий DNF без підстави', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-dnf-norun', status: 'did_not_finish' });
+
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-dnf-norun', startPage: 0 });
+    expect((await UserBookRepository.getById(db, 'ub-disc-dnf-norun'))?.status).toBe('reading');
+
+    await ReadingSessionRepository.discard(db, s.id);
+
+    // Немає жодного живого run, на який можна було б відкотитись — computeStatusAfterRunRemoval
+    // чесно повертає 'want_to_read' (докладніше — коментар над функцією), а не вигадує 'did_not_finish'.
+    const userBook = await UserBookRepository.getById(db, 'ub-disc-dnf-norun');
+    expect(userBook?.status).toBe('want_to_read');
+  });
+
+  it('у run лишається ще одна жива сесія — run і статус НЕ чіпаються, видаляється лише скасована сесія', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-multi', status: 'want_to_read' });
+
+    const first = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-multi', startPage: 0 });
+    const runId = first.readingRunId as string;
+    const second = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-multi', startPage: 5 });
+    expect(second.readingRunId).toBe(runId); // той самий run (Фаза 7 — без завершення між стартами)
+
+    await ReadingSessionRepository.discard(db, second.id);
+
+    expect(await ReadingSessionRepository.getById(db, first.id)).not.toBeNull(); // перша сесія лишається живою
+    const userBook = await UserBookRepository.getById(db, 'ub-disc-multi');
+    expect(userBook?.status).toBe('reading'); // не відкотилось — run усе ще активний і має живу сесію
+    const run = await ReadingRunRepository.getById(db, runId);
+    expect(run?.status).toBe('in_progress'); // run не видалено
+  });
+
+  it('run уже завершений (finishedAt проставлено) — це реальна історія, discard сесії його не чіпає', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-done', status: 'reading' });
+    const s = await ReadingSessionRepository.start(db, { userBookId: 'ub-disc-done', startPage: 0 });
+    const runId = s.readingRunId as string;
+    await ReadingRunRepository.finish(db, runId, { status: 'finished' });
+    // Статус книги свідомо НЕ синхронізуємо вручну тут — тест перевіряє лише що discard() не
+    // чіпає вже завершений run/побічно завершені дані, а не повний UpdateStatus-флоу.
+
+    await ReadingSessionRepository.discard(db, s.id);
+
+    const run = await ReadingRunRepository.getById(db, runId);
+    expect(run).not.toBeNull(); // run НЕ видалено — фінішований run це вже історія, а не помилковий старт
+    expect(run?.status).toBe('finished');
+  });
+
+  it('легасі-сесія без reading_run_id (до Фази 7) — discard видаляє лише сесію, без помилки', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, { id: 'ub-disc-legacy', status: 'reading' });
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO reading_session (
+         id, user_book_id, reading_run_id, started_at, ended_at, paused_intervals, start_page, end_page,
+         duration_seconds, is_edited, created_at, updated_at
+       ) VALUES (?,?,NULL,?,NULL,'[]',?,NULL,NULL,0,?,?)`,
+      ['session-disc-legacy', 'ub-disc-legacy', now, 0, now, now],
+    );
+
+    await expect(ReadingSessionRepository.discard(db, 'session-disc-legacy')).resolves.toBeUndefined();
+
+    expect(await ReadingSessionRepository.getById(db, 'session-disc-legacy')).toBeNull();
+    const userBook = await UserBookRepository.getById(db, 'ub-disc-legacy');
+    expect(userBook?.status).toBe('reading'); // легасі-сесія без run — статус книги поза межами цієї функції
+  });
+});
+
 describe('ReadingSessionRepository — перечитування та м\'яко видалена книга (Фаза 5)', () => {
   it('перечитування (user_book.status = "rereading") — репозиторій сесій до статусу байдужий', async () => {
     const db = await openMigratedTestDb();
