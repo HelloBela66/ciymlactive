@@ -356,3 +356,78 @@ describe('ActivityHistoryRepository.listBetween', () => {
     expect(ids).toContain('quote-behind');
   });
 });
+
+/**
+ * КАЛЕНДАР, ВІЗУАЛЬНА КОМПОЗИЦІЯ (пост-Фаза 19) — Day Details' "Збережено цього дня" потребує
+ * не лише видимі записи (`listBetween`), а й ЧИСЛО прихованих, щоб чесно написати "Ще N
+ * записів приховано...", а не мовчки показати менше записів без пояснення.
+ */
+describe('ActivityHistoryRepository.countSpoilerHiddenJournalBetween', () => {
+  const T1 = '2026-02-01T10:00:00.000Z';
+  const T2 = '2026-02-02T10:00:00.000Z';
+  const T3 = '2026-02-03T10:00:00.000Z';
+
+  async function seedOneBookWithAheadAndBehindEntries(db: SQLiteDatabase, spoilerSafeEnabled: 0 | 1): Promise<void> {
+    await db.runAsync(`INSERT INTO work (id, title, created_at, updated_at) VALUES (?,?,?,?)`, ['work-1', 'Книга', T1, T1]);
+    await db.runAsync(
+      `INSERT INTO edition (id, work_id, title, language, format, created_at, updated_at, page_count) VALUES (?,?,?,?,?,?,?,?)`,
+      ['edition-1', 'work-1', 'Книга', 'uk', 'paperback', T1, T1, 400],
+    );
+    await db.runAsync(
+      `INSERT INTO user_book (id, edition_id, status, current_page, spoiler_safe_enabled, added_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['user_book-1', 'edition-1', 'reading', 50, spoilerSafeEnabled, T1, T1],
+    );
+    await db.runAsync(
+      `INSERT INTO note (id, user_book_id, type, page, text, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+      ['note-ahead', 'user_book-1', 'thought', 300, 'Спойлер з кінця.', '[]', T2, T2],
+    );
+    await db.runAsync(
+      `INSERT INTO quote (id, user_book_id, edition_id, page, text, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      ['quote-behind', 'user_book-1', 'edition-1', 10, 'Цитата з початку.', T3, T3],
+    );
+  }
+
+  it('рахує рівно приховані journal_entry/quote діапазону (тут — 1, note-ahead)', async () => {
+    const db = await openMigratedTestDb();
+    await seedOneBookWithAheadAndBehindEntries(db, 1);
+
+    const count = await ActivityHistoryRepository.countSpoilerHiddenJournalBetween(
+      db,
+      T1,
+      '2026-02-10T00:00:00.000Z',
+    );
+    expect(count).toBe(1);
+  });
+
+  it('0, коли власник вимкнув прапорець (нічого не приховано)', async () => {
+    const db = await openMigratedTestDb();
+    await seedOneBookWithAheadAndBehindEntries(db, 0);
+
+    const count = await ActivityHistoryRepository.countSpoilerHiddenJournalBetween(
+      db,
+      T1,
+      '2026-02-10T00:00:00.000Z',
+    );
+    expect(count).toBe(0);
+  });
+
+  it('0 поза діапазоном дат', async () => {
+    const db = await openMigratedTestDb();
+    await seedOneBookWithAheadAndBehindEntries(db, 1);
+
+    const count = await ActivityHistoryRepository.countSpoilerHiddenJournalBetween(
+      db,
+      '2025-01-01T00:00:00.000Z',
+      '2025-02-01T00:00:00.000Z',
+    );
+    expect(count).toBe(0);
+  });
+
+  it('не рахує неспойлерні типи подій (session_completed/book_started тощо) — вони ніколи не приховані', async () => {
+    const db = await openMigratedTestDb();
+    await seedTwoBooksAcrossAllEventTypes(db);
+
+    const count = await ActivityHistoryRepository.countSpoilerHiddenJournalBetween(db, ADDED_1, SHELF_ADDED);
+    expect(count).toBe(0);
+  });
+});

@@ -10,28 +10,35 @@ import { Card } from '@/components/ui/Card';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { ReadingDayBookCard } from '@/components/calendar/ReadingDayBookCard';
 import { useTheme } from '@/design/ThemeProvider';
-import { activityEventTypeLabels } from '@/design/i18n-labels';
+import { activityEventTypeLabels, journalEntryTypeLabels } from '@/design/i18n-labels';
 import { EVENT_ICON, eventDetail } from '@/design/activityEventDisplay';
-import { useDaySessions } from '@/features/calendar/useCalendarSessions';
-import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
+import { useDaySessions, type DayRunEvent } from '@/features/calendar/useCalendarSessions';
+import { formatCompactDuration } from '@/lib/calendarFormat';
+import { pluralizeUk } from '@/lib/pluralizeUk';
 import { formatDuration } from '@/lib/sessionTiming';
 import type { ActivityEvent } from '@/types/activityEvent';
+import type { JournalFeedEntry } from '@/types/journalEntry';
+
+const BOOK_FORMS = ['книга', 'книги', 'книг'] as const;
+const PAGE_FORMS = ['сторінка', 'сторінки', 'сторінок'] as const;
+const ENTRY_FORMS = ['запис', 'записи', 'записів'] as const;
 
 /**
- * ДЕТАЛІ ДНЯ (POLYTSIA V1.6.1, Фаза 19 — КАЛЕНДАР 2.0, `docs/CALENDAR_2_0.md`). Значно
- * змістовніша версія попереднього "лише список сесій": підсумок дня, сесії (з позначкою
- * прочитання при перечитуванні), і решта подій ТЗ, що сталися того дня (початок/фініш
- * книги, нотатки/цитати — вже spoiler-safe відфільтровані на рівні репозиторію, оцінки,
- * додавання на полицю).
+ * ДЕТАЛІ ДНЯ — "ДЕНЬ ЧИТАННЯ" (POLYTSIA V1.6.1, Фаза 19 → ВІЗУАЛЬНА КОМПОЗИЦІЯ ТА REDESIGN
+ * ДНЯ ЧИТАННЯ, пост-Фаза 19, `docs/CALENDAR_2_0.md` §"Visual Day Composition"). Структура:
+ * hero (компактний підсумок) → книги дня (primary першою, `ReadingDayBookCard`) → сесії
+ * читання (з позначкою перечитування) → "Початок і завершення" (таймлайн з `ReadingRun`, НЕ з
+ * `ActivityHistoryRepository`'s `book_started`/`book_finished` — докладніше коментар над
+ * `ReadingRunRepository.listStartedOrFinishedBetween`) → "Збережено цього дня" (щоденник,
+ * spoiler-safe, макс. 3, секція повністю відсутня, коли порожня) → "Інша активність" (оцінка/
+ * полиця/додавання книги — рештки восьми типів подій ТЗ, що не мають власної секції вище).
  *
- * Свідомо ЛИШИВСЯ окремим route-екраном (`app/day/[date]`), а не перетворений на модальний
- * sheet, хоча оригінальний `docs/ARCHITECTURE.md` (розділ 6, ще з Milestone 0) називав
- * `DaySummarySheet` — ТЗ цієї фази перелічує ЗМІСТ деталей дня ("summary/books/sessions/
- * journal preview/start-finish events"), а не вимагає конкретно навігаційної оболонки; заміна
- * route на sheet зачепила б і deep-linking (`/day/[date]` як самостійний URL), і кнопку "назад",
- * не будучи явно потрібною для жодної вимоги цієї фази — той самий "не змінюй мовчки те, чого
- * не просили" принцип, що й вибір НЕ переставляти Home shortcuts у Фазі 17.
+ * Лишається окремим route-екраном, не модальним sheet — те саме обґрунтування, що й до цієї
+ * фази (докладніше коментар нижче над функцією-компонентом і `docs/CALENDAR_2_0.md`
+ * §"Чому лишився route, не sheet") — ця фаза змінює ЗМІСТ і композицію, не навігаційну
+ * оболонку, якої ніхто явно не просив міняти.
  */
 export default function DayDetailsScreen() {
   const theme = useTheme();
@@ -40,24 +47,30 @@ export default function DayDetailsScreen() {
   const { data, isLoading, isError, refetch } = useDaySessions(parsedDate);
 
   const title = parsedDate ? format(parsedDate, 'd MMMM yyyy', { locale: uk }) : 'День';
-  const sessions = data?.sessions ?? [];
-  const otherEvents = data?.otherEvents ?? [];
-  const isEmpty = sessions.length === 0 && otherEvents.length === 0;
 
-  // Залежність саме на `data` (не на `sessions` — `data?.sessions ?? []` вище створює НОВИЙ
-  // масив-referenced на кожен рендер навіть коли `data` не змінився, через `?? []` фолбек), щоб
-  // цей `useMemo` реально мемоізував, а не перераховував на кожен рендер (react-hooks/
-  // exhaustive-deps, знайдено ESLint).
-  const summary = useMemo(() => {
-    const daySessions = data?.sessions ?? [];
-    if (daySessions.length === 0) return null;
-    const rawSessions = daySessions.map((s) => s.session);
-    const distinctBooksCount = new Set(daySessions.map((s) => s.userBook.id)).size;
-    return {
-      totalMinutes: sumSessionMinutes(rawSessions),
-      totalPages: sumSessionPages(rawSessions),
-      distinctBooksCount,
-    };
+  const books = data?.books ?? [];
+  const sessions = data?.sessions ?? [];
+  const timelineEvents = data?.timelineEvents ?? [];
+  const journalItems = data?.journalItems ?? [];
+  const hiddenJournalCount = data?.hiddenJournalCount ?? 0;
+  const otherEvents = data?.otherEvents ?? [];
+
+  const isEmpty =
+    books.length === 0 &&
+    timelineEvents.length === 0 &&
+    journalItems.length === 0 &&
+    hiddenJournalCount === 0 &&
+    otherEvents.length === 0;
+
+  // Залежність саме на `data` (не на похідних масивах вище — `data?.books ?? []` тощо створює
+  // НОВИЙ масив-референс на кожен рендер навіть коли `data` не змінився, через `?? []`
+  // фолбек), щоб цей `useMemo` реально мемоізував (react-hooks/exhaustive-deps).
+  const hero = useMemo(() => {
+    const dayBooks = data?.books ?? [];
+    if (dayBooks.length === 0) return null;
+    const totalMinutes = dayBooks.reduce((sum, b) => sum + b.totalMinutes, 0);
+    const totalPages = dayBooks.reduce((sum, b) => sum + b.totalPages, 0);
+    return { booksCount: dayBooks.length, totalMinutes, totalPages };
   }, [data]);
 
   return (
@@ -85,17 +98,33 @@ export default function DayDetailsScreen() {
           />
         ) : (
           <View style={{ gap: theme.spacing.lg }}>
-            {summary ? (
+            {hero ? (
               <Card style={{ gap: theme.spacing.xs }}>
                 <AppText variant="heading">Підсумок дня</AppText>
                 <AppText variant="body" color="secondary">
-                  {formatDuration(summary.totalMinutes * 60 * 1000)}
+                  {hero.booksCount} {pluralizeUk(hero.booksCount, BOOK_FORMS)}
                   {' · '}
-                  {summary.totalPages} стор.
+                  {formatCompactDuration(hero.totalMinutes)}
                   {' · '}
-                  {summary.distinctBooksCount} {summary.distinctBooksCount === 1 ? 'книга' : 'книг'}
+                  {hero.totalPages} {pluralizeUk(hero.totalPages, PAGE_FORMS)}
                 </AppText>
               </Card>
+            ) : null}
+
+            {books.length > 0 ? (
+              <View style={{ gap: theme.spacing.sm }}>
+                <AppText variant="heading">Книги цього дня</AppText>
+                {books.map((book, index) => (
+                  <ReadingDayBookCard
+                    key={book.userBook.id}
+                    userBook={book.userBook}
+                    totalMinutes={book.totalMinutes}
+                    totalPages={book.totalPages}
+                    sessionCount={book.sessionCount}
+                    isPrimary={index === 0}
+                  />
+                ))}
+              </View>
             ) : null}
 
             {sessions.length > 0 ? (
@@ -110,7 +139,7 @@ export default function DayDetailsScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={
                         runNumber
-                          ? `${userBook.work.title}, перечитування, прохід ${runNumber}`
+                          ? `${userBook.work.title}, перечитування, прочитання №${runNumber}`
                           : userBook.work.title
                       }
                     >
@@ -134,7 +163,7 @@ export default function DayDetailsScreen() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
                               <Ionicons name="repeat" size={12} color={theme.colors.accent} />
                               <AppText variant="micro" color="accent">
-                                Перечитування, прохід {runNumber}
+                                Перечитування · прочитання №{runNumber}
                               </AppText>
                             </View>
                           ) : null}
@@ -144,6 +173,30 @@ export default function DayDetailsScreen() {
                     </Pressable>
                   );
                 })}
+              </View>
+            ) : null}
+
+            {timelineEvents.length > 0 ? (
+              <View style={{ gap: theme.spacing.sm }}>
+                <AppText variant="heading">Початок і завершення</AppText>
+                {timelineEvents.map((event, index) => (
+                  <RunTimelineRow key={`${event.type}-${event.userBook.id}-${index}`} event={event} />
+                ))}
+              </View>
+            ) : null}
+
+            {journalItems.length > 0 || hiddenJournalCount > 0 ? (
+              <View style={{ gap: theme.spacing.sm }}>
+                <AppText variant="heading">Збережено цього дня</AppText>
+                {journalItems.map((entry) => (
+                  <JournalPreviewRow key={`${entry.kind}-${entry.id}`} entry={entry} />
+                ))}
+                {hiddenJournalCount > 0 ? (
+                  <AppText variant="caption" color="tertiary">
+                    Ще {hiddenJournalCount} {pluralizeUk(hiddenJournalCount, ENTRY_FORMS)} приховано режимом «без
+                    спойлерів».
+                  </AppText>
+                ) : null}
               </View>
             ) : null}
 
@@ -162,10 +215,78 @@ export default function DayDetailsScreen() {
   );
 }
 
-/** Рядок "решти семи типів подій" дня (початок/фініш книги, нотатка/цитата — вже spoiler-safe,
- * оцінка, полиця) — той самий `EVENT_ICON`/`eventDetail`, що й `app/history.tsx`'s
- * `ActivityEventRow` (`src/design/activityEventDisplay.ts`), лише без CoverThumbnail (сесії
- * вище вже несуть обкладинку — тут переважно короткі текстові події). */
+/** "Почав читати"/"Завершив" — джерело САМЕ `ReadingRun` (`docs/CALENDAR_2_0.md`
+ * §"Visual Day Composition"), не `ActivityEvent`, тому власний, простіший рядок, не
+ * перевикористання `DayEventRow` нижче (той очікує саме `ActivityEvent`, у якого немає
+ * "type: started/finished" — лише вбудовані вісім типів UNION ALL). */
+function RunTimelineRow({ event }: { event: DayRunEvent }) {
+  const theme = useTheme();
+  const isFinished = event.type === 'finished';
+  const label = isFinished ? 'Завершив' : 'Почав читати';
+
+  return (
+    <Pressable
+      onPress={() => router.push({ pathname: '/work/[workId]', params: { workId: event.userBook.work.id } })}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${event.userBook.work.title}`}
+    >
+      <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
+        <CoverThumbnail
+          coverUrl={event.userBook.edition.coverUrl}
+          title={event.userBook.work.title}
+          fallbackColor={event.userBook.work.coverFallbackColor}
+          width={40}
+          height={58}
+        />
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name={isFinished ? 'flag' : 'play'} size={13} color={theme.colors.accent} />
+            <AppText variant="caption" color="accent">
+              {label}
+            </AppText>
+          </View>
+          <AppText variant="body" numberOfLines={1}>
+            {event.userBook.work.title}
+          </AppText>
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+/** "Збережено цього дня" — рядок запису щоденника (нотатка/цитата), уже spoiler-safe
+ * відфільтрований на рівні `JournalRepository.listFeedPage`. `typeLabel` — той самий "власна
+ * категорія, коли є, інакше вбудований тип" принцип, що й `app/journal/index.tsx`'s
+ * `feedEntryLabel`/`app/(tabs)/search.tsx`'s `entryTypeLabel` (`categoryLabel` уже резолвлена
+ * прямо в SQL — без додаткового запиту). */
+function JournalPreviewRow({ entry }: { entry: JournalFeedEntry }) {
+  const theme = useTheme();
+  const typeLabel = entry.categoryId && entry.categoryLabel ? entry.categoryLabel : journalEntryTypeLabels[entry.type];
+
+  return (
+    <Card style={{ gap: 4 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        {entry.isFavorite ? <Ionicons name="star" size={12} color={theme.colors.warning} /> : null}
+        <AppText variant="caption" color="accent">
+          {typeLabel}
+        </AppText>
+      </View>
+      <AppText variant="body" numberOfLines={2}>
+        {entry.text}
+      </AppText>
+      <AppText variant="micro" color="tertiary" numberOfLines={1}>
+        {entry.workTitle}
+      </AppText>
+    </Card>
+  );
+}
+
+/** Рядок "решти типів подій" дня (оцінка, додавання книги, полиця — `book_started`/
+ * `book_finished`/`journal_entry`/`quote`/`session_completed` тепер мають власні, змістовніші
+ * секції вище, і виключені з цього списку на рівні хука) — той самий `EVENT_ICON`/`eventDetail`,
+ * що й `app/history.tsx`'s `ActivityEventRow` (`src/design/activityEventDisplay.ts`), лише без
+ * CoverThumbnail (сесії/книги вище вже несуть обкладинку — тут переважно короткі текстові
+ * події). */
 function DayEventRow({ event }: { event: ActivityEvent }) {
   const theme = useTheme();
   const detail = eventDetail(event);

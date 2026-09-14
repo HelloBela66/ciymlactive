@@ -187,6 +187,44 @@ export const ReadingRunRepository = {
   },
 
   /**
+   * Run'и, чий `startedAt` АБО `finishedAt` потрапляє в `[startIso, endIso)` — КАЛЕНДАР,
+   * ВІЗУАЛЬНА КОМПОЗИЦІЯ (пост-Фаза 19, `docs/CALENDAR_2_0.md` §"Visual Day Composition"):
+   * "почав читати"/"завершив" позначки дня-клітинки й timeline-пункти Day Details мають брати
+   * дати САМЕ з ReadingRun (кожен прохід має власні `startedAt`/`finishedAt`), а НЕ з
+   * `user_book.started_at`/`finished_at` (`ActivityHistoryRepository`'s `book_started`/
+   * `book_finished` гілки) — те поле "заморожене" на ПЕРШИЙ старт і ПЕРШИЙ незмінений фініш
+   * книги (`UserBookRepository.updateStatus`, докладніше коментар там-таки), тож для
+   * перечитаної книги НЕ відображає дату старту/фінішу кожного окремого проходу — рівно та
+   * проблема, якої це нове поле уникає.
+   *
+   * `JOIN user_book` з `deleted_at IS NULL` — на відміну від решти методів цього репозиторію
+   * (які самі по собі м'якого видалення книги не знають, бо `reading_run` не несе власного
+   * поняття "жива книга"), тут це свідомо додано: ЦЕ нова функціональність цієї фази, не
+   * редагування наявної агрегації, тож пишеться одразу коректно щодо soft-delete, а не
+   * повторює відомий (окремо задокументований, НЕ виправлений цією фазою — поза її обсягом)
+   * розрив між сіткою місяця й деталями дня для хвилин-підрахунку на основі
+   * `ReadingSessionRepository` (докладніше — `docs/CALENDAR_VISUAL_REDESIGN_REPORT.md`
+   * §"Відомі обмеження").
+   *
+   * Один запит на весь запитаний діапазон (сітка місяця чи один день) — той самий "діапазон
+   * замість по одному" підхід, що й `ActivityHistoryRepository.listBetween`.
+   */
+  async listStartedOrFinishedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingRun[]> {
+    const rows = await db.getAllAsync<ReadingRunRow>(
+      `SELECT rr.* FROM reading_run rr
+       JOIN user_book ub ON ub.id = rr.user_book_id
+       WHERE rr.deleted_at IS NULL AND ub.deleted_at IS NULL
+         AND (
+           (rr.started_at >= ? AND rr.started_at < ?)
+           OR (rr.finished_at >= ? AND rr.finished_at < ?)
+         )
+       ORDER BY rr.started_at ASC`,
+      [startIso, endIso, startIso, endIso],
+    );
+    return rows.map(mapRow);
+  },
+
+  /**
    * `userBookId` усіх книг, що мають ≥2 ЗАВЕРШЕНИХ (`status = 'finished'`) run — тобто книг, які
    * реально можна порівняти на `app/reread-comparison/[workId].tsx` (`selectComparableRuns`,
    * `useReadingRunsDetail.ts`, той самий поріг ≥2 `finished`). Фаза 16 (MEMORY HUB HIERARCHY,

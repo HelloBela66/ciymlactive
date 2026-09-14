@@ -1,5 +1,82 @@
 # Changelog
 
+## КАЛЕНДАР — візуальна композиція та redesign дня читання
+
+**Дата:** 2026-09-14
+
+Окрема, пізніша UI/візуальна фаза поверх Календаря 2.0 (Фаза 19, `docs/CALENDAR_2_0.md`) — НЕ
+новий проєкт і не переписування, той самий набір джерел даних
+(`ReadingSession`/`ReadingRun`/`ActivityHistory`/`Work`/`Edition`/`Journal`), жодної нової
+персистентної таблиці. Мета: день-клітинка й Day Details як "візуальна історія читання" (дата +
+обкладинка(и) + одна компактна метрика часу), не таблиця чисел.
+
+**Додано:**
+- `src/components/calendar/CalendarBookStack.tsx` — новий перевикористовуваний cover-стек
+  (1 книга/2 книги primary+secondary/3+ з бейджем "+N").
+- `src/components/calendar/ReadingDayBookCard.tsx` — картка книги дня для Day Details.
+- `src/lib/calendarFormat.ts` — компактне ("1 год 12 хв") і повнословесне ("1 година 12 хвилин",
+  для accessibility) форматування тривалості.
+- `src/lib/calendarTopBooks.ts` — `rankTopBooksOfMonth`, топ-3 книги місяця за хвилинами,
+  групування за `workId` (не `userBookId` — задокументоване рішення в самому файлі).
+- `src/lib/calendarJournalPriority.ts` — `rankJournalEntriesForDay`, пріоритет запису щоденника
+  дня (обране → момент → думка → цитата → інше).
+- `ReadingRunRepository.listStartedOrFinishedBetween` — пакетний, soft-delete-aware запит для
+  таймлайну "Початок і завершення" Day Details (джерело САМЕ `ReadingRun`, не заморожені на
+  перше входження поля `user_book.started_at`/`finished_at`).
+- `ActivityHistoryRepository.countSpoilerHiddenJournalBetween` — кількість прихованих
+  spoiler-safe режимом записів щоденника дня, для повідомлення "Ще N записів приховано…".
+- `docs/CALENDAR_VISUAL_MANUAL_TEST.md` — 12-пунктовий ручний перевірочний список.
+- `docs/CALENDAR_VISUAL_REDESIGN_REPORT.md` — повний технічний звіт фази.
+
+**Змінено:**
+- `src/lib/calendarIntensity.ts` — `rankBooksForDay` (повне ранжування книг дня, замінює
+  "лише переможець" `selectPrimaryBookForDay`, який лишився тонкою обгорткою) і новий
+  4-рівневий tie-break: сума хвилин → сума сторінок → кількість сесій → найновіша (не найраніша)
+  активність дня — свідома, задокументована зміна tie-break-ланцюжка Фази 19. Нова
+  `compactPrimarySecondary` — резолвить топ-2 книги дня в об'єкти для cover-стеку. Пороги
+  `computeDayIntensity` (30/90 хв) — БЕЗ ЗМІН.
+- `app/(tabs)/calendar.tsx` — день-клітинка тепер показує `CalendarBookStack` замість однієї
+  обкладинки, tiny-позначка старту/фінішу книги (іконка `play`/`flag`); підсумок місяця
+  спрощено до активних днів/часу/сторінок; нова картка "Найчастіше цього місяця" (3 обкладинки);
+  новий текст порожнього місяця "Цього місяця ще немає читання."; `accessibilityLabel` клітинки
+  розширено кількістю книг і почав/завершив-позначкою.
+- `app/day/[date].tsx` — повністю перебудований: hero-підсумок → "Книги цього дня" (primary
+  першою, `ReadingDayBookCard`) → "Сесії читання" (позначка перечитування тепер
+  "Перечитування · прочитання №N") → нова "Початок і завершення" (з `ReadingRun`) → нова
+  "Збережено цього дня" (щоденник, spoiler-safe, макс. 3, секція відсутня, якщо порожня) →
+  "Інша активність" (рештки типів подій без власної секції).
+- `src/features/calendar/useCalendarSessions.ts` — `useMonthCalendarData`/`useMonthSummary`/
+  `useDaySessions` розширені для нових потреб (секундарна книга, кількість додаткових книг,
+  прапорці старту/фінішу дня, `topBooks`, повна структура `DayDetailsData`), увесь запитовий
+  профіль лишається без N+1 (пакетні `listWithDetailsByIds`/`listByIds`, один запит на весь
+  діапазон).
+
+**week_start:** підтверджено повторно (не лише зі слів Фази 19) — `AppSettingsRepository` і
+далі не має жодного методу читання/запису, жодного UI налаштувань немає — лишається НЕ
+підключеним, з явним коментарем у коді й документації.
+
+**Тести, живий прогін на машині власника продукту:** `tsc --noEmit` — 0 помилок; `npm test` —
+**67 test suites (було 64), 861 тестів (було 813), усі passed** — +3 нові тестові файли
+(`calendarFormat.test.ts` — 9, `calendarTopBooks.test.ts` — 8, `calendarJournalPriority.test.ts`
+— 6) і +48 тестів разом узятих, з решти — у переписаному `calendarIntensity.test.ts`
+(`rankBooksForDay` усі 4 рівні tie-break + мультикнижковий рейтинг/бейдж-математика/
+reread-dedup, `selectPrimaryBookForDay`, `compactPrimarySecondary`; `computeDayIntensity`/
+`sumMinutesForDay` — наявні тести лишились без змін поведінки), і в нових описах
+`ReadingRunRepository.test.ts`/`ActivityHistoryRepository.test.ts`; `eslint . --max-warnings=0`
+— 0 попереджень. Компонентних тестів для `CalendarBookStack`/`ReadingDayBookCard` немає — той
+самий усталений house-конвент проєкту (жодного `.test.tsx` у всьому репозиторії), UI
+верифікується ручним тестуванням (`docs/CALENDAR_VISUAL_MANUAL_TEST.md`), не React Testing
+Library.
+
+**Відоме обмеження, звітоване, НЕ виправлене цією фазою:** розбіжність soft-delete-обізнаності
+між сіткою місяця (`useMonthCalendarData`, успадкована з Фази 19) і деталями дня для м'яко
+видалених книг — той самий клас бага, що Фаза 28 попереднього milestone'у знайшла й виправила
+для Бібліотеки, але не застосувала до Календаря (раніше задокументовано в
+`docs/V1_6_1_FULL_AUDIT_REPORT.md` §35). Нові запити цієї фази
+(`listStartedOrFinishedBetween`) — soft-delete-aware з моменту створення; існуючий запит не
+чіпався (поза скоупом "не альтерувати `ReadingRun`-lifecycle"). Докладніше —
+`docs/CALENDAR_VISUAL_REDESIGN_REPORT.md` §"Відомі обмеження".
+
 ## POLYTSIA V1.6.1 — незалежний повний пост-імплементаційний аудит
 
 **Дата:** 2026-09-14

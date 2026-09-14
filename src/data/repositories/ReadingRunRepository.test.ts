@@ -375,3 +375,112 @@ describe('ReadingRunRepository.listByIds', () => {
     expect(result.get(runB.id)?.userBookId).toBe('ub-batch3b');
   });
 });
+
+describe('ReadingRunRepository.listStartedOrFinishedBetween', () => {
+  it('знаходить run за started_at у діапазоні', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range1');
+    const run = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range1',
+      startedAt: '2026-03-15T12:00:00.000Z',
+    });
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result.map((r) => r.id)).toEqual([run.id]);
+  });
+
+  it('знаходить run за finished_at у діапазоні, НАВІТЬ якщо started_at поза діапазоном (перечитування, що почалось раніше)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range2');
+    const run = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range2',
+      startedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await ReadingRunRepository.finish(db, run.id, { status: 'finished', finishedAt: '2026-03-15T12:00:00.000Z' });
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result.map((r) => r.id)).toEqual([run.id]);
+  });
+
+  it('діапазон напіввідкритий [start, end) — межа кінця виключна', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range3');
+    await ReadingRunRepository.start(db, { userBookId: 'ub-range3', startedAt: '2026-03-16T00:00:00.000Z' });
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('м\'яко видалений run не потрапляє в результат', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range4');
+    const run = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range4',
+      startedAt: '2026-03-15T12:00:00.000Z',
+    });
+    await ReadingRunRepository.discard(db, run.id);
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('run книги, м\'яко видаленої з бібліотеки (user_book.deleted_at), не потрапляє в результат', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range5');
+    const run = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range5',
+      startedAt: '2026-03-15T12:00:00.000Z',
+    });
+    await db.runAsync(`UPDATE user_book SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), 'ub-range5']);
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result.find((r) => r.id === run.id)).toBeUndefined();
+  });
+
+  it('сортування — started_at за зростанням', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range6a');
+    await seedUserBook(db, 'ub-range6b');
+    const later = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range6a',
+      startedAt: '2026-03-15T18:00:00.000Z',
+    });
+    const earlier = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range6b',
+      startedAt: '2026-03-15T06:00:00.000Z',
+    });
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result.map((r) => r.id)).toEqual([earlier.id, later.id]);
+  });
+});

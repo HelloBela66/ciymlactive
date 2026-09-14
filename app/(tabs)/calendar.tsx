@@ -8,14 +8,21 @@ import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
+import { CalendarBookStack } from '@/components/calendar/CalendarBookStack';
 import { useTheme } from '@/design/ThemeProvider';
 import { buildMonthGrid, type CalendarDay } from '@/lib/calendarGrid';
-import { formatDuration } from '@/lib/sessionTiming';
+import { formatCompactDuration, formatDurationForAccessibility } from '@/lib/calendarFormat';
+import { pluralizeUk } from '@/lib/pluralizeUk';
 import { useMonthCalendarData, useMonthSummary, type DayCalendarStats } from '@/features/calendar/useCalendarSessions';
 import type { DayIntensityLevel } from '@/lib/calendarIntensity';
 
 const WEEKDAY_LABELS_MON_FIRST = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
 const DAY_KEY_FORMAT = 'yyyy-MM-dd';
+
+const BOOK_FORMS = ['книга', 'книги', 'книг'] as const;
+const PAGE_FORMS = ['сторінка', 'сторінки', 'сторінок'] as const;
+const DAY_FORMS = ['день', 'дні', 'днів'] as const;
+
 /** Одна межа "вузького екрана" для всього дня-клітинки (Фаза 19) — той самий дух, що й
  * `useWindowDimensions`-обчислення в `app/(tabs)/library/index.tsx`'s `GRID_COLUMNS`: клітинка
  * сама по собі вже адаптивна (`width: '${100/7}%'`), але фіксований розмір ОБКЛАДИНКИ всередині
@@ -34,9 +41,19 @@ function computeCoverSize(windowWidth: number, horizontalPadding: number): numbe
  * мало інформації для читача екрана (повна дата/інтенсивність/назва книги вже в
  * `accessibilityLabel` клітинки), тож досить часткового обмеження (не повного вимкнення), яке
  * лишає число читабельним, не даючи йому візуально вилізти за межі кола при найбільших
- * системних розмірах шрифту.
+ * системних розмірах шрифту. Та сама межа перевикористана для "+N"/start-finish бейджів
+ * ВІЗУАЛЬНОЇ КОМПОЗИЦІЇ (пост-Фаза 19) — той самий клас елемента (маленький бейдж поверх
+ * обкладинки), не нове рішення.
  */
 const DAY_BADGE_MAX_FONT_SCALE = 1.2;
+
+/** Наскільки більший стек (primary+secondary) за саму обкладинку — для розміру today-рамки
+ * навколо стеку (ВІЗУАЛЬНА КОМПОЗИЦІЯ, пост-Фаза 19) — та сама частка, що й `CalendarBookStack`'s
+ * `SECONDARY_OFFSET_RATIO` (не імпортується напряму: компонент навмисно не експортує внутрішні
+ * константи компонування, лише свій публічний проп-контракт; дублювання одного числа тут
+ * дешевше за розширення публічного API компонента заради суто візуального розрахунку рамки
+ * навколо нього). */
+const STACK_SECONDARY_OFFSET_RATIO = 0.3;
 
 function intensityLabel(intensity: DayIntensityLevel): string {
   if (intensity === 0) return 'без читання';
@@ -45,26 +62,69 @@ function intensityLabel(intensity: DayIntensityLevel): string {
   return 'висока активність читання';
 }
 
+/**
+ * ВІЗУАЛЬНА КОМПОЗИЦІЯ (пост-Фаза 19) — повний текстовий опис клітинки дня для читача екрана:
+ * дата, скільки книг (лише коли 2+, ТЗ приклад "Читав 2 книги" — один-книжний день і так
+ * повністю описаний назвою книги нижче, без потреби в граматично складнішій формі "1 книгу"),
+ * тривалість ПОВНИМИ словами (`formatDurationForAccessibility`, не скорочене "1 год 12 хв" —
+ * читач екрана може вимовити скорочення незрозуміло), сторінки, головна книга, і нарешті
+ * почав/завершив — той самий "повний текст лише в описі, tiny-позначка лише візуально" принцип,
+ * що й ТЗ вимагає для самої клітинки.
+ */
 function buildDayAccessibilityLabel(day: CalendarDay, stats: DayCalendarStats | undefined): string {
   const dateLabel = format(day.date, 'd MMMM', { locale: uk });
-  if (!stats || stats.intensity === 0) return `${dateLabel}, ${intensityLabel(0)}`;
-  const bookPart = stats.primaryUserBook ? `, ${stats.primaryUserBook.work.title}` : '';
-  return `${dateLabel}, ${intensityLabel(stats.intensity)}${bookPart}`;
+  const totalBooksCount = stats?.primaryUserBook
+    ? 1 + (stats.secondaryUserBook ? 1 : 0) + stats.additionalBookCount
+    : 0;
+
+  const parts: string[] = [`${dateLabel}.`];
+
+  if (totalBooksCount === 0 && !stats?.hasStartedBook && !stats?.hasFinishedBook) {
+    parts.push(`${intensityLabel(0).charAt(0).toUpperCase()}${intensityLabel(0).slice(1)}.`);
+  } else {
+    if (totalBooksCount >= 2) {
+      parts.push(`Читав ${totalBooksCount} ${pluralizeUk(totalBooksCount, BOOK_FORMS)}.`);
+    }
+    if (stats && stats.totalMinutes > 0) {
+      parts.push(`${formatDurationForAccessibility(stats.totalMinutes)}.`);
+    }
+    if (stats && stats.totalPages > 0) {
+      parts.push(`${stats.totalPages} ${pluralizeUk(stats.totalPages, PAGE_FORMS)}.`);
+    }
+    if (stats?.primaryUserBook) {
+      parts.push(`Найбільше — «${stats.primaryUserBook.work.title}».`);
+    }
+  }
+
+  // Обидва траплялись того самого дня (книга прочитана в один сеанс) — вкрай рідко, "завершив"
+  // важливіша віха, показуємо лише її (ТЗ: "tiny" — одна позначка, не дві одночасно).
+  if (stats?.hasFinishedBook) parts.push('Завершив читання.');
+  else if (stats?.hasStartedBook) parts.push('Почав читати.');
+
+  return parts.join(' ');
 }
 
 /**
- * КАЛЕНДАР 2.0 (POLYTSIA V1.6.1, Фаза 19, `docs/CALENDAR_2_0.md`) — місяць-сітка з обкладинкою
- * "головної" книги дня й індикатором інтенсивності читання (дедалі більше крапок) замість
- * колишньої єдиної крапки-ознаки "була якась активність". Підсумок місяця — під сіткою. Тап на
- * день і далі відкриває Day Details (`app/day/[date].tsx`), тепер значно змістовніший
- * (докладніше — коментар над тим файлом і `docs/CALENDAR_2_0.md` §"Чому лишився route, не
- * sheet").
+ * КАЛЕНДАР 2.0 (POLYTSIA V1.6.1, Фаза 19) + ВІЗУАЛЬНА КОМПОЗИЦІЯ ТА REDESIGN ДНЯ ЧИТАННЯ
+ * (пост-Фаза 19, `docs/CALENDAR_2_0.md` §"Visual Day Composition") — місяць-сітка, де день з
+ * активністю показує "візуальну історію читання того дня" (cover-стек `CalendarBookStack`,
+ * компактна метрика часу, тонкий інтенсивність-індикатор), а не таблицю чисел. Підсумок
+ * місяця й "Найчастіше цього місяця" — під сіткою. Тап на день відкриває Day Details
+ * (`app/day/[date].tsx`), тепер "день читання" (докладніше — коментар над тим файлом).
  */
 export default function CalendarScreen() {
   const theme = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
 
+  // `week_start` (`app_settings.week_start`) і далі НЕ підключено до `weekStartsOn` (свідоме
+  // рішення Фази 19, підтверджене цією фазою — докладніше `docs/CALENDAR_2_0.md` §"Свідомо НЕ
+  // зроблено"): колонка існує в схемі, але немає жодного repository-методу читання/UI
+  // налаштувань для неї (перевірено цією фазою: `AppSettingsRepository` не має жодного
+  // `getWeekStart`/`setWeekStart`) — підключення вимагало б будувати цю власну UI-фічу
+  // налаштувань "з нуля", якої ані ТЗ цієї фази, ані попередньої не називає. Це ВІЗУАЛЬНА
+  // композиція дня-клітинки, не нова фіча налаштувань — поза обсягом, той самий "не вигадуй
+  // нову фічу заради суміжної згадки в ТЗ" принцип.
   const days = useMemo(() => buildMonthGrid(monthAnchor, 1), [monthAnchor]);
   const { data: dayStatsByKey } = useMonthCalendarData(days);
   const { data: monthSummary } = useMonthSummary(monthAnchor);
@@ -73,14 +133,11 @@ export default function CalendarScreen() {
     () => computeCoverSize(windowWidth, theme.spacing.lg),
     [windowWidth, theme.spacing.lg],
   );
-  const ringSize = coverSize + 4;
 
-  // Фаза 19 (`docs/CALENDAR_2_0.md`) — раніше `scroll={false}` (сітка з 6 рядків завжди
-  // вміщалась на екрані без прокрутки). Тепер під сіткою додано підсумок місяця (нова вимога
-  // ТЗ), і на менших екранах/великих системних шрифтах сума вже не завжди вміщається — тож
-  // тут свідомо `scroll` за замовчуванням (=true), той самий `topInset` патерн, що й
-  // Бібліотека/Пошук/Профіль (`ScreenContainer.tsx`, коментар над `topInset`) для "голого" таба
-  // без нативного хедера.
+  const hasAnyMonthActivity =
+    !!monthSummary &&
+    (monthSummary.activeDaysCount > 0 || monthSummary.booksFinishedCount > 0 || monthSummary.topBooks.length > 0);
+
   return (
     <ScreenContainer topInset>
       <AppText variant="title">Календар</AppText>
@@ -114,9 +171,23 @@ export default function CalendarScreen() {
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {days.map((day) => {
           const dayKey = format(day.date, DAY_KEY_FORMAT);
+          // Та сама межа маскування, що й до цієї фази: `intensity` (і тепер accessibility-опис)
+          // рахуються з РЕАЛЬНИХ (немаскованих) даних навіть для днів сусіднього місяця в сітці
+          // (бляклі крапки насиченості для контексту), лише візуальна обкладинка/стек/tiny-
+          // позначки замасковані до `null`/`false` для клітинок поза поточним місяцем — не нова
+          // поведінка цієї фази, перенесено як є з попередньої версії екрана.
           const stats = dayStatsByKey?.get(dayKey);
           const intensity = stats?.intensity ?? 0;
           const primaryUserBook = day.inCurrentMonth ? stats?.primaryUserBook ?? null : null;
+          const secondaryUserBook = day.inCurrentMonth ? stats?.secondaryUserBook ?? null : null;
+          const additionalBookCount = day.inCurrentMonth ? stats?.additionalBookCount ?? 0 : 0;
+          const hasStartedBook = day.inCurrentMonth ? !!stats?.hasStartedBook : false;
+          const hasFinishedBook = day.inCurrentMonth ? !!stats?.hasFinishedBook : false;
+          const showStartFinishMark = hasStartedBook || hasFinishedBook;
+          const startFinishIcon = hasFinishedBook ? 'flag' : 'play';
+
+          const stackSize = coverSize + (secondaryUserBook ? Math.round(coverSize * STACK_SECONDARY_OFFSET_RATIO) : 0);
+          const ringSize = stackSize + 4;
 
           return (
             <Pressable
@@ -144,14 +215,23 @@ export default function CalendarScreen() {
                     borderColor: theme.colors.accent,
                   }}
                 >
-                  <CoverThumbnail
-                    coverUrl={primaryUserBook.edition.coverUrl}
-                    title={primaryUserBook.work.title}
-                    fallbackColor={primaryUserBook.work.coverFallbackColor}
-                    width={coverSize}
-                    height={coverSize}
-                    borderRadius={theme.radius.sm}
-                    hideFallbackLetter
+                  <CalendarBookStack
+                    primary={{
+                      coverUrl: primaryUserBook.edition.coverUrl,
+                      title: primaryUserBook.work.title,
+                      fallbackColor: primaryUserBook.work.coverFallbackColor,
+                    }}
+                    secondary={
+                      secondaryUserBook
+                        ? {
+                            coverUrl: secondaryUserBook.edition.coverUrl,
+                            title: secondaryUserBook.work.title,
+                            fallbackColor: secondaryUserBook.work.coverFallbackColor,
+                          }
+                        : null
+                    }
+                    additionalCount={additionalBookCount}
+                    size={coverSize}
                   />
                   <View
                     style={{
@@ -173,6 +253,25 @@ export default function CalendarScreen() {
                       {day.date.getDate()}
                     </AppText>
                   </View>
+                  {showStartFinishMark ? (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: -6,
+                        right: -6,
+                        width: 16,
+                        height: 16,
+                        borderRadius: 8,
+                        backgroundColor: theme.colors.surfaceRaised,
+                        borderWidth: 1,
+                        borderColor: theme.colors.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons name={startFinishIcon} size={9} color={theme.colors.accent} />
+                    </View>
+                  ) : null}
                 </View>
               ) : (
                 <View
@@ -192,6 +291,25 @@ export default function CalendarScreen() {
                   >
                     {day.date.getDate()}
                   </AppText>
+                  {showStartFinishMark ? (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: -4,
+                        right: -4,
+                        width: 14,
+                        height: 14,
+                        borderRadius: 7,
+                        backgroundColor: theme.colors.surfaceRaised,
+                        borderWidth: 1,
+                        borderColor: theme.colors.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons name={startFinishIcon} size={8} color={theme.colors.accent} />
+                    </View>
+                  ) : null}
                 </View>
               )}
 
@@ -215,28 +333,59 @@ export default function CalendarScreen() {
         })}
       </View>
 
-      {monthSummary && (monthSummary.activeDaysCount > 0 || monthSummary.booksStartedCount > 0 || monthSummary.booksFinishedCount > 0) ? (
-        <Card style={{ marginTop: theme.spacing.lg, gap: theme.spacing.xs }}>
-          <AppText variant="heading">Підсумок місяця</AppText>
-          <AppText variant="body" color="secondary">
-            {formatDuration(monthSummary.totalMinutes * 60 * 1000)}
-            {' · '}
-            {monthSummary.totalPages} стор.
-            {' · '}
-            {monthSummary.distinctBooksCount} {monthSummary.distinctBooksCount === 1 ? 'книга' : 'книг'}
-            {' · '}
-            {monthSummary.activeDaysCount} {monthSummary.activeDaysCount === 1 ? 'день' : 'днів'} читання
-          </AppText>
-          {monthSummary.booksStartedCount > 0 || monthSummary.booksFinishedCount > 0 ? (
-            <AppText variant="caption" color="tertiary">
-              Почато: {monthSummary.booksStartedCount} · Завершено: {monthSummary.booksFinishedCount}
+      {hasAnyMonthActivity && monthSummary ? (
+        <>
+          <Card style={{ marginTop: theme.spacing.lg, gap: theme.spacing.xs }}>
+            <AppText variant="heading">Підсумок місяця</AppText>
+            <AppText variant="body" color="secondary">
+              {monthSummary.activeDaysCount} {pluralizeUk(monthSummary.activeDaysCount, DAY_FORMS)} читання
+              {' · '}
+              {formatCompactDuration(monthSummary.totalMinutes)}
+              {' · '}
+              {monthSummary.totalPages} {pluralizeUk(monthSummary.totalPages, PAGE_FORMS)}
             </AppText>
+            {monthSummary.booksFinishedCount > 0 ? (
+              <AppText variant="caption" color="tertiary">
+                Завершено книг: {monthSummary.booksFinishedCount}
+              </AppText>
+            ) : null}
+          </Card>
+
+          {monthSummary.topBooks.length > 0 ? (
+            <Card style={{ marginTop: theme.spacing.md, gap: theme.spacing.sm }}>
+              <AppText variant="heading">Найчастіше цього місяця</AppText>
+              <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
+                {monthSummary.topBooks.map((top) => (
+                  <Pressable
+                    key={top.userBook.id}
+                    onPress={() => router.push({ pathname: '/work/[workId]', params: { workId: top.userBook.work.id } })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${top.userBook.work.title}, ${formatDurationForAccessibility(top.totalMinutes)} цього місяця`}
+                    style={{ flex: 1, alignItems: 'center', gap: 4 }}
+                  >
+                    <CoverThumbnail
+                      coverUrl={top.userBook.edition.coverUrl}
+                      title={top.userBook.work.title}
+                      fallbackColor={top.userBook.work.coverFallbackColor}
+                      width={48}
+                      height={68}
+                    />
+                    <AppText variant="caption" numberOfLines={2} style={{ textAlign: 'center' }}>
+                      {top.userBook.work.title}
+                    </AppText>
+                    <AppText variant="micro" color="tertiary">
+                      {formatCompactDuration(top.totalMinutes)}
+                    </AppText>
+                  </Pressable>
+                ))}
+              </View>
+            </Card>
           ) : null}
-        </Card>
+        </>
       ) : (
         <View style={{ marginTop: theme.spacing.xl, alignItems: 'center' }}>
           <AppText variant="caption" color="tertiary" style={{ textAlign: 'center' }}>
-            Дні із сесіями читання позначені обкладинкою книги — торкнись дня, щоб побачити деталі.
+            Цього місяця ще немає читання.
           </AppText>
         </View>
       )}

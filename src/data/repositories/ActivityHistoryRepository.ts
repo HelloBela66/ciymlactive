@@ -211,4 +211,28 @@ export const ActivityHistoryRepository = {
     );
     return rows.filter((row) => !isActivityRowSpoilerHidden(row)).map(mapRow);
   },
+
+  /**
+   * КАЛЕНДАР, ВІЗУАЛЬНА КОМПОЗИЦІЯ (пост-Фаза 19) — скільки `journal_entry`/`quote` подій
+   * діапазону приховано spoiler-safe режимом (той самий 8-branch запит/фільтр, що й
+   * `listBetween`, лише рахує ПРИХОВАНІ замість повертати видимі, і звужений одразу в SQL до
+   * двох типів, що взагалі можуть бути прихованими — решта шести гілок `isActivityRowSpoilerHidden`
+   * завжди повертає `false`). Day Details потребує це число окремо від самого `listBetween`,
+   * щоб секція "Збережено цього дня" могла чесно написати "Ще N записів приховано режимом «без
+   * спойлерів»." — без цього лічильника приховані записи просто мовчки зникали б із секції
+   * без жодного пояснення користувачу, чому видно менше записів, ніж він точно лишав.
+   *
+   * Окремий метод, а не розширення `listBetween` (наприклад, повернення `{ events, hiddenCount
+   * }` замість голого масиву) — `listBetween` уже має іншого споживача з іншою семантикою
+   * діапазону (`useMonthSummary`, якому лічильник прихованих не потрібен); зміна її сигнатури
+   * заради одного нового споживача зачепила б непов'язаний виклик без потреби.
+   */
+  async countSpoilerHiddenJournalBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<number> {
+    const rows = await db.getAllAsync<ActivityEventRow>(
+      `SELECT * FROM (${ACTIVITY_UNION_SQL})
+       WHERE occurred_at >= ? AND occurred_at < ? AND type IN ('journal_entry', 'quote')`,
+      [startIso, endIso],
+    );
+    return rows.filter((row) => isActivityRowSpoilerHidden(row)).length;
+  },
 };
