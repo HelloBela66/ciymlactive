@@ -60,7 +60,7 @@ import { resolveEntryTypeLabel, categoriesToMap } from '@/lib/journalEntryLabel'
 import { formatDuration } from '@/lib/sessionTiming';
 import { computeRollingPace } from '@/lib/readingPace';
 import { predictFinish } from '@/lib/finishPrediction';
-import { editionFormatLabels, userBookStatusLabels } from '@/design/i18n-labels';
+import { editionFormatLabels, getEditionLanguageLabel, userBookStatusLabels } from '@/design/i18n-labels';
 import type { EditionWithRelations } from '@/types/edition';
 import type { UserBook, UserBookStatus } from '@/types/userBook';
 import type { OwnedBook } from '@/types/ownedBook';
@@ -107,7 +107,7 @@ function EditionCard({ edition }: { edition: EditionWithRelations }) {
   if (edition.translators.length > 0) {
     rows.push(['Переклад', edition.translators.map((t) => t.name).join(', ')]);
   }
-  rows.push(['Мова', edition.language]);
+  rows.push(['Мова', getEditionLanguageLabel(edition.language)]);
   if (edition.pageCount) rows.push(['Сторінок', String(edition.pageCount)]);
   rows.push(['Формат', editionFormatLabels[edition.format]]);
 

@@ -42,6 +42,56 @@ export const editionFormatLabels = {
 
 export type EditionFormat = keyof typeof editionFormatLabels;
 
+/**
+ * `edition.language` (`src/types/edition.ts`) — НЕ закритий enum, а вільний рядок: різні
+ * провайдери повертають різні формати того самого значення (`uk` — ISO 639-1, Google
+ * Books/ISBNdb; `ukr` — ISO 639-2, Open Library; або повне слово на кшталт `ukrainian` —
+ * докладніше `src/data/providers/ukrainianFilter.ts`, реальний спостережений випадок). Тому,
+ * на відміну від `editionFormatLabels` вище (закритий union, вичерпний `Record`), це — ЧАСТКОВА
+ * мапа найпоширеніших варіантів, не вичерпний список.
+ *
+ * Знайдено аудитом каталог-імпорту (`docs/OWN_CATALOG_IMPORT.md`): Book Details (`EditionCard`,
+ * `app/work/[workId].tsx`) показував це поле СИРИМ — рядок "Мова: uk" замість людського
+ * підпису (на відміну від `format`, що вже йшов через `editionFormatLabels`). Мінімальний
+ * фіксений баг у зоні, яку цей аудит і мав перевірити — не нова фіча.
+ */
+export const editionLanguageLabels: Record<string, string> = {
+  uk: 'Українська',
+  ukr: 'Українська',
+  ukrainian: 'Українська',
+  en: 'Англійська',
+  eng: 'Англійська',
+  english: 'Англійська',
+  ru: 'Російська',
+  rus: 'Російська',
+  russian: 'Російська',
+  pl: 'Польська',
+  pol: 'Польська',
+  polish: 'Польська',
+  de: 'Німецька',
+  ger: 'Німецька',
+  deu: 'Німецька',
+  german: 'Німецька',
+  fr: 'Французька',
+  fre: 'Французька',
+  fra: 'Французька',
+  french: 'Французька',
+  es: 'Іспанська',
+  spa: 'Іспанська',
+  spanish: 'Іспанська',
+  it: 'Італійська',
+  ita: 'Італійська',
+  italian: 'Італійська',
+};
+
+/** Людський підпис для `edition.language`, коли код розпізнаний (`editionLanguageLabels`,
+ * регістронезалежно, з обрізаними пробілами); інакше — сире значення як є (краще показати
+ * нерозпізнаний код, ніж порожньо чи вигадати переклад для незнайомого варіанту). */
+export function getEditionLanguageLabel(rawLanguage: string): string {
+  const normalized = rawLanguage.trim().toLowerCase();
+  return editionLanguageLabels[normalized] ?? rawLanguage;
+}
+
 export const seriesEntryTypeLabels = {
   main: 'Основна',
   prequel: 'Приквел',

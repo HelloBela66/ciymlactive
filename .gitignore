@@ -36,6 +36,10 @@ coverage/
 # не секрети, але й не частина джерела; регенеруються `supabase link`/`functions deploy`)
 supabase/.temp/
 
+# Звіти кожного прогону scripts/sync-curated-books.js (JSON+текст, іменовані batch id) —
+# локальні артефакти конкретного запуску, не частина джерела; той самий дух, що supabase/.temp/.
+data/import-reports/
+
 # Десктоп-застосунок Claude (Cowork) сам створює цю теку в корені проєкту — плоскі копії
 # щойно створених файлів на момент збереження на пристрій. Не частина джерела, не варто
 # комітити (і псує Jest — див. коментар біля testPathIgnorePatterns у jest.config.js).
