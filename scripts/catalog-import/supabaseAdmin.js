@@ -90,7 +90,7 @@ async function upsertChunk(bodyRows, config, fetchImpl) {
  * @param {{ supabaseUrl: string, serviceRoleKey: string }} config
  * @param {typeof fetch} fetchImpl
  * @param {number} chunkSize
- * @returns {Promise<Array<{ rowNumber: number, id: string, ok: boolean, code?: string, detail?: string }>>}
+ * @returns {Promise<Array<{ rowNumber: number, id: string, ok: boolean, code?: string, status?: number, detail?: string }>>}
  */
 async function upsertCuratedBooks(items, config, fetchImpl, chunkSize = 50) {
   const results = [];
@@ -114,7 +114,17 @@ async function upsertCuratedBooks(items, config, fetchImpl, chunkSize = 50) {
       results.push(
         single.ok
           ? { rowNumber: item.rowNumber, id: item.id, ok: true }
-          : { rowNumber: item.rowNumber, id: item.id, ok: false, code: 'DB_UPSERT_FAILED', detail: single.detail },
+          : {
+              rowNumber: item.rowNumber,
+              id: item.id,
+              ok: false,
+              code: 'DB_UPSERT_FAILED',
+              // HTTP-статус окремо від тіла відповіді (`detail`) — власник продукту, побачивши
+              // 401/403 для КОЖНОГО рядка одразу знає "не той ключ у .env.admin", а не мусить
+              // здогадуватись із самого лише тексту тіла відповіді.
+              status: single.status,
+              detail: single.detail,
+            },
       );
     }
   }

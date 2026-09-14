@@ -322,4 +322,67 @@ describe('CLI end-to-end — ідемпотентність (mock Supabase, ре
 
     expect(coverUrlAfterSecond).toBe(coverUrlAfterFirst);
   }, 30000);
+
+  /**
+   * Регресія на реальний випадок власника продукту (2026-09-14): `--apply` проти проєкту,
+   * куди Supabase відхилив УСІ рядки (тут — симуляція "не той ключ у .env.admin", 401 на
+   * кожен POST). До фіксу `totals.created`/`totals.updated` рахувались ДО спроби запису й
+   * лишались рівними кількості файлу навіть коли жоден рядок не потрапив у базу — звіт
+   * виглядав як "усе імпортувалось", хоча насправді нуль. Так само `message` для
+   * `DB_UPSERT_FAILED` був самою лише заглушкою "деталі — у повідомленні" без жодних деталей.
+   */
+  it('Supabase відхиляє КОЖЕН upsert (напр. недійсний ключ) — created/updated=0 (не кількість файлу), помилка на кожному рядку, message містить реальну причину Supabase, не заглушку', async () => {
+    server.removeAllListeners('request');
+    server.on('request', (req, res) => {
+      const url = new URL(req.url, 'http://localhost');
+      if (req.method === 'GET' && url.pathname === '/rest/v1/curated_book') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('[]');
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/rest/v1/curated_book') {
+        req.on('data', () => {});
+        req.on('end', () => {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'JWT expired', code: 'PGRST301' }));
+        });
+        return;
+      }
+      res.writeHead(404, { 'Content-Length': 0 });
+      res.end();
+    });
+
+    const { csvPath, envPath } = writeFixture();
+    const reportDir = path.join(tmpDir, 'reports-fail');
+    const scriptPath = path.join(__dirname, 'sync-curated-books.js');
+    const env = { ...process.env };
+    delete env.SUPABASE_URL;
+    delete env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // На відміну від `runApply` вище: тут CLI ОЧІКУВАНО завершується exit code 1
+    // (`report.totals.errors > 0 && args.apply` у sync-curated-books.js) — виняток від
+    // execFile тут не збій тесту, а частина сценарію, що перевіряється.
+    await expect(
+      execFileAsync('node', [scriptPath, csvPath, '--apply', `--env-file=${envPath}`, `--report-dir=${reportDir}`, '--concurrency=2'], {
+        env,
+        timeout: 15000,
+      }),
+    ).rejects.toThrow();
+
+    const reportFile = fs.readdirSync(reportDir).find((f) => f.endsWith('.json') && !f.endsWith('-normalized.json'));
+    const report = JSON.parse(fs.readFileSync(path.join(reportDir, reportFile), 'utf8'));
+
+    expect(report.totals.created).toBe(0);
+    expect(report.totals.updated).toBe(0);
+    expect(report.totals.errors).toBe(2);
+    expect(store.size).toBe(0); // жодного рядка справді не записано
+
+    const dbIssues = report.rowIssues.filter((i) => i.code === 'DB_UPSERT_FAILED');
+    expect(dbIssues).toHaveLength(2);
+    for (const issue of dbIssues) {
+      expect(issue.message).toContain('401');
+      expect(issue.message).toContain('JWT expired');
+      expect(issue.message).not.toBe('Supabase відхилив upsert цього рядка (деталі — у повідомленні).');
+    }
+  }, 20000);
 });

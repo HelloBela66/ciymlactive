@@ -107,7 +107,7 @@ describe('upsertCuratedBooks', () => {
     const results = await upsertCuratedBooks(items, CONFIG, fetchImpl, 10);
     expect(results).toEqual([
       { rowNumber: 1, id: 'good1', ok: true },
-      { rowNumber: 1, id: 'bad', ok: false, code: 'DB_UPSERT_FAILED', detail: 'check violated' },
+      { rowNumber: 1, id: 'bad', ok: false, code: 'DB_UPSERT_FAILED', status: 400, detail: 'check violated' },
       { rowNumber: 1, id: 'good2', ok: true },
     ]);
     expect(callCount).toBe(4); // 1 спроба чанком + 3 по одному

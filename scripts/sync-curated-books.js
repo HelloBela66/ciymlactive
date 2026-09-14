@@ -221,9 +221,31 @@ async function main() {
       body: toUpsertBody(e.normalized, coverUrlById.has(e.normalized.id) ? coverUrlById.get(e.normalized.id) : existingCovers.get(e.normalized.id) ?? null),
     }));
     const upsertResults = await upsertCuratedBooks(upsertItems, config, fetch);
+    // Рядки, чий upsert реально відхилено — потрібні окремо від "мало б бути новим/оновленим"
+    // (порахованого вище ДО спроби запису), щоб created/updated нижче відображали РЕАЛЬНИЙ
+    // результат, а не намір. Знахідка з реального прогону власника продукту: коли Supabase
+    // відхиляє КОЖЕН рядок (напр. не той ключ у .env.admin), totals.created раніше однаково
+    // показував повну кількість рядків файлу — виглядало як "усе імпортувалось", хоча в базу
+    // не потрапило жодного рядка.
+    const failedIds = new Set();
     for (const r of upsertResults) {
-      if (!r.ok) rowIssues.push({ rowNumber: r.rowNumber, id: r.id, code: r.code || 'DB_UPSERT_FAILED' });
+      if (!r.ok) {
+        failedIds.add(r.id);
+        rowIssues.push({
+          rowNumber: r.rowNumber,
+          id: r.id,
+          code: r.code || 'DB_UPSERT_FAILED',
+          // Реальна причина відмови Supabase (HTTP-статус + тіло відповіді, `supabaseAdmin.js`)
+          // — без цього поле message у звіті раніше показувало лише загальний текст-заглушку
+          // "деталі — у повідомленні", який жодних деталей насправді не містив.
+          message: r.detail
+            ? `Supabase відхилив upsert цього рядка (HTTP ${r.status ?? '?'}): ${r.detail}`
+            : undefined,
+        });
+      }
     }
+    created = toImport.filter((e) => !existingCovers.has(e.normalized.id) && !failedIds.has(e.normalized.id)).length;
+    updated = toImport.filter((e) => existingCovers.has(e.normalized.id) && !failedIds.has(e.normalized.id)).length;
   }
 
   const finishedAt = new Date().toISOString();
