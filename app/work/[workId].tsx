@@ -409,6 +409,13 @@ function LibrarySection({
 
   return (
     <View style={{ gap: theme.spacing.lg }}>
+      {/* Фаза 28 (re-audit, "conceptual overload"): цей розділ — найщільніший блок екрана
+          (контроли читання/статус/полиці/прибрати з бібліотеки — 7-8 окремих контролів
+          підряд) і до цієї фази не мав ЖОДНОГО заголовка, на відміну від "Оцінка"/"До
+          читання"/"Щоденник" нижче — виглядав як довільний набір карток без назви. Сам блок і
+          всі контроли в ньому не змінені, лише додана назва. */}
+      <AppText variant="heading">Бібліотека</AppText>
+
       {userBook ? <ReadingControls userBook={userBook} /> : null}
 
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: theme.spacing.md }}>
@@ -464,28 +471,24 @@ function LibrarySection({
           загальним чіпом статусу вище, де "Перечитую" — лише один з ~5 рівнозначних варіантів,
           легко непомітний. Механізм НЕ новий: `handleStatusChange('rereading')` — той самий
           виклик `useUpdateUserBookStatus`, що чіп і так уже викликав (`UserBookRepository.
-          updateStatus` сама стартує новий `reading_run`) — тут лише додано пояснювальну кнопку
-          з поясненням наслідку, нічого не прибрано з чіпа. Видима лише для `finished`: книга,
-          що вже `rereading`, і так у процесі нового прочитання. */}
+          updateStatus` сама стартує новий `reading_run`). Видима лише для `finished`: книга,
+          що вже `rereading`, і так у процесі нового прочитання.
+          Фаза 28 (re-audit, "conceptual overload"): до цієї фази це була ОКРЕМА картка (Card з
+          іконкою+шевроном) — той самий вплив, що й повноцінний рядок навігації, хоча дії тут
+          нікуди не переходить, лише міняє статус на місці. Полегшено до підпису-посилання під
+          самим чіпом статусу — той самий виклик, той самий результат, той самий текст пояснення,
+          просто без ваги окремої картки серед і так щільного розділу. */}
       {userBook && userBook.status === 'finished' ? (
         <Pressable
           onPress={() => handleStatusChange('rereading')}
           disabled={isStatusPending}
           accessibilityRole="button"
           accessibilityLabel="Перечитати книгу — почати нове прочитання"
+          style={{ minHeight: theme.minTouchTarget, justifyContent: 'center' }}
         >
-          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-            <Ionicons name="refresh-outline" size={20} color={theme.colors.accent} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <AppText variant="body" color="accent">
-                Перечитати
-              </AppText>
-              <AppText variant="caption" color="secondary">
-                Почати нове прочитання — стара історія, спогади й оцінка збережуться
-              </AppText>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
-          </Card>
+          <AppText variant="caption" color="accent">
+            Перечитати книгу — стара історія, спогади й оцінка збережуться
+          </AppText>
         </Pressable>
       ) : null}
 
@@ -629,6 +632,14 @@ function StaleReadingSection({
 
   return (
     <Card style={{ gap: theme.spacing.sm }}>
+      {/* Фаза 28 (re-audit, "conceptual overload"): до цієї фази картка не мала жодного
+          підпису — виглядала як безіменна картка серед інших, хоча `FinishPredictionSection`
+          нижче (той самий "сигнал про активне читання", просто інший запуск умови) уже мав
+          свій caption-підпис. Тепер обидві картки послідовно позначені — без зміни змісту чи
+          дії самої картки. */}
+      <AppText variant="caption" color="accent">
+        Давно не читав
+      </AppText>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing.sm }}>
         <Ionicons name="time-outline" size={18} color={theme.colors.accent} style={{ marginTop: 2 }} />
         <AppText variant="body" color="secondary" style={{ flex: 1 }}>
@@ -1574,11 +1585,19 @@ export default function BookDetailsScreen() {
               <StaleReadingSection status={data.userBook.status} sessions={sessions} workId={data.work.id} />
             ) : null}
 
-            <LoreSection
-              workId={data.work.id}
-              userBook={data.userBook}
-              pageCount={data.primaryEdition?.pageCount ?? null}
-            />
+            {/* Фаза 28 (re-audit, "conceptual overload"): до цієї фази — завжди розгорнута
+                картка незалежно від статусу книги й навіть коли лору ще нуль (тоді показувала
+                лише "Світ цієї книги ще порожній." + кнопку — вага картки без інформації).
+                Згорнуто за замовчуванням, той самий ідіом, що й "Історія прочитань"/"Історія
+                читання"/"Видання" нижче — сама функція (лічильник з урахуванням spoiler-safe,
+                перехід на `/lore/[workId]`) не змінена, лише за замовчуванням прихована. */}
+            <CollapsibleSection title="Світ книги">
+              <LoreSection
+                workId={data.work.id}
+                userBook={data.userBook}
+                pageCount={data.primaryEdition?.pageCount ?? null}
+              />
+            </CollapsibleSection>
 
             {data.userBook ? (
               <PreReadingReflectionSection userBookId={data.userBook.id} status={data.userBook.status} />
@@ -1614,15 +1633,30 @@ export default function BookDetailsScreen() {
               />
             ) : null}
 
-            {data.userBook && readingRuns && readingRuns.length > 0 ? (
-              <CollapsibleSection title="Історія прочитань">
-                <ReadingRunsHistorySection workId={data.work.id} details={readingRuns} />
-              </CollapsibleSection>
-            ) : null}
-
-            {data.userBook && sessions && sessions.length > 0 ? (
-              <CollapsibleSection title="Історія читання">
-                <ReadingHistorySection sessions={sessions} />
+            {/* Фаза 28 (re-audit, "conceptual overload"): до цієї фази — два сусідні незалежні
+                CollapsibleSection ("Історія прочитань"/"Історія читання"), обидва вже згорнуті
+                за замовчуванням, обидва про той самий "погляд назад" на минулі прочитання —
+                користувачу треба було розгорнути ДВА окремих перемикачі, щоб побачити все.
+                Об'єднано під один спільний toggle із двома підзаголовками всередині; кожен
+                внутрішній розділ і далі рендериться лише коли має що показати (той самий гард,
+                просто перевірений заздалегідь для зовнішньої умови) — жодна з двох секцій сама
+                по собі не змінена. */}
+            {data.userBook && ((readingRuns && readingRuns.length > 0) || (sessions && sessions.length > 0)) ? (
+              <CollapsibleSection title="Історія">
+                <View style={{ gap: theme.spacing.xl }}>
+                  {readingRuns && readingRuns.length > 0 ? (
+                    <View style={{ gap: theme.spacing.md }}>
+                      <AppText variant="heading">Прочитання</AppText>
+                      <ReadingRunsHistorySection workId={data.work.id} details={readingRuns} />
+                    </View>
+                  ) : null}
+                  {sessions && sessions.length > 0 ? (
+                    <View style={{ gap: theme.spacing.md }}>
+                      <AppText variant="heading">Сесії читання</AppText>
+                      <ReadingHistorySection sessions={sessions} />
+                    </View>
+                  ) : null}
+                </View>
               </CollapsibleSection>
             ) : null}
 

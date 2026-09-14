@@ -162,7 +162,15 @@ export function useRemoveFromLibrary() {
           .catch(() => {});
       }
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      // Фаза 28 (re-audit Library, bug fix — те саме, що й фікс лічильника в
+      // `ShelfRepository.listAll`/`search`): прибрана книга й далі рахувалась у
+      // `bookCount` полиці на екрані "Бібліотека" не лише через сам SQL-запит, а й тому, що
+      // жодна мутація тут не інвалідовувала кеш полиць — `ShelfCard` показував старе число,
+      // доки власний `staleTime` полиць не спливе сам.
+      queryClient.invalidateQueries({ queryKey: queryKeys.shelves.all });
+    },
     onError,
   });
 }

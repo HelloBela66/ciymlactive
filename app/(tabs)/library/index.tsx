@@ -538,7 +538,13 @@ export default function LibraryScreen() {
   const [viewMode, setViewMode] = useState<LibraryViewMode>('list');
   const [sort, setSort] = useState<LibrarySortOption>('default');
   const [isSortSheetOpen, setSortSheetOpen] = useState(false);
-  const [actionsForBook, setActionsForBook] = useState<UserBookWithDetails | null>(null);
+  // Фаза 28 (re-audit Library, bug fix) — навмисно лише id, НЕ весь `UserBookWithDetails`
+  // снепшот (як було до цієї фази): снепшот-об'єкт довелось би окремо тримати в синку зі
+  // списком книг (ESLint-правило `react-hooks/set-state-in-effect` цього проєкту прямо
+  // забороняє setState усередині ефекту саме для такого патерну — "синхронізація" стейту, що
+  // сам є похідним від інших даних, має рахуватись у рендері, не в ефекті). Замість цього нижче
+  // `actionsForBook` — похідне значення, що рахується просто зі свіжого `books` щоразу.
+  const [actionsForBookId, setActionsForBookId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -571,7 +577,24 @@ export default function LibraryScreen() {
   const { data: waitingLongest } = useWaitingLongest();
   const { data: recentlyFinished } = useRecentlyFinished();
 
-  const handleLongPress = useCallback((userBook: UserBookWithDetails) => setActionsForBook(userBook), []);
+  // Фаза 28 (re-audit Library, bug fix): до цієї фази шторка отримувала СНЕПШОТ книги на
+  // момент long-press, який ніколи не оновлювався — `BookQuickActionsSheet` рендерить
+  // `ChipSelect` як повністю контрольований інпут (`value={userBook.status}`) саме з цього
+  // снепшота, а жодна з мутацій статусу нижче не чіпає сам цей стейт, лише інвалідовує
+  // query-кеш списку книг. Вибраний у шторці чіп статусу "застрягав" на старому значенні
+  // одразу після зміни (хоча в БД уже новий статус), аж поки користувач не закриє й не
+  // відкриє шторку знову. Похідне значення нижче рахується просто зі свіжого `books` щоразу —
+  // без окремого стейту, який довелось би тримати в синку (і без ефекту з `setState`, який
+  // ESLint (`react-hooks/set-state-in-effect`) цього проєкту саме для такого патерну
+  // забороняє). Якщо книга зникла зі списку (напр. прибрана з бібліотеки) — `actionsForBook`
+  // природно стає `null`, і `BookQuickActionsSheet` сама закривається (`visible = !!userBook`
+  // усередині неї) — так само доречна поведінка, не потребує окремого коду.
+  const actionsForBook = useMemo(
+    () => (actionsForBookId ? (books?.find((book) => book.id === actionsForBookId) ?? null) : null),
+    [books, actionsForBookId],
+  );
+
+  const handleLongPress = useCallback((userBook: UserBookWithDetails) => setActionsForBookId(userBook.id), []);
 
   const gridCoverWidth = useMemo(
     () => (windowWidth - theme.spacing.lg * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS,
@@ -643,7 +666,7 @@ export default function LibraryScreen() {
         onSelect={handleSelectSort}
         onClose={() => setSortSheetOpen(false)}
       />
-      <BookQuickActionsSheet userBook={actionsForBook} onClose={() => setActionsForBook(null)} />
+      <BookQuickActionsSheet userBook={actionsForBook} onClose={() => setActionsForBookId(null)} />
     </ScreenContainer>
   );
 }

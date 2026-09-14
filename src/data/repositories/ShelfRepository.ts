@@ -95,10 +95,20 @@ export const ShelfRepository = {
   },
 
   async listAll(db: SQLiteDatabase): Promise<ShelfWithCount[]> {
+    // Фаза 28 (re-audit Library, bug fix): `LEFT JOIN shelf_book` саме по собі рахує РЯДКИ
+    // зв'язку, а не живі книги — `UserBookRepository.remove` робить soft-delete
+    // (`deleted_at`), і `shelf_book` при цьому НІКОЛИ не чиститься (немає ON DELETE CASCADE
+    // на м'яке видалення, лише на жорстке видалення самої полиці, див. коментар над `remove`
+    // нижче). Тож без другого JOIN тут лічильник рахував і книги, яких користувач уже прибрав
+    // з бібліотеки — розбіжність із `listBooksByShelf`, яка (через
+    // `UserBookRepository.listWithDetailsByIds`) такі книги коректно не показує. Другий JOIN
+    // (замість `WHERE ub.deleted_at IS NULL`, щоб не перетворити зовнішній LEFT JOIN на
+    // фактичний INNER і не загубити полиці без жодної книги) відфільтровує саме в COUNT.
     const rows = await db.getAllAsync<ShelfRow & { book_count: number }>(
-      `SELECT s.*, COUNT(sb.user_book_id) as book_count
+      `SELECT s.*, COUNT(ub.id) as book_count
        FROM shelf s
        LEFT JOIN shelf_book sb ON sb.shelf_id = s.id
+       LEFT JOIN user_book ub ON ub.id = sb.user_book_id AND ub.deleted_at IS NULL
        GROUP BY s.id
        ORDER BY s.sort_order ASC`,
     );
@@ -113,10 +123,12 @@ export const ShelfRepository = {
     const trimmed = query.trim();
     if (trimmed.length === 0) return [];
     const pattern = `%${trimmed}%`;
+    // Фаза 28: той самий фікс лічильника, що й у `listAll` вище — див. коментар там.
     const rows = await db.getAllAsync<ShelfRow & { book_count: number }>(
-      `SELECT s.*, COUNT(sb.user_book_id) as book_count
+      `SELECT s.*, COUNT(ub.id) as book_count
        FROM shelf s
        LEFT JOIN shelf_book sb ON sb.shelf_id = s.id
+       LEFT JOIN user_book ub ON ub.id = sb.user_book_id AND ub.deleted_at IS NULL
        WHERE s.name LIKE ?
        GROUP BY s.id
        ORDER BY s.sort_order ASC
