@@ -4,12 +4,16 @@ import {
   listDueCapsuleCandidates,
   findGoalNearCompletionCandidate,
   selectHomeContextCard,
+  getHomeContextCardSuppressionKey,
+  nullifyHomeContextCandidate,
+  selectVisibleHomeContextCard,
   GOAL_NEAR_COMPLETION_RATIO,
   type StaleReadingBookInput,
   type CapsuleDueCandidateInput,
   type GoalCandidate,
   type StaleReadingCandidate,
   type CapsuleDueCandidate,
+  type HomeContextSelectionInput,
 } from './homeContext';
 import type { ReadingGoal, ReadingGoalProgress } from '@/types/readingGoal';
 
@@ -280,5 +284,128 @@ describe('selectHomeContextCard', () => {
       tbrOldestWaiting: null,
     });
     expect(result).toBeNull();
+  });
+});
+
+/**
+ * POLYTSIA V1.6.2, #169 (HOME CONTEXT SUPPRESSION) — `getHomeContextCardSuppressionKey`/
+ * `nullifyHomeContextCandidate`/`selectVisibleHomeContextCard`.
+ */
+describe('getHomeContextCardSuppressionKey', () => {
+  it('stale_reading — ключ по userBookId конкретного кандидата', () => {
+    expect(getHomeContextCardSuppressionKey({ kind: 'stale_reading', candidate: STALE_CANDIDATE })).toBe(
+      `stale_reading:${STALE_CANDIDATE.userBookId}`,
+    );
+  });
+
+  it('capsule_due — ключ по capsuleId конкретного кандидата', () => {
+    expect(getHomeContextCardSuppressionKey({ kind: 'capsule_due', candidate: CAPSULE_CANDIDATE })).toBe(
+      `capsule_due:${CAPSULE_CANDIDATE.capsuleId}`,
+    );
+  });
+
+  it('goal_near_completion — ключ по goal.id конкретного кандидата', () => {
+    expect(getHomeContextCardSuppressionKey({ kind: 'goal_near_completion', candidate: GOAL_CANDIDATE })).toBe(
+      `goal_near_completion:${GOAL_CANDIDATE.goal.id}`,
+    );
+  });
+
+  it('on_this_day — фіксований ключ (немає стабільного "хто саме", спогад ротується щодня сам)', () => {
+    expect(getHomeContextCardSuppressionKey({ kind: 'on_this_day' })).toBe('on_this_day');
+  });
+
+  it('tbr_suggestion — фіксований ключ (немає одного стабільного кандидата, пропозиція по всьому пулу)', () => {
+    expect(getHomeContextCardSuppressionKey({ kind: 'tbr_suggestion', bookCount: 3, oldestWaiting: null })).toBe(
+      'tbr_suggestion',
+    );
+  });
+
+  it('різні кандидати ОДНОГО типу дають РІЗНІ ключі — приховання одного не чіпає іншого', () => {
+    const other: StaleReadingCandidate = { ...STALE_CANDIDATE, userBookId: 'ub-other' };
+    expect(getHomeContextCardSuppressionKey({ kind: 'stale_reading', candidate: STALE_CANDIDATE })).not.toBe(
+      getHomeContextCardSuppressionKey({ kind: 'stale_reading', candidate: other }),
+    );
+  });
+});
+
+const FULL_INPUT: HomeContextSelectionInput = {
+  staleReading: STALE_CANDIDATE,
+  capsuleDue: CAPSULE_CANDIDATE,
+  onThisDayAvailable: true,
+  goalNearCompletion: GOAL_CANDIDATE,
+  tbrBookCount: 3,
+  tbrOldestWaiting: null,
+};
+
+describe('nullifyHomeContextCandidate', () => {
+  it('stale_reading — обнуляє лише staleReading, решта полів без змін', () => {
+    expect(nullifyHomeContextCandidate(FULL_INPUT, 'stale_reading')).toEqual({ ...FULL_INPUT, staleReading: null });
+  });
+
+  it('capsule_due — обнуляє лише capsuleDue', () => {
+    expect(nullifyHomeContextCandidate(FULL_INPUT, 'capsule_due')).toEqual({ ...FULL_INPUT, capsuleDue: null });
+  });
+
+  it('on_this_day — обнуляє onThisDayAvailable у false', () => {
+    expect(nullifyHomeContextCandidate(FULL_INPUT, 'on_this_day')).toEqual({ ...FULL_INPUT, onThisDayAvailable: false });
+  });
+
+  it('goal_near_completion — обнуляє лише goalNearCompletion', () => {
+    expect(nullifyHomeContextCandidate(FULL_INPUT, 'goal_near_completion')).toEqual({
+      ...FULL_INPUT,
+      goalNearCompletion: null,
+    });
+  });
+
+  it('tbr_suggestion — обнуляє tbrBookCount у 0', () => {
+    expect(nullifyHomeContextCandidate(FULL_INPUT, 'tbr_suggestion')).toEqual({ ...FULL_INPUT, tbrBookCount: 0 });
+  });
+});
+
+describe('selectVisibleHomeContextCard', () => {
+  it('без приглушених ключів — та сама картка, що й selectHomeContextCard', () => {
+    expect(selectVisibleHomeContextCard(FULL_INPUT, new Set())).toEqual(selectHomeContextCard(FULL_INPUT));
+  });
+
+  it('приглушений переможець-кандидат — провалюється до наступного за пріоритетом', () => {
+    const key = getHomeContextCardSuppressionKey({ kind: 'stale_reading', candidate: STALE_CANDIDATE });
+    expect(selectVisibleHomeContextCard(FULL_INPUT, new Set([key]))).toEqual({
+      kind: 'capsule_due',
+      candidate: CAPSULE_CANDIDATE,
+    });
+  });
+
+  it('приглушені всі кандидати по черзі — null, а не помилка/зациклення', () => {
+    const keys = new Set([
+      getHomeContextCardSuppressionKey({ kind: 'stale_reading', candidate: STALE_CANDIDATE }),
+      getHomeContextCardSuppressionKey({ kind: 'capsule_due', candidate: CAPSULE_CANDIDATE }),
+      getHomeContextCardSuppressionKey({ kind: 'on_this_day' }),
+      getHomeContextCardSuppressionKey({ kind: 'goal_near_completion', candidate: GOAL_CANDIDATE }),
+      getHomeContextCardSuppressionKey({ kind: 'tbr_suggestion', bookCount: 3, oldestWaiting: null }),
+    ]);
+    expect(selectVisibleHomeContextCard(FULL_INPUT, keys)).toBeNull();
+  });
+
+  it('приглушення чужого кандидата ТОГО Ж типу не впливає — свій кандидат і далі показується', () => {
+    const otherBookKey = getHomeContextCardSuppressionKey({
+      kind: 'stale_reading',
+      candidate: { ...STALE_CANDIDATE, userBookId: 'ub-completely-different' },
+    });
+    expect(selectVisibleHomeContextCard(FULL_INPUT, new Set([otherBookKey]))).toEqual({
+      kind: 'stale_reading',
+      candidate: STALE_CANDIDATE,
+    });
+  });
+
+  it('null вхід (жодного кандидата) лишається null незалежно від приглушених ключів', () => {
+    const empty: HomeContextSelectionInput = {
+      staleReading: null,
+      capsuleDue: null,
+      onThisDayAvailable: false,
+      goalNearCompletion: null,
+      tbrBookCount: 0,
+      tbrOldestWaiting: null,
+    };
+    expect(selectVisibleHomeContextCard(empty, new Set(['stale_reading:anything']))).toBeNull();
   });
 });

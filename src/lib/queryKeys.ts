@@ -206,6 +206,10 @@ export const queryKeys = {
     // (`useHomeContextCard.ts`, `src/lib/homeContext.ts`), без параметрів — той самий "один
     // запит на весь застосунок" сенс, що й `statistics.overall`/`tbr.reality`.
     contextCard: ['home', 'contextCard'] as const,
+    // POLYTSIA V1.6.2, #169 (HOME CONTEXT SUPPRESSION) — окремий ключ від `contextCard` вище:
+    // приглушені ключі (`homeContextSuppressionStorage.ts`) читаються з `SecureStore`, не з БД,
+    // і інвалідуються окремо (на дію "приховати", а не на будь-яку зміну "сирих" даних картки).
+    contextCardSuppression: ['home', 'contextCardSuppression'] as const,
   },
   memoryIndex: {
     // ТЗ Фази 18 (HOME REDESIGN §HOME SHORTCUTS, «Моя пам'ять») — той самий "без параметрів"

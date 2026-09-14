@@ -191,3 +191,83 @@ export function selectHomeContextCard(input: HomeContextSelectionInput): HomeCon
   }
   return null;
 }
+
+/**
+ * POLYTSIA V1.6.2, #169 (HOME CONTEXT SUPPRESSION) — до цієї фази ЖОДЕН з п'яти типів
+ * контекстної картки не мав способу, яким користувач міг би сказати "не зараз, прибери це":
+ * `capsule_due` зникає лише після повного recall-флоу (`markOpened`), `on_this_day` — лише
+ * наступного календарного дня, а `stale_reading`/`goal_near_completion`/`tbr_suggestion` не
+ * зникають взагалі, доки не зміниться сам факт (книга прочитана, ціль виконана) — `tbr_suggestion`
+ * найпоказовіше: доки в "Хочу прочитати" лишається хоч одна книга, ця картка може показуватись
+ * ідентичною щодня необмежено довго. Ключ ідентифікує КОНКРЕТНОГО кандидата (не просто тип
+ * картки) — щоб приховання due-капсули книги A сьогодні не приховало б завтрашню due-капсулу
+ * геть іншої книги B; для `on_this_day`/`tbr_suggestion`, де немає стабільного "хто саме"
+ * (спогад ротується щодня сам, TBR-пропозиція — по всьому пулу), ключ — просто тип картки.
+ */
+export function getHomeContextCardSuppressionKey(card: HomeContextCard): string {
+  switch (card.kind) {
+    case 'stale_reading':
+      return `stale_reading:${card.candidate.userBookId}`;
+    case 'capsule_due':
+      return `capsule_due:${card.candidate.capsuleId}`;
+    case 'on_this_day':
+      return 'on_this_day';
+    case 'goal_near_completion':
+      return `goal_near_completion:${card.candidate.goal.id}`;
+    case 'tbr_suggestion':
+      return 'tbr_suggestion';
+  }
+}
+
+/**
+ * #169 — прибирає з `HomeContextSelectionInput` рівно того кандидата, чий тип щойно програв
+ * через приглушення, щоб наступна ітерація `selectVisibleHomeContextCard` природно "провалилась"
+ * до наступного за пріоритетом кандидата — той самий механізм, яким уже сьогодні `capsuleDue`
+ * стає `null` після фільтра `openedAt` ДО виклику `selectHomeContextCard` (`useHomeContextCard.ts`),
+ * лише узагальнений на всі п'ять типів і застосований ПІСЛЯ вибору, а не до нього (приглушення
+ * стосується КОНКРЕТНОГО обраного кандидата, не всього типу одразу).
+ */
+export function nullifyHomeContextCandidate(
+  input: HomeContextSelectionInput,
+  kind: HomeContextCardKind,
+): HomeContextSelectionInput {
+  switch (kind) {
+    case 'stale_reading':
+      return { ...input, staleReading: null };
+    case 'capsule_due':
+      return { ...input, capsuleDue: null };
+    case 'on_this_day':
+      return { ...input, onThisDayAvailable: false };
+    case 'goal_near_completion':
+      return { ...input, goalNearCompletion: null };
+    case 'tbr_suggestion':
+      return { ...input, tbrBookCount: 0 };
+  }
+}
+
+/** Скільки типів карток існує — межа циклу нижче, щоб приглушення НЕ МОГЛО зациклитись
+ * (кожна ітерація або повертає картку, або приглушує рівно один тип і ніколи не повертає його). */
+const HOME_CONTEXT_CARD_KIND_COUNT = 5;
+
+/**
+ * #169 — той самий вибір, що й `selectHomeContextCard`, але з урахуванням приглушених сьогодні
+ * карток (`suppressedKeys` — уже прочитані й непрострочені ключі з `homeContextSuppressionStorage.ts`,
+ * читання/сховище навмисно поза цією чистою функцією, той самий "чиста функція + тонка обгортка"
+ * розподіл, що й `fetchReadingSeasonData`/`useReadingSeason` у #167). Коли обраний кандидат
+ * приглушений — він прибирається (`nullifyHomeContextCandidate`) і вибір повторюється для решти,
+ * аж доки не знайдеться неприглушений кандидат або кандидати не закінчаться — та сама "тиха
+ * деградація", що й `selectHomeContextCard`: `null`, коли показати нічого.
+ */
+export function selectVisibleHomeContextCard(
+  input: HomeContextSelectionInput,
+  suppressedKeys: ReadonlySet<string>,
+): HomeContextCard | null {
+  let current = input;
+  for (let i = 0; i < HOME_CONTEXT_CARD_KIND_COUNT; i++) {
+    const card = selectHomeContextCard(current);
+    if (!card) return null;
+    if (!suppressedKeys.has(getHomeContextCardSuppressionKey(card))) return card;
+    current = nullifyHomeContextCandidate(current, card.kind);
+  }
+  return null;
+}

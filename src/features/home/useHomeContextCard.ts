@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDatabase } from '@/data/db';
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
@@ -9,11 +10,13 @@ import { queryKeys } from '@/lib/queryKeys';
 import { findOldestWaitingBook } from '@/lib/tbrPersonality';
 import { selectHomePrimaryMemory } from '@/lib/onThisDay';
 import { useOnThisDay } from '@/features/on-this-day/useOnThisDay';
+import { HomeContextSuppressionStorage } from '@/lib/homeContextSuppressionStorage';
 import {
   findStaleReadingCandidate,
   findCapsuleDueCandidate,
   findGoalNearCompletionCandidate,
-  selectHomeContextCard,
+  selectVisibleHomeContextCard,
+  getHomeContextCardSuppressionKey,
   type StaleReadingCandidate,
   type CapsuleDueCandidate,
   type GoalCandidate,
@@ -122,19 +125,56 @@ function useHomeContextRestData() {
 }
 
 /**
- * Вибрана ЄДИНА контекстна картка Home, чи `null` — саму логіку пріоритезації рахує чиста
- * `selectHomeContextCard` (`src/lib/homeContext.ts`), тут лише зібрані докупи "сирі" дані.
- * Повертає `null` і поки дані ще завантажуються (та сама "тиха деградація", що й решта
- * контекстних карток V1.6) — Home просто не показує розділ, доки не буде відомо, що саме
- * показати, а не "блимає" порожньою карткою чи спінером.
+ * POLYTSIA V1.6.2, #169 (HOME CONTEXT SUPPRESSION) — ключі карток, приглушених "на сьогодні"
+ * (`homeContextSuppressionStorage.ts`). Окремий запит від `useHomeContextRestData` вище (інший
+ * queryKey, `queryKeys.home.contextCardSuppression`) — читається з `SecureStore`, не з БД, і
+ * інвалідується лише дією "приховати" (`useDismissHomeContextCard` нижче), не будь-яким
+ * записом/сесією, що вже інвалідує `contextCard`.
+ */
+function useHomeContextSuppressedKeys() {
+  return useQuery<Set<string>>({
+    queryKey: queryKeys.home.contextCardSuppression,
+    queryFn: () => HomeContextSuppressionStorage.getActiveKeys(new Date()),
+  });
+}
+
+/**
+ * Вибрана ЄДИНА контекстна картка Home, чи `null` — саму логіку пріоритезації й приглушення
+ * рахує чиста `selectVisibleHomeContextCard` (`src/lib/homeContext.ts`), тут лише зібрані докупи
+ * "сирі" дані. Повертає `null` і поки будь-які дані ще завантажуються (та сама "тиха деградація",
+ * що й решта контекстних карток V1.6) — Home просто не показує розділ, доки не буде відомо, що
+ * саме показати, а не "блимає" порожньою карткою чи спінером.
  */
 export function useHomeContextCard(): HomeContextCard | null {
   const onThisDayQuery = useOnThisDay();
   const restQuery = useHomeContextRestData();
+  const suppressedQuery = useHomeContextSuppressedKeys();
 
-  if (!restQuery.data) return null;
+  if (!restQuery.data || !suppressedQuery.data) return null;
 
   const onThisDayAvailable = !!onThisDayQuery.data && selectHomePrimaryMemory(onThisDayQuery.data) != null;
 
-  return selectHomeContextCard({ ...restQuery.data, onThisDayAvailable });
+  return selectVisibleHomeContextCard({ ...restQuery.data, onThisDayAvailable }, suppressedQuery.data);
+}
+
+/**
+ * #169 — дія "приховати на сьогодні" для картки, яку `HomeContextCard.tsx` наразі показує:
+ * рахує ключ ОБРАНОЇ картки (`getHomeContextCardSuppressionKey`), приглушує його до завтра
+ * (`HomeContextSuppressionStorage.suppressUntilTomorrow`) і інвалідує лише
+ * `contextCardSuppression` — наступний рендер `useHomeContextCard` природно "провалиться" до
+ * наступного за пріоритетом кандидата (чи нічого не покаже), без жодного нового мережевого/SQL
+ * запиту.
+ */
+export function useDismissHomeContextCard(): (card: HomeContextCard) => void {
+  const queryClient = useQueryClient();
+
+  return useCallback(
+    (card: HomeContextCard) => {
+      const key = getHomeContextCardSuppressionKey(card);
+      void HomeContextSuppressionStorage.suppressUntilTomorrow(key, new Date()).then(() => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.home.contextCardSuppression });
+      });
+    },
+    [queryClient],
+  );
 }

@@ -37,6 +37,7 @@ import {
 } from '@/features/memory/usePreReadingReflection';
 import { canEditPreReadingReflection } from '@/lib/beforeAfter';
 import { useDnfReflection, useSaveDnfReflectionDetails } from '@/features/memory/useDnfReflection';
+import { useBookCapsule } from '@/features/memory/useBookCapsule';
 import { canEditDnfReflection, computeDnfProgressPercent } from '@/lib/dnfReflection';
 import { DNF_REASON_META, DNF_REASON_ORDER, isDnfReasonId, type DnfReasonId } from '@/design/dnfReason';
 import { computeStaleReadingInfo, describeStaleReading } from '@/lib/staleReading';
@@ -346,6 +347,13 @@ function LibrarySection({
   const { data: activeSession } = useActiveSession();
   const hasActiveSession = !!userBook && activeSession?.userBookId === userBook.id;
 
+  // #169 (BOOK DETAILS IA POLISH) — `capsule` тут навмисно НЕ обмежена поточним `reading_run`
+  // (та сама `getByUserBookId`, що й `BookCapsuleSection`'s `capsule` на `app/memory/[workId].tsx`,
+  // не `useCurrentBookCapsule`): мета цього блоку — виявити, чи є в книги взагалі БУДЬ-ЯКА
+  // капсула з БУДЬ-ЯКОГО минулого прочитання, незалежно від того, яке "перечитування" зараз
+  // активне.
+  const { data: capsule } = useBookCapsule(userBook?.id);
+
   // Захист від подвійного тапу (Milestone 10 fix6, `docs/STATUS_V1.md` п. 3.1) — перевірка
   // "чи вже є запис" (`userBook`) і саме створення/оновлення виконуються не атомарно, тож
   // швидкий повторний тап до завершення першого запиту раніше міг встигнути піти тим самим
@@ -461,6 +469,34 @@ function LibrarySection({
             <Ionicons name="ribbon-outline" size={20} color={theme.colors.accent} />
             <AppText variant="body" color="accent" style={{ flex: 1 }}>
               Переглянути підсумок читання
+            </AppText>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+          </Card>
+        </Pressable>
+      ) : null}
+
+      {/* #169 (BOOK DETAILS IA POLISH, аудит V1.6.1 §29/§101 + `docs/UI_COMPLEXITY_AUDIT_PHASE28.md`
+          — код-підтверджена прогалина) — до цього блоку Book Details не мав ЖОДНОГО прямого
+          входу до Капсули/Моєї пам'яті: єдиний шлях ішов через кнопку "Переглянути підсумок
+          читання" вище, а вона сама доступна лише для статусів 'finished'/'rereading' і веде на
+          Completion, не напряму на Book Memory. Книга, що зараз читається/перечитується, але вже
+          МАЄ капсулу з попереднього завершеного прочитання, лишалась без жодного шляху назад до
+          неї — той самий "доступно незалежно від статусу" принцип, що вже застосований до
+          `LoreSection` нижче ("Світ книги"), тут навмисно поширений і на капсулу/пам'ять: якщо
+          капсула вже існує — посилання на неї показується завжди, незалежно від поточного
+          статусу, а не лише коли книга щойно завершена. Для finished/rereading з капсулою обидві
+          картки показуються разом (загальний підсумок і прямий вхід до капсули — різні речі, не
+          дублікати). */}
+      {userBook && capsule ? (
+        <Pressable
+          onPress={() => router.push({ pathname: '/memory/[workId]', params: { workId } } as unknown as Href)}
+          accessibilityRole="button"
+          accessibilityLabel="Переглянути мою пам'ять про цю книгу"
+        >
+          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <Ionicons name="cube-outline" size={20} color={theme.colors.accent} />
+            <AppText variant="body" color="accent" style={{ flex: 1 }}>
+              Переглянути мою пам&apos;ять про цю книгу
             </AppText>
             <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
           </Card>
