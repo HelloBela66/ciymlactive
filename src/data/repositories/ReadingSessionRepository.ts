@@ -519,6 +519,49 @@ export const ReadingSessionRepository = {
   },
 
   /**
+   * Метрики УСІХ завершених сесій за весь час — рівно ті чотири колонки, які приймає
+   * canonical-двигун періодів (`PeriodSessionInput`, `src/lib/readingPeriodSummary.ts`).
+   * POLYTSIA V1.7, Phase 4 (Reading Life, `docs/V1_7_READING_LIFE.md`).
+   *
+   * ЧОМУ ОКРЕМИЙ МЕТОД, А НЕ `listAllCompleted` вище: Reading Life будує ієрархію «рік → місяць»
+   * за ВСЮ історію одразу (`src/lib/readingLife.ts`), тож їй потрібні саме рядки, а не
+   * SQL-агрегат — але потрібні лише чотири поля з тринадцяти. Це той самий принцип #168 («не
+   * тягнути повні рядки через міст заради метрики»), застосований до нової поверхні: проєкція
+   * замість `SELECT *`.
+   *
+   * ЧОМУ НЕ SQL `GROUP BY` ПО МІСЯЦЯХ: місяць читацької історії — ЛОКАЛЬНИЙ календарний місяць
+   * пристрою, а SQLite не знає ані поясу, ані того, який offset діяв у конкретний момент.
+   * `GROUP BY substr(started_at, 1, 7)` повернув би UTC-місяць — рівно ту misattribution, яку
+   * усунула Phase 1 (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Бакетування робить JS
+   * (`readingMonthKey`), SQL віддає лише вузькі рядки.
+   *
+   * ЧОМУ ОДИН ЗАПИТ НА ВСЮ ІСТОРІЮ, А НЕ ПО ЗАПИТУ НА РІК: інакше екран року й екран місяця
+   * стали б двома незалежними обчисленнями того самого — саме тим, що ТЗ V1.7 називає «п'ять
+   * різних відповідей на питання «скільки я читав цього місяця?»». Один запит → один
+   * `buildReadingLife` → обидва екрани як проєкції одного результату.
+   */
+  async listAllCompletedMetrics(
+    db: SQLiteDatabase,
+  ): Promise<{ startedAt: string; durationSeconds: number | null; startPage: number; endPage: number | null }[]> {
+    const rows = await db.getAllAsync<{
+      started_at: string;
+      duration_seconds: number | null;
+      start_page: number;
+      end_page: number | null;
+    }>(
+      `SELECT started_at, duration_seconds, start_page, end_page FROM reading_session
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL
+       ORDER BY started_at ASC`,
+    );
+    return rows.map((row) => ({
+      startedAt: row.started_at,
+      durationSeconds: row.duration_seconds,
+      startPage: row.start_page,
+      endPage: row.end_page,
+    }));
+  },
+
+  /**
    * Підсумки за ВЕСЬ час одним SQL-агрегатом — POLYTSIA V1.6.2, #168. Замінює
    * `sumSessionMinutes(sessions)`/`sumSessionPages(sessions)`/`sessions.length`
    * (`src/lib/readingAggregates.ts`) над результатом `listAllCompleted` у `useStatistics.ts`.

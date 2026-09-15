@@ -47,6 +47,22 @@ export default function MyReadingScreen() {
           Цифри, інсайти й підсумки твого читання — усе в одному місці.
         </AppText>
 
+        {/* POLYTSIA V1.7, Phase 4 — вхід у «Мою читацьку історію» (ТЗ V1.7 §11).
+            ПЕРШИМ пунктом і поза групою «цифри»: решта екранів цієї секції відповідають на
+            питання «які в мене показники ЗАРАЗ» (за весь час, одним зрізом), а читацька історія
+            — на інше: «як виглядало моє читання ТОДІ». Це не ще один аналітичний екран, а інший
+            спосіб дивитись, тож він не змішується зі Статистикою/Профілем/Відбитком.
+            Саме тут, а не окремим рядком у Профілі: цей хаб (Фаза 15, ANALYTICS HIERARCHY) і
+            з'явився для того, щоб Профіль не обростав п'ятьма входами в те саме. */}
+        <View style={{ gap: theme.spacing.sm, marginBottom: theme.spacing.xl }}>
+          <QuickAction
+            icon="time-outline"
+            label="Моя читацька історія"
+            description="Рік за роком, місяць за місяцем — як ти читав"
+            onPress={() => router.push('/reading-life' as unknown as Href)}
+          />
+        </View>
+
         <View style={{ gap: theme.spacing.sm }}>
           <QuickAction
             icon="bar-chart-outline"

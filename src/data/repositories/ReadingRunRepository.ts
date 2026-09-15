@@ -301,4 +301,31 @@ export const ReadingRunRepository = {
     );
     return rows.map(mapRow);
   },
+
+  /**
+   * Усі завершені прочитання за ВЕСЬ час — POLYTSIA V1.7, Phase 4 (Reading Life,
+   * `docs/V1_7_READING_LIFE.md`). Той самий `WHERE`, той самий `JOIN` і та сама семантика
+   * «завершилось = `finished_at` + `status IN ('finished','did_not_finish')`», що й
+   * `listFinishedBetween` вище — лише без обмеження діапазону.
+   *
+   * НАВМИСНО дублює умову, а не «діапазон від початку часів»: виклик із літералами на кшталт
+   * `'0000-01-01'`/`'9999-12-31'` був би магічними межами, що мовчки залежать від формату
+   * зберігання, тоді як окремий метод чесно каже «за весь час» і лишається під тим самим
+   * коментарем про soft-delete (§61: історична поверхня переживає видалення книги з Бібліотеки).
+   *
+   * Reading Life групує ці рядки за ЛОКАЛЬНИМ місяцем завершення в JS (`readingMonthKey`) — з
+   * тієї самої причини, що й сесії: SQL не знає часового поясу пристрою
+   * (`ReadingSessionRepository.listAllCompletedMetrics`).
+   */
+  async listAllFinished(db: SQLiteDatabase): Promise<ReadingRun[]> {
+    const rows = await db.getAllAsync<ReadingRunRow>(
+      `SELECT rr.* FROM reading_run rr
+       JOIN user_book ub ON ub.id = rr.user_book_id
+       WHERE rr.deleted_at IS NULL
+         AND rr.status IN ('finished', 'did_not_finish')
+         AND rr.finished_at IS NOT NULL
+       ORDER BY rr.finished_at ASC`,
+    );
+    return rows.map(mapRow);
+  },
 };

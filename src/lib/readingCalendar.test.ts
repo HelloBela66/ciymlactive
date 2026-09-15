@@ -7,6 +7,8 @@ import {
   monthSpanRange,
   readingDayKey,
   readingDayKeyOf,
+  readingMonthKey,
+  readingYearOf,
   weekRange,
   yearRange,
   yearRangeOf,
@@ -59,6 +61,52 @@ describe('readingDayKey — локальна календарна дата, а �
 
   it('readingDayKeyOf(Date) і readingDayKey(iso) дають той самий ключ для того самого моменту', () => {
     expect(readingDayKeyOf(LOCAL_AUG_16_00_30)).toBe(readingDayKey(LOCAL_AUG_16_00_30.toISOString()));
+  });
+});
+
+describe('readingMonthKey / readingYearOf — місяць і рік у ЛОКАЛЬНОМУ поясі', () => {
+  it('нічне читання 1 червня о 00:30 належить ЧЕРВНЮ, а не травню', () => {
+    const juneNight = new Date(2026, 5, 1, 0, 30);
+    expect(readingMonthKey(juneNight.toISOString())).toBe('2026-06');
+  });
+
+  it('31 травня о 23:50 лишається в ТРАВНІ', () => {
+    const mayLate = new Date(2026, 4, 31, 23, 50);
+    expect(readingMonthKey(mayLate.toISOString())).toBe('2026-05');
+  });
+
+  it('місяць завжди двоцифровий (січень — `2026-01`, не `2026-1`)', () => {
+    expect(readingMonthKey(new Date(2026, 0, 5, 12, 0).toISOString())).toBe('2026-01');
+  });
+
+  it('новорічна ніч: 1 січня 00:30 — це НОВИЙ рік і його січень', () => {
+    const newYearNight = new Date(2027, 0, 1, 0, 30);
+    expect(readingMonthKey(newYearNight.toISOString())).toBe('2027-01');
+    expect(readingYearOf(newYearNight.toISOString())).toBe(2027);
+  });
+
+  it('31 грудня 23:50 лишається в СТАРОМУ році', () => {
+    const lastMoment = new Date(2026, 11, 31, 23, 50);
+    expect(readingMonthKey(lastMoment.toISOString())).toBe('2026-12');
+    expect(readingYearOf(lastMoment.toISOString())).toBe(2026);
+  });
+
+  it('ключ місяця — це рівно перші 7 символів ключа дня того самого моменту', () => {
+    const instant = LOCAL_AUG_16_00_30.toISOString();
+    expect(readingMonthKey(instant)).toBe(readingDayKey(instant).slice(0, 7));
+  });
+
+  it('рік із `readingYearOf` збігається з роком у ключі місяця', () => {
+    const instant = LOCAL_AUG_16_00_30.toISOString();
+    expect(String(readingYearOf(instant))).toBe(readingMonthKey(instant).slice(0, 4));
+  });
+
+  it('момент належить діапазону саме ТОГО місяця, який назвав його ключ', () => {
+    const instant = new Date(2026, 5, 1, 0, 30).toISOString();
+    const key = readingMonthKey(instant);
+    const range = monthRangeOf(Number(key.slice(0, 4)), Number(key.slice(5, 7)));
+    expect(instant >= range.startIso).toBe(true);
+    expect(instant < range.endIso).toBe(true);
   });
 });
 

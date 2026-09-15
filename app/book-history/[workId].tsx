@@ -186,7 +186,19 @@ export default function BookHistoryScreen() {
 
   return (
     <ScreenContainer scroll>
-      <Stack.Screen options={{ title: 'Моя історія з книгою' }} />
+      {/* `headerShown: true` — обов'язкове: кореневий `Stack` (`app/_layout.tsx`) виставляє
+          `headerShown: false` для ВСІХ маршрутів, тож самої лише `title` замало — екран лишався
+          б без шапки й без кнопки «назад» (той самий набір опцій, що й `app/statistics.tsx`/
+          `app/wrapped/[year].tsx`/`app/reread-comparison/[workId].tsx`). */}
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: 'Моя історія з книгою',
+          headerStyle: { backgroundColor: theme.colors.bg },
+          headerTintColor: theme.colors.textPrimary,
+          headerShadowVisible: false,
+        }}
+      />
 
       {errored ? (
         <QueryErrorState

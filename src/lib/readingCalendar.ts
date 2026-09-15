@@ -67,6 +67,25 @@ export function readingDayKeyOf(date: Date): string {
   return format(date, READING_DAY_KEY_FORMAT);
 }
 
+export const READING_MONTH_KEY_FORMAT = 'yyyy-MM';
+
+/**
+ * Абсолютний instant → ключ календарного МІСЯЦЯ (`yyyy-MM`) у локальному поясі — той самий
+ * принцип, що й `readingDayKey`, лише на рівень вище. Для Reading Life (V1.7, Phase 4), яка
+ * групує історію рік → місяць, і для будь-якого іншого помісячного бакетування.
+ *
+ * НЕ використовувати `iso.slice(0, 7)`: це дало б UTC-місяць, тобто читання 1 червня о 00:30 у
+ * Києві потрапило б у травень — рівно та misattribution, яку усунула Phase 1.
+ */
+export function readingMonthKey(instantIso: string): string {
+  return format(new Date(instantIso), READING_MONTH_KEY_FORMAT);
+}
+
+/** Календарний РІК події в локальному поясі. */
+export function readingYearOf(instantIso: string): number {
+  return new Date(instantIso).getFullYear();
+}
+
 /**
  * Напіввідкритий діапазон `[startIso, endIso)` в абсолютних UTC instants, побудований із
  * ЛОКАЛЬНИХ меж періоду. Саме в такому вигляді він іде в SQL (`started_at >= ? AND started_at < ?`)

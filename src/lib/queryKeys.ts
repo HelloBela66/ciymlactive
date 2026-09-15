@@ -162,6 +162,22 @@ export const queryKeys = {
     // спільний кеш" принцип, що й у `readingRuns` вище).
     sources: (userBookId: string) => ['bookHistory', 'sources', userBookId] as const,
   },
+  readingLife: {
+    // POLYTSIA V1.7, Phase 4 («Моя читацька історія», `docs/V1_7_READING_LIFE.md`) — БЕЗ
+    // параметрів, і це головне архітектурне рішення цієї фази: екран року й екран місяця НЕ
+    // мають власних ключів. Обидва читають цей один кеш-запис і беруть із нього свій зріз
+    // (`findReadingLifeYear`/`findReadingLifeMonth`, `src/lib/readingLife.ts`).
+    //
+    // Альтернатива (`year(2026)`/`month('2026-06')` з власним `queryFn` на кожен) означала б
+    // рівно те, що ТЗ V1.7 називає головним антипатерном: кілька незалежних обчислень однієї й
+    // тієї самої історичної правди, здатних розійтись. Той самий "один хук, спільний кеш"
+    // принцип, що й `readingRuns.detailByUserBook`, лише на рівні всієї історії.
+    all: ['readingLife', 'all'] as const,
+    // Книги конкретного місяця (обкладинки/назви для «Що я дочитав») — окремий, ВУЗЬКИЙ
+    // діапазонний запит: назви й обкладинки потрібні лише відкритому місяцю, тягнути їх у
+    // загальний `all` для всієї історії одразу було б марно.
+    monthBooks: (monthKey: string) => ['readingLife', 'monthBooks', monthKey] as const,
+  },
   loreEntities: {
     // POLYTSIA V1.6, Фаза 9-10 («Персонажі» → PERSONAL LORE) — той самий рівень, що й
     // `genres.byWork`/`tags.byWork` нижче: `lore_entity.work_id`, не `user_book_id`

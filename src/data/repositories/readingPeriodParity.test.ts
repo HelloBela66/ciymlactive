@@ -4,8 +4,10 @@ import { openTestDatabase } from '@/data/db/testDb';
 import { UserBookRepository } from './UserBookRepository';
 import { ReadingSessionRepository } from './ReadingSessionRepository';
 import { ReadingRunRepository } from './ReadingRunRepository';
-import { computeReadingPeriodSummary } from '@/lib/readingPeriodSummary';
+import { JournalRepository } from './JournalRepository';
+import { computeReadingPeriodSummary, type ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
 import { monthRange, readingDayKey, weekRange, yearRangeOf } from '@/lib/readingCalendar';
+import { buildReadingLife, findReadingLifeMonth, findReadingLifeYear } from '@/lib/readingLife';
 import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
 
 /**
@@ -230,6 +232,141 @@ describe('V1.7 parity — History Preservation тримається на рів�
     // Контроль: жива Бібліотека книгу коректно НЕ бачить.
     const library = await UserBookRepository.listAll(db);
     expect(library.map((ub) => ub.id)).not.toContain('p-h');
+  });
+});
+
+/**
+ * POLYTSIA V1.7, Phase 4 — НАЙВАЖЛИВІША перевірка цієї фази.
+ *
+ * Reading Life (`src/lib/readingLife.ts`) бере ВСЮ історію одним запитом і ріже її на роки й
+ * місяці в JS. Wrapped/Seasons/Recap беруть ОДИН період діапазонним SQL-запитом. Це два різні
+ * шляхи до однієї цифри — рівно та конфігурація, з якої й народжуються «п'ять різних відповідей
+ * на питання «скільки я читав цього місяця?»».
+ *
+ * Тому тут обидва шляхи проганяються по ОДНИХ І ТИХ САМИХ даних і звіряються полем за полем.
+ * Якщо колись хтось «оптимізує» один із них окремо — цей тест впаде першим.
+ */
+async function buildLifeLikeHook(db: SQLiteDatabase) {
+  const [sessions, runs, journalInstants] = await Promise.all([
+    ReadingSessionRepository.listAllCompletedMetrics(db),
+    ReadingRunRepository.listAllFinished(db),
+    JournalRepository.listCreatedInstants(db),
+  ]);
+  const workIdByUserBookId = await UserBookRepository.listWorkIdsByIds(db, [
+    ...new Set(runs.map((run) => run.userBookId)),
+  ]);
+  return buildReadingLife({
+    sessions,
+    finishedRuns: runs.map((run) => ({
+      id: run.id,
+      userBookId: run.userBookId,
+      workId: workIdByUserBookId.get(run.userBookId) ?? null,
+      runNumber: run.runNumber,
+      status: run.status,
+      finishedAt: run.finishedAt,
+    })),
+    journalInstants,
+  });
+}
+
+/** Усі метрики, які обидва шляхи мають рахувати однаково (журнал — лише в Reading Life). */
+function comparableMetrics(summary: ReadingPeriodSummary) {
+  return {
+    readingMinutes: summary.readingMinutes,
+    pagesRead: summary.pagesRead,
+    sessionCount: summary.sessionCount,
+    activeDays: summary.activeDays,
+    activeDayKeys: summary.activeDayKeys,
+    finishedRunCount: summary.finishedRunCount,
+    firstTimeFinishCount: summary.firstTimeFinishCount,
+    rereadFinishCount: summary.rereadFinishCount,
+    dnfRunCount: summary.dnfRunCount,
+    uniqueFinishedWorkIds: [...summary.uniqueFinishedWorkIds].sort(),
+    pagesPerHour: summary.pagesPerHour,
+  };
+}
+
+describe('V1.7 parity — Reading Life і діапазонний запит дають ТУ САМУ цифру', () => {
+  async function seedMixedHistory(db: SQLiteDatabase): Promise<void> {
+    await seedBook(db, 'p-k');
+    await seedBook(db, 'p-l');
+
+    // Червень 2026, зокрема нічне читання 1 червня о 00:30 (UTC-семантика віднесла б його в травень).
+    await seedSession(db, { id: 's1', userBookId: 'p-k', startedAtLocal: new Date(2026, 5, 1, 0, 30), durationSeconds: 1800, startPage: 0, endPage: 20 });
+    await seedSession(db, { id: 's2', userBookId: 'p-k', startedAtLocal: new Date(2026, 5, 14, 20, 0), durationSeconds: 2700, startPage: 20, endPage: 55 });
+    await seedSession(db, { id: 's3', userBookId: 'p-l', startedAtLocal: new Date(2026, 5, 14, 22, 0), durationSeconds: 900, startPage: 0, endPage: 8 });
+    // Липень — щоб рік не складався з одного місяця.
+    await seedSession(db, { id: 's4', userBookId: 'p-l', startedAtLocal: new Date(2026, 6, 2, 9, 0), durationSeconds: 3600, startPage: 8, endPage: 70 });
+    // Попередній рік — щоб перевірити, що роки не змішуються.
+    await seedSession(db, { id: 's5', userBookId: 'p-k', startedAtLocal: new Date(2025, 10, 3, 9, 0), durationSeconds: 1200, startPage: 0, endPage: 10 });
+
+    await seedFinishedRun(db, { id: 'r1', userBookId: 'p-k', runNumber: 1, finishedAtLocal: new Date(2026, 5, 20, 12, 0) });
+    await seedFinishedRun(db, { id: 'r2', userBookId: 'p-k', runNumber: 2, finishedAtLocal: new Date(2026, 6, 28, 12, 0) });
+    await seedFinishedRun(db, { id: 'r3', userBookId: 'p-l', runNumber: 1, finishedAtLocal: new Date(2026, 6, 30, 12, 0), status: 'did_not_finish' });
+  }
+
+  it('місяць Reading Life дорівнює тому самому місяцю через `monthRange` + repository', async () => {
+    const db = await openMigratedTestDb();
+    await seedMixedHistory(db);
+
+    const life = await buildLifeLikeHook(db);
+
+    for (const [monthKey, anchor] of [
+      ['2026-06', new Date(2026, 5, 15)],
+      ['2026-07', new Date(2026, 6, 15)],
+      ['2025-11', new Date(2025, 10, 15)],
+    ] as const) {
+      const fromLife = findReadingLifeMonth(life, monthKey);
+      const fromRange = await summarize(db, monthRange(anchor));
+      expect(fromLife).not.toBeNull();
+      expect(fromLife ? comparableMetrics(fromLife.summary) : null).toEqual(comparableMetrics(fromRange));
+    }
+  });
+
+  it('рік Reading Life дорівнює тому самому року через `yearRangeOf` + repository', async () => {
+    const db = await openMigratedTestDb();
+    await seedMixedHistory(db);
+
+    const life = await buildLifeLikeHook(db);
+
+    for (const year of [2026, 2025]) {
+      const fromLife = findReadingLifeYear(life, year);
+      const fromRange = await summarize(db, yearRangeOf(year));
+      expect(fromLife).not.toBeNull();
+      expect(fromLife ? comparableMetrics(fromLife.summary) : null).toEqual(comparableMetrics(fromRange));
+    }
+  });
+
+  it('роки й місяці Reading Life — саме ті, у яких щось відбулось (без порожніх і без пропусків)', async () => {
+    const db = await openMigratedTestDb();
+    await seedMixedHistory(db);
+
+    const life = await buildLifeLikeHook(db);
+
+    expect(life.years.map((year) => year.year)).toEqual([2026, 2025]);
+    expect(findReadingLifeYear(life, 2026)?.months.map((month) => month.monthKey)).toEqual([
+      '2026-07',
+      '2026-06',
+    ]);
+    expect(findReadingLifeYear(life, 2025)?.months.map((month) => month.monthKey)).toEqual(['2025-11']);
+  });
+
+  it("м'яко видалена книга лишається і в Reading Life (та сама History Preservation)", async () => {
+    const db = await openMigratedTestDb();
+    await seedMixedHistory(db);
+
+    const before = findReadingLifeYear(await buildLifeLikeHook(db), 2026);
+    await db.runAsync(`UPDATE user_book SET deleted_at = ? WHERE id = ?`, [
+      new Date().toISOString(),
+      'p-k',
+    ]);
+    const after = findReadingLifeYear(await buildLifeLikeHook(db), 2026);
+
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(after ? comparableMetrics(after.summary) : null).toEqual(
+      before ? comparableMetrics(before.summary) : undefined,
+    );
   });
 });
 

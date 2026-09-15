@@ -224,6 +224,39 @@ export const UserBookRepository = {
   },
 
   /**
+   * `user_book.id` → `work.id`, пакетно, БЕЗ решти деталей книги — POLYTSIA V1.7, Phase 4
+   * (Reading Life, `docs/V1_7_READING_LIFE.md`).
+   *
+   * ЧОМУ НЕ `listWithDetailsByIdsIncludingDeleted` вище: canonical-двигун періодів рахує
+   * «унікальні твори» саме за `work.id` (`readingPeriodSummary.ts` — ідентичність книги це
+   * `work`, не `user_book`/`edition`), а прохід знає лише `userBookId`. Reading Life резолвить
+   * це для ВСІХ книг, які колись були дочитані, тобто потенційно для всієї бібліотеки — тягнути
+   * заради одного поля повні `Work`+`Edition`+авторів (`attachDetailsBatch` — три додаткові
+   * запити й повні рядки) було б марно. Обкладинки/назви потрібні лише екрану конкретного
+   * місяця, і він бере їх власним вузьким діапазонним запитом.
+   *
+   * БЕЗ `deleted_at IS NULL` — History Preservation, той самий принцип, що й у
+   * `listByIdsIncludingDeleted` вище: видалення книги з Бібліотеки сьогодні не має переписувати
+   * підсумок року, у якому її було прочитано (§61). Фізично відсутній `edition` просто не
+   * приєднається — книга тихо не потрапить у лічильник унікальних творів, а не зламає підсумок.
+   */
+  async listWorkIdsByIds(db: SQLiteDatabase, ids: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (ids.length === 0) return result;
+
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ user_book_id: string; work_id: string }>(
+      `SELECT ub.id AS user_book_id, e.work_id AS work_id
+       FROM user_book ub
+       JOIN edition e ON e.id = ub.edition_id
+       WHERE ub.id IN (${placeholders})`,
+      ids,
+    );
+    for (const row of rows) result.set(row.user_book_id, row.work_id);
+    return result;
+  },
+
+  /**
    * Оновлення статусу. `started_at`/`finished_at` виставляються автоматично при першому
    * переході в 'reading'/'rereading' чи 'finished' (і не перезаписуються, якщо вже стоять) —
    * щоб дата початку/завершення читання не "стрибала" при випадкових перемиканнях статусу.

@@ -362,6 +362,32 @@ export const JournalRepository = {
   },
 
   /**
+   * Моменти створення УСІХ записів щоденника (нотатки + цитати) за весь час — лише колонка
+   * `created_at`, без текстів. POLYTSIA V1.7, Phase 4 (Reading Life,
+   * `docs/V1_7_READING_LIFE.md`): «N записів у щоденнику» для місяця/року
+   * (`summary.journalCount`, `src/lib/readingPeriodSummary.ts`).
+   *
+   * SPOILER-SAFE: свідомо НЕ фільтрує — і це узгоджено з уже наявною політикою лічильників,
+   * а не виняток із неї. `countByUserBookId`/`countAll` вище так само рахують усі живі записи:
+   * spoiler-safe ховає ТЕКСТ запису (`isSpoilerHidden` застосовується в `listPage`/`listFeedPage`/
+   * `ActivityHistoryRepository`), а не сам факт, що цього місяця людина щось записала. Тут
+   * повертаються лише часові мітки — жодного тексту, жодної сторінки, жодної книги, тож нічого
+   * спойлерного передати фізично неможливо.
+   *
+   * Групування за ЛОКАЛЬНИМ місяцем робить JS (`readingMonthKey`) — з тієї самої причини, що й
+   * для сесій (`ReadingSessionRepository.listAllCompletedMetrics`): SQL не знає часового поясу.
+   */
+  async listCreatedInstants(db: SQLiteDatabase): Promise<string[]> {
+    const rows = await db.getAllAsync<{ created_at: string }>(
+      `SELECT created_at FROM note WHERE deleted_at IS NULL
+       UNION ALL
+       SELECT created_at FROM quote WHERE deleted_at IS NULL
+       ORDER BY created_at ASC`,
+    );
+    return rows.map((row) => row.created_at);
+  },
+
+  /**
    * Сторінка глобальної стрічки "Мій щоденник" (Фаза 4) — той самий union-підхід, що й
    * `listPage`, але з JOIN до `user_book`→`edition`→`work`, щоб кожен запис ніс назву й
    * обкладинку своєї книги (записи різних книг ідуть впереміш, на відміну від "щоденника
