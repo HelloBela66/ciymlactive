@@ -1,3 +1,5 @@
+import { format } from 'date-fns';
+import { uk } from 'date-fns/locale';
 import { pluralizeUk } from './pluralizeUk';
 
 /**
@@ -36,6 +38,30 @@ export function formatCompactDuration(totalMinutes: number): string {
   if (hours === 0) return `${remainderMinutes} хв`;
   if (remainderMinutes === 0) return `${hours} год`;
   return `${hours} год ${remainderMinutes} хв`;
+}
+
+/**
+ * Назва календарного місяця в називному відмінку («Січень», «Серпень») — POLYTSIA V1.7, Phase 6.
+ *
+ * ЧОМУ ЦЕ ОКРЕМА ФУНКЦІЯ, А НЕ РЯДОК УСЕРЕДИНІ ЕКРАНА. Саме там жив останній UTC-дефект того ж
+ * класу, що виправляла Phase 1: Wrapped будував дату як `new Date(Date.UTC(year, month - 1, 1))`.
+ * У поясі на захід від Гринвіча цей момент — ще ПОПЕРЕДНІЙ місяць за локальним часом, тож
+ * «найактивніший місяць: січень» підписувався як «грудень». `computeBusiestMonth` рахує місяць
+ * ЛОКАЛЬНО (`new Date(startedAt).getMonth()`), тож і підпис до нього мусить будуватись локально.
+ *
+ * Поки це був рядок усередині JSX, помилку не могло спіймати ніщо: екрани в цій кодовій базі не
+ * покриті тестами. Винесена функція має власний тест, який ганяється ще й під `TZ=Europe/Kyiv`
+ * (`npm run test:tz`) — інакше твердження «`test:tz` захищає цей клас помилок» було б неправдою
+ * саме для тієї помилки, через яку його написали.
+ *
+ * `LLLL` (standalone), не `MMMM`: українська розрізняє «січень» (сам по собі) і «січня» (у даті),
+ * і date-fns теж. Для підпису-заголовка потрібен називний.
+ *
+ * `month` — 1-12, як у людей (не 0-11, як у `Date`) — той самий контракт, що й `monthRangeOf`.
+ */
+export function formatMonthName(year: number, month: number): string {
+  const label = format(new Date(year, month - 1, 1), 'LLLL', { locale: uk });
+  return label.length === 0 ? label : label[0]!.toUpperCase() + label.slice(1);
 }
 
 const HOUR_FORMS = ['година', 'години', 'годин'] as const;

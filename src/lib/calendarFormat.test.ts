@@ -1,4 +1,8 @@
-import { formatCompactDuration, formatDurationForAccessibility } from './calendarFormat';
+import {
+  formatCompactDuration,
+  formatDurationForAccessibility,
+  formatMonthName,
+} from './calendarFormat';
 
 describe('formatCompactDuration', () => {
   it('0 (і захисно від\'ємне) — "0 хв"', () => {
@@ -47,5 +51,39 @@ describe('formatDurationForAccessibility', () => {
 
   it('години + хвилини-залишок, приклад з ТЗ ("1 година 12 хвилин")', () => {
     expect(formatDurationForAccessibility(72)).toBe('1 година 12 хвилин');
+  });
+});
+
+/**
+ * POLYTSIA V1.7, Phase 6 — регресійний тест на КОНКРЕТНИЙ виправлений дефект: Wrapped будував
+ * назву найактивнішого місяця через `Date.UTC(year, month - 1, 1)`, і в поясі на захід від
+ * Гринвіча січень підписувався як «грудень».
+ *
+ * Інваріант навмисно сформульований так, щоб бути істинним у БУДЬ-ЯКОМУ поясі: назва місяця
+ * мусить залежати ЛИШЕ від переданих `year`/`month`. Багована реалізація цю умову порушувала
+ * рівно там, де offset від'ємний (`npm run test:tz` ганяє цей suite ще й під `TZ=Europe/Kyiv`).
+ */
+describe('formatMonthName', () => {
+  it('приймає людський номер місяця (1-12) і дає називний відмінок з великої літери', () => {
+    expect(formatMonthName(2026, 1)).toBe('Січень');
+    expect(formatMonthName(2026, 8)).toBe('Серпень');
+    expect(formatMonthName(2026, 12)).toBe('Грудень');
+  });
+
+  it('МЕЖА РОКУ: січень лишається січнем, грудень — груднем (регресія UTC-дефекту)', () => {
+    expect(formatMonthName(2027, 1)).toBe('Січень');
+    expect(formatMonthName(2026, 12)).toBe('Грудень');
+    expect(formatMonthName(2027, 1)).not.toBe(formatMonthName(2026, 12));
+  });
+
+  it('назва залежить лише від номера місяця, не від року', () => {
+    for (let month = 1; month <= 12; month += 1) {
+      expect(formatMonthName(2026, month)).toBe(formatMonthName(2031, month));
+    }
+  });
+
+  it("усі дванадцять місяців різні — жоден не «з'їхав» на сусідній", () => {
+    const names = Array.from({ length: 12 }, (_, index) => formatMonthName(2026, index + 1));
+    expect(new Set(names).size).toBe(12);
   });
 });

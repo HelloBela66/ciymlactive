@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { View, Pressable } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { format } from 'date-fns';
-import { uk } from 'date-fns/locale';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
@@ -11,7 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { useTheme } from '@/design/ThemeProvider';
 import { useWrappedYear } from '@/features/wrapped/useWrappedYear';
-import { formatCompactDuration } from '@/lib/calendarFormat';
+import { formatCompactDuration, formatMonthName } from '@/lib/calendarFormat';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
@@ -185,9 +183,7 @@ export default function WrappedScreen() {
                 <AppText variant="caption" color="secondary">
                   Найактивніший місяць
                 </AppText>
-                <AppText variant="heading" style={{ textTransform: 'capitalize' }}>
-                  {format(new Date(year, data.busiestMonth.month - 1, 1), 'LLLL', { locale: uk })}
-                </AppText>
+                <AppText variant="heading">{formatMonthName(year, data.busiestMonth.month)}</AppText>
               </Card>
             ) : null}
 
