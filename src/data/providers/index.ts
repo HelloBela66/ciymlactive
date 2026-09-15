@@ -5,7 +5,13 @@ import { SharedCatalogProvider } from './SharedCatalogProvider';
 import { CuratedCatalogProvider } from './CuratedCatalogProvider';
 import { ManualBookProvider } from './ManualBookProvider';
 
-export type { BookMetadataProvider, RawProviderBook } from './BookMetadataProvider';
+export type {
+  BookMetadataProvider,
+  RawProviderBook,
+  ProviderSearchOutcome,
+  ProviderSearchError,
+  ProviderSearchErrorKind,
+} from './BookMetadataProvider';
 export { GoogleBooksProvider } from './GoogleBooksProvider';
 export { ISBNdbProvider } from './ISBNdbProvider';
 export { SharedCatalogProvider, toRawBook as sharedCatalogRowToRawBook } from './SharedCatalogProvider';

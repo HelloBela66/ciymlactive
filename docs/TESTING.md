@@ -127,6 +127,51 @@ test.ts` отримав два наскрізні сценарії: `seedV15Libr
 `sortOrder` у `NoteCategoryRepository.create`, дедуп-без-оновлення в `OwnedBookRepository.
 create` — і жодного тесту раніше).
 
+## FOUNDATION FINAL POLISH — крос-узгодженість Календаря + Search error-модель
+
+Окремий пас, не частина matrix #165 вище (той — систематичний прохід по repository-шару за
+ризиком; цей — регресійне покриття для двох конкретних, точково виправлених дефектів,
+`docs/FOUNDATION_FINAL_POLISH_REPORT.md`):
+
+- `src/data/repositories/calendarHistoricalConsistency.test.ts` — НЕ репозиторний тест однієї
+  функції, а тест **крос-узгодженості кількох Calendar-проекцій** (сесії, книжкова резолюція,
+  `rankBooksForDay`, `listStartedOrFinishedBetween`, `rankTopBooksOfMonth`) для одного спільного
+  історичного набору даних, до/після soft-delete — той самий дух, що й вимога "тестуй потік
+  даних вище одного helper-а", а не ізольований юніт. Обране рішення НЕ рендерити React-хуки
+  (`useMonthCalendarData`/`useDaySessions`/`useMonthSummary` тримають агрегацію вбудованою прямо
+  в `queryFn`, невід'ємно від React Query — виносити її окремими функціями означало б
+  архітектурний рефакторинг Календаря, поза межами мандату пасу) — замість цього напряму
+  викликаються ті самі repository-методи й ті самі чисті lib-функції, у тому самому порядку.
+- `src/data/repositories/ReadingRunRepository.test.ts` — існуючий тест, що раніше стверджував
+  СТАРУ баговану поведінку `listStartedOrFinishedBetween` (soft-deleted книга губить свій
+  start/finish run), переписаний на нову очікувану поведінку; додано контрольну пару "фізичне
+  видалення через `ON DELETE CASCADE`" — щоб soft-delete і hard-delete лишались чітко
+  розрізненими сценаріями, а не одним і тим самим тестом.
+- `src/lib/providerSearchError.test.ts` — чисті функції класифікації (`classifyHttpStatus` межі
+  діапазону 429/5xx, `describeProviderSearchError` для всіх 6 kind — книжковий тон, без
+  HTTP-кодів/stack trace в тексті).
+- `src/lib/searchProviderCombine.test.ts` — дедуплікація за ISBN (`isbnKey`/`dedupeAgainst`/
+  `withSeen`), gate "осіло" для платного ISBNdb (`isProviderSettled`), і найважливіше —
+  `haveAllProvidersFailed`: розрізняє "усі джерела провалились" від "усі перевірили — і книги
+  справді нема" (жоден провайдер не помилявся) і від "хоч одне джерело ще успішно щось дало".
+  Ці функції винесені зі самого `app/(tabs)/search.tsx` (React-компонент, немає власної RTL-
+  інфраструктури в проєкті — house-конвент, жодного `.test.tsx` в усьому репозиторії) слово в
+  слово, саме заради прямого юніт-тестування.
+- `src/data/remote/googleBooksProxyClient.test.ts`/`isbndbProxyClient.test.ts` — `jest.
+  resetModules()` + `require()` патерн (обидва клієнти читають `process.env` на рівні модуля,
+  при `import`, тож кожен тест повинен отримати ЧИСТИЙ модуль із власними значеннями env):
+  success+книги, success+порожньо (генуїнний "нічого не знайдено"), 429, 5xx, мережевий збій,
+  клієнтський timeout (`jest.useFakeTimers()` + мокнутий `fetch`, що слухає `AbortSignal`),
+  malformed JSON, "проксі не налаштовано" (fetch взагалі не викликається), і окремий блок —
+  серіалізований клієнтський результат (`JSON.stringify`) ніколи не містить анонімного
+  Supabase-ключа чи платного ISBNdb-ключа з мокнутого середовища.
+- `src/data/providers/GoogleBooksProvider.test.ts` — обидва шляхи (проксі налаштовано / прямий
+  анонімний fallback), і окремий регресійний блок: `lookupByISBN`'s прямий шлях індексував
+  `fetchVolumesDirect(...)[0]` так, ніби той повертає голий масив — після переходу на
+  `ProviderSearchOutcome` (об'єкт `{status, items|error}`) це завжди давало `undefined`, тобто
+  ISBN-лукап без проксі мовчки ЗАВЖДИ повертав `null`. Знайдено й виправлено в межах цього ж
+  пасу (регресія власного фіксу, не зовнішня знахідка) — тест лочить правильну поведінку.
+
 ## Що НЕ покривається юніт-тестами (свідомо)
 
 Верстка/анімації/жести — перевіряються вручну (single-user MVP, немає бюджету на E2E у V1);

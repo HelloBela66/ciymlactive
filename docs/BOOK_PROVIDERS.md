@@ -23,9 +23,10 @@ export interface BookMetadataProvider {
   displayName: string;
   isEnabled: boolean; // false для провайдерів без офіційного/дозволеного API, або без ключа
   // `signal` — React Query скасовує застарілий запит під час набору тексту (див. GoogleBooksProvider.ts)
-  searchBooks(query: string, signal?: AbortSignal): Promise<RawProviderBook[]>;
-  lookupByISBN(isbn: string): Promise<RawProviderBook | null>;
-  getEdition(externalId: string): Promise<RawProviderBook | null>;
+  // FOUNDATION FINAL POLISH — `ProviderSearchOutcome`, НЕ голий масив (докладніше — розділ нижче).
+  searchBooks(query: string, signal?: AbortSignal): Promise<ProviderSearchOutcome<RawProviderBook>>;
+  lookupByISBN(isbn: string): Promise<RawProviderBook | null>; // поза межами error-моделі нижче
+  getEdition(externalId: string): Promise<RawProviderBook | null>; // те саме
   normalizeBook(raw: RawProviderBook): NormalizedBookDraft; // -> Work+Edition draft, через Zod
 }
 ```
@@ -34,6 +35,56 @@ export interface BookMetadataProvider {
 `src/types/bookDraft.ts`), з якої однаково будуються Work+Edition, незалежно від того, чи
 дані прийшли з Google Books, ISBN-скану чи ручного вводу. UI (Search, ISBN scan) ніколи не
 бачить сирий провайдерський JSON — тільки `NormalizedBookDraft`.
+
+## Search Provider Error Transparency (FOUNDATION FINAL POLISH)
+
+**Проблема (аудит `POST_V1_6_2_FINAL_AUDIT_REPORT.md`, розділ 21):** до цього пасу БУДЬ-ЯКА
+помилка зовнішнього джерела під час пошуку (HTTP 429/5xx, мережевий збій, timeout, невалідна
+відповідь) тихо перетворювалась на `[]` — той самий результат, що й для "цієї книги справді
+немає". UI не міг розрізнити ці два стани.
+
+**Модель (`src/lib/providerSearchError.ts`):**
+
+```ts
+export type ProviderSearchErrorKind =
+  | 'network' | 'timeout' | 'rate_limited' | 'server' | 'invalid_response' | 'unknown';
+
+export interface ProviderSearchError { kind: ProviderSearchErrorKind; }
+
+export type ProviderSearchOutcome<T> =
+  | { status: 'success'; items: T[] }          // включно з генуїнним порожнім результатом
+  | { status: 'error'; error: ProviderSearchError };
+```
+
+HTTP-семантика (`classifyHttpStatus`): 2xx з валідним JSON → `success` (порожній `items` — це
+РЕАЛЬНИЙ порожній результат, не помилка). 429 → `rate_limited`. 5xx → `server`. Мережевий збій
+(fetch throw, не AbortError) → `network`. Клієнтський timeout (`googleBooksProxyClient.ts`/
+`isbndbProxyClient.ts`'s власний `AbortController` на 10с) → `timeout`. Невалідний/непарситься
+JSON → `invalid_response`. `describeProviderSearchError(kind, providerName)` — єдине місце
+книжкового (не технічного) тексту для UI, ніколи HTTP-коду чи stack trace.
+
+**Область дії — навмисно ЛИШЕ "зовнішні" джерела:** `GoogleBooksProvider`, `ISBNdbProvider`
+(через `googleBooksProxyClient.ts`/`isbndbProxyClient.ts`, і прямий анонімний fallback-шлях
+Google Books, коли проксі не задеплоєно). `SharedCatalogProvider`/`CuratedCatalogProvider`
+(власний Supabase, довірена інфраструктура) і `ManualBookProvider` — чиста structural-обгортка
+`{status:'success', items:...}` без жодної зміни власної логіки/помилок.
+
+**Секрети:** ані анонімний Supabase-ключ, ані платний ISBNdb-ключ, ані Google Books API-ключ
+(якого в клієнті взагалі немає з V1.6.1 Фази 4) НІКОЛИ не потрапляють у `ProviderSearchOutcome` —
+класифікація відбувається на рівні HTTP-статусу/факту помилки, серверна відповідь із заголовками
+чи сирим тілом ніколи не серіалізується в результат, що бачить UI (регресійно перевірено в
+`googleBooksProxyClient.test.ts`/`isbndbProxyClient.test.ts`, розділ "секрети ніколи не
+потрапляють у клієнтський результат").
+
+**UI (`app/(tabs)/search.tsx`):** мультипровайдерний пошук НЕ ламається через одне джерело —
+`ProviderResultsSection` показує помилку ЛИШЕ своєї секції (інлайн `ProviderErrorNotice`, тон
+"книжковий", не тривожний, з кнопкою "Спробувати ще раз" там, де ретрай безпечний), решта секцій
+рендеряться як завжди. Якщо ВСІ спробувані джерела провалились цього разу — окремий,
+чесний стан ("Не вдалося завантажити результати пошуку", `QueryErrorState`, один retry на всі
+джерела), явно НЕ "Нічого не знайдено" (пошук фактично не відбувся). Чиста логіка комбінування
+кількох провайдерів (дедуплікація за ISBN, gate "осіло" для платного ISBNdb, "усі провалились")
+винесена в `src/lib/searchProviderCombine.ts` — той самий код, що раніше жив лише в компоненті,
+тепер прямо юніт-тестований.
 
 ## Реалізовані у V1 (M7)
 

@@ -134,8 +134,23 @@ export function useMonthCalendarData(days: CalendarDay[]) {
       }
 
       // Milestone 8-style пакетне довантаження — ФІКСОВАНА кількість запитів (усередині
-      // `listWithDetailsByIds`), незалежно від кількості днів з активністю в місяці.
-      const books = await UserBookRepository.listWithDetailsByIds(db, [...neededBookIds]);
+      // `listWithDetailsByIdsIncludingDeleted`), незалежно від кількості днів з активністю в
+      // місяці.
+      //
+      // POLYTSIA POST-V1.6.2 FOUNDATION CLOSURE — History Preservation Principle: `sessions`
+      // вище вже включає сесії за м'яко видаленими книгами (`ReadingSessionRepository.
+      // listStartedBetween` фільтрує лише власний `deleted_at` сесії, без join на `user_book`).
+      // Раніше тут викликався `listWithDetailsByIds` (alive-only) — тобто сумарні хвилини/
+      // інтенсивність дня рахувались за ВСІМА сесіями (рядок 144, `sumMinutesForDay`), а обкладинку
+      // для дня можна було підібрати лише серед ЖИВИХ книг: видалена книга залишалась "видимою"
+      // через інтенсивність клітинки, але зникала з `primaryUserBook`/`secondaryUserBook`, якщо
+      // була єдиною/топовою книгою дня — і, найгірше, Деталі Дня (`useDaySessions` нижче) тоді
+      // взагалі відкидали такий день з `books`, показуючи розбіжність із місячною сіткою для ТІЄЇ
+      // Ж дати. Видалення книги з бібліотеки не повинно стирати легітимну історію читання — тож
+      // тут (і в `useDaySessions`) книга резолвиться незалежно від `deleted_at`.
+      // `listWithDetailsByIdsIncludingDeleted` усередині все одно пропускає (без падіння) книгу,
+      // чиї Edition/Work самі не знайдені — той самий graceful-фолбек, що вже існував.
+      const books = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, [...neededBookIds]);
       const bookById = new Map(books.map((ub) => [ub.id, ub]));
 
       const result = new Map<string, DayCalendarStats>();
@@ -222,7 +237,20 @@ export function useMonthSummary(monthAnchor: Date) {
       const activeDaysCount = new Set(sessions.map((s) => format(new Date(s.startedAt), DAY_KEY_FORMAT))).size;
       const distinctUserBookIds = [...new Set(sessions.map((s) => s.userBookId))];
 
-      const books = await UserBookRepository.listWithDetailsByIds(db, distinctUserBookIds);
+      // POLYTSIA FOUNDATION FINAL POLISH — Calendar Historical Consistency, Gap A (закритий
+      // gap з `POST_V1_6_2_FINAL_AUDIT_REPORT.md`, розділ 7). Раніше тут викликався
+      // `listWithDetailsByIds` (alive-only): `sessions` вище вже включає сесії за м'яко
+      // видаленими книгами (`ReadingSessionRepository.listStartedBetween` фільтрує лише
+      // власний `deleted_at`), але для сесії видаленої книги `bookById.get(...)` повертав
+      // `undefined` → `workId` не резолвився → саме ця сесія відкидалась із
+      // `sessionsForTopBooks` нижче. Наслідок: "Найчастіше цього місяця" тихо забувала книгу,
+      // яку користувач прочитав цього місяця, а потім прибрав з бібліотеки — та сама History
+      // Preservation Principle, що вже застосована в `useMonthCalendarData`/`useDaySessions`
+      // (обидві вже викликають `listWithDetailsByIdsIncludingDeleted`), тепер поширена й сюди.
+      // `totalMinutes`/`totalPages`/`activeDaysCount`/`distinctBooksCount` уже й ДО цього фіксу
+      // рахувались напряму з `sessions` (не через `bookById`), тож на них цей геп не впливав —
+      // єдине, що змінює цей рядок, це `topBooks` нижче.
+      const books = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, distinctUserBookIds);
       const bookById = new Map(books.map((ub) => [ub.id, ub]));
 
       const sessionsForTopBooks = sessions
@@ -337,8 +365,13 @@ export function useDaySessions(date: Date | undefined) {
 
       const ranked = rankBooksForDay(sessions);
 
+      // POLYTSIA POST-V1.6.2 FOUNDATION CLOSURE — History Preservation Principle (той самий фікс,
+      // що й `useMonthCalendarData` вище): `IncludingDeleted`, щоб день не "порожнів" (і не
+      // розходився з місячною сіткою для тієї ж дати) лише тому, що книгу згодом прибрали з
+      // бібліотеки. `attachDetailsBatch` усередині все одно gracefully пропускає книгу, чиї
+      // Edition/Work самі не знайдені.
       const userBookIds = [...new Set([...sessions.map((s) => s.userBookId), ...runs.map((r) => r.userBookId)])];
-      const userBooks = await UserBookRepository.listWithDetailsByIds(db, userBookIds);
+      const userBooks = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, userBookIds);
       const userBookById = new Map(userBooks.map((ub) => [ub.id, ub]));
 
       const books: DayBookSummary[] = ranked

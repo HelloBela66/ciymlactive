@@ -1,4 +1,5 @@
 import { createLogger } from '@/lib/logger';
+import { classifyHttpStatus, type ProviderSearchOutcome } from '@/lib/providerSearchError';
 
 const log = createLogger('remote/googleBooksProxy');
 
@@ -45,13 +46,25 @@ export interface GoogleBooksProxyBook {
  * `isbndbProxyClient.ts`. */
 const CLIENT_TIMEOUT_MS = 10_000;
 
-async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal): Promise<T | null> {
+/** Результат одного HTTP-виклику проксі — `null`, коли проксі взагалі не налаштовано (виклик
+ * навіть не стався, це не помилка — `GoogleBooksProvider` сам вирішує, чи падати на прямий
+ * анонімний шлях); `{ ok: true, data }` на 2xx з валідним JSON; `{ ok: false, kind }` на будь-
+ * яку іншу — саме ЦЕ розрізнення (FOUNDATION FINAL POLISH) раніше повністю губилось: усі три
+ * випадки колись зводились до `T | null`, і "не налаштовано"/"провайдер упав"/"нічого не
+ * знайдено" були невідрізненні одне від одного на рівні викликача. */
+type ProxyCallResult<T> = { ok: true; data: T } | { ok: false; kind: import('@/lib/providerSearchError').ProviderSearchErrorKind };
+
+async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal): Promise<ProxyCallResult<T> | null> {
   if (!isGoogleBooksProxyConfigured()) return null;
 
   const controller = new AbortController();
   const onExternalAbort = () => controller.abort();
   signal?.addEventListener('abort', onExternalAbort);
-  const timeoutId = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, CLIENT_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/google-books-proxy`, {
@@ -67,16 +80,28 @@ async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal)
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '');
       log.warn('Google Books proxy: не-OK відповідь', { status: response.status, body: bodyText.slice(0, 300) });
-      return null;
+      return { ok: false, kind: classifyHttpStatus(response.status) };
     }
-    return (await response.json()) as T;
+    try {
+      const data = (await response.json()) as T;
+      return { ok: true, data };
+    } catch (parseError) {
+      log.warn('Google Books proxy: не вдалось розпарсити відповідь', {
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+      });
+      return { ok: false, kind: 'invalid_response' };
+    }
   } catch (error) {
     // Той самий "лише зовнішній signal пробиває далі" контракт, що й `isbndbProxyClient.ts`
     // (докладне пояснення — коментар там-таки, включно з iOS/Expo Go `FetchRequestCanceledException`
-    // нюансом).
+    // нюансом). `timedOut` розрізняє внутрішній client-side timeout від справжнього мережевого
+    // збою — обидва йдуть через той самий `controller.abort()`, тож інакше нерозрізнювані.
     if (signal?.aborted) throw error;
-    log.warn('Google Books proxy: помилка запиту', { error: error instanceof Error ? error.message : String(error) });
-    return null;
+    log.warn('Google Books proxy: помилка запиту', {
+      error: error instanceof Error ? error.message : String(error),
+      timedOut,
+    });
+    return { ok: false, kind: timedOut ? 'timeout' : 'network' };
   } finally {
     clearTimeout(timeoutId);
     signal?.removeEventListener('abort', onExternalAbort);
@@ -84,18 +109,31 @@ async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal)
 }
 
 export const GoogleBooksProxyClient = {
-  async search(query: string, langRestrict: string | undefined, signal?: AbortSignal): Promise<GoogleBooksProxyBook[]> {
+  /** FOUNDATION FINAL POLISH — повертає `ProviderSearchOutcome`, а не голий масив:
+   * "не налаштовано" (`callProxy` → `null`) трактується як `success: []` (виклик узагалі не
+   * стався — не помилка джерела, `GoogleBooksProvider` викликає це лише коли проксі
+   * налаштовано, тож це чисто захисний фолбек), справжня HTTP/мережева помилка — як `error`. */
+  async search(
+    query: string,
+    langRestrict: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<ProviderSearchOutcome<GoogleBooksProxyBook>> {
     const result = await callProxy<{ books: GoogleBooksProxyBook[] }>({ op: 'search', query, langRestrict }, signal);
-    return result?.books ?? [];
+    if (result === null) return { status: 'success', items: [] };
+    if (!result.ok) return { status: 'error', error: { kind: result.kind } };
+    return { status: 'success', items: result.data.books ?? [] };
   },
 
+  /** `lookupByIsbn`/`getEdition` — НЕ зачеплені цим фіксом (поза межами ТЗ FOUNDATION FINAL
+   * POLISH, який стосується лише вільнотекстового пошуку на екрані Search): той самий
+   * "success ⇄ null" контракт, що й до цієї фази. */
   async lookupByIsbn(isbn: string, signal?: AbortSignal): Promise<GoogleBooksProxyBook | null> {
     const result = await callProxy<{ book: GoogleBooksProxyBook | null }>({ op: 'lookup', isbn }, signal);
-    return result?.book ?? null;
+    return result?.ok ? (result.data.book ?? null) : null;
   },
 
   async getEdition(externalId: string, signal?: AbortSignal): Promise<GoogleBooksProxyBook | null> {
     const result = await callProxy<{ book: GoogleBooksProxyBook | null }>({ op: 'get_edition', externalId }, signal);
-    return result?.book ?? null;
+    return result?.ok ? (result.data.book ?? null) : null;
   },
 };

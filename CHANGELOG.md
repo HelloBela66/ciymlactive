@@ -1,5 +1,129 @@
 # Changelog
 
+## FOUNDATION FINAL POLISH — Calendar Historical Consistency + Search Provider Error UX + Regression Coverage
+
+**Дата:** 2026-09-15
+
+Короткий фінальний polish-pass після V1.6.2 і пост-V1.6.2 аудиту
+(`docs/POST_V1_6_2_FINAL_AUDIT_REPORT.md`, розділ 7/21) — рівно три речі, без нових фіч, без
+редизайну, без нової архітектури: закриття двох знайдених аудитом Calendar-гепів історичної
+узгодженості, прозорість помилок пошукових провайдерів, і крос-узгоджена регресійна перевірка.
+
+**Calendar Historical Consistency (History Preservation Principle, поширений на 2 нових шляхи):**
+- **Gap A** — `useMonthSummary` ("Найчастіше цього місяця") резолвив книги сесій через
+  `UserBookRepository.listWithDetailsByIds` (alive-only): сесія книги, прочитаної цього місяця й
+  ЗГОДОМ м'яко видаленої з бібліотеки, тихо випадала з ранжування (хвилини/сторінки/активні дні
+  на неї НЕ впливали — рахувались напряму з `sessions` — впливало лише на `topBooks`). Виправлено
+  на `listWithDetailsByIdsIncludingDeleted` (той самий метод, що й `useMonthCalendarData`/
+  `useDaySessions` з попередньої фази закриття фундаменту) — жодного нового репозиторного методу.
+- **Gap B** — `ReadingRunRepository.listStartedOrFinishedBetween` (єдине джерело tiny start/
+  finish-позначок місяця-сітки й таймлайну "Початок і завершення" Day Details) мав `AND
+  ub.deleted_at IS NULL` у `JOIN user_book` — старт/фініш книги зникав з Календаря, щойно книгу
+  прибирали з бібліотеки. Умову прибрано. `listFinishedBetween` (окремий метод, використовується
+  ЛИШЕ Reading Seasons, #167) СВІДОМО НЕ зачеплений — той самий gap там лишається поза межами
+  цього пасу (Seasons — заморожений продуктовий скоуп, не Calendar).
+- Обидва фікси — точкові зміни в межах одного виклику/однієї SQL-умови, без CASCADE, без нової
+  моделі даних, без зміни ReadingRun-архітектури. Global Library semantics (`listAll`/
+  `listByStatus`/`listByIds`) — БЕЗ ЗМІН, і далі alive-only: soft-deleted книга НІКОЛИ не
+  повертається в Бібліотеку, лише в історичних Calendar-проекціях.
+
+**Search Provider Error Transparency:**
+- Новий `src/lib/providerSearchError.ts` — дискримінована відповідь провайдера
+  `ProviderSearchOutcome<T> = { status: 'success'; items: T[] } | { status: 'error'; error:
+  ProviderSearchError }`, `ProviderSearchErrorKind = 'network' | 'timeout' | 'rate_limited' |
+  'server' | 'invalid_response' | 'unknown'`, `classifyHttpStatus` (429→rate_limited, 5xx→server),
+  `describeProviderSearchError` (не технічний, книжковий текст, без HTTP-кодів/stack trace).
+  Свідомо НЕ зачіпає own/shared catalog (`SharedCatalogProvider`/`CuratedCatalogProvider`) —
+  власна, довірена Supabase-інфраструктура, поза межами "зовнішній провайдер".
+- `googleBooksProxyClient.ts`/`isbndbProxyClient.ts` — `callProxy` більше не ковтає HTTP/мережеві/
+  timeout/parse-помилки в тиху `null`. Ключ Google Books/ISBNdb і далі ніколи не покидає сервер
+  (Edge Function) — цей пас лише виправляє класифікацію ВЖЕ отриманої відповіді проксі, жодних змін
+  у самому серверному коді `supabase/functions/`.
+- `GoogleBooksProvider`/`ISBNdbProvider`/`SharedCatalogProvider`/`CuratedCatalogProvider`/
+  `ManualBookProvider` — усі `searchBooks` тепер повертають `ProviderSearchOutcome`, не голий
+  масив; own/shared catalog і ручний провайдер — чиста обгортка форми, без зміни поведінки.
+- **Знайдена й виправлена регресія в межах цього ж пасу:** `GoogleBooksProvider.lookupByISBN`'s
+  прямий (без проксі) шлях індексував `fetchVolumesDirect(...)[0]`, так, ніби той повертав голий
+  масив — після переходу на `ProviderSearchOutcome` це завжди давало `undefined`, тобто ISBN-лукап
+  без налаштованого проксі мовчки ЗАВЖДИ повертав `null`. Виправлено (розпаковка `result.items[0]`
+  лише для `status: 'success'`), покрито регресійними тестами.
+- `useProviderSearch.ts` — новий `ProviderSearchData = { items, error }`, `select` розкладає
+  `ProviderSearchOutcome` у цю форму; кеш React Query лишається "сирим" (весь `outcome`), фільтр
+  `filterUkrainianBooks` застосовано лише до `items` успішної відповіді.
+- `app/(tabs)/search.tsx` — нова `ProviderErrorNotice` (інлайн, книжковий тон, з кнопкою "Спробувати
+  ще раз" там, де ретрай безпечний); `ProviderResultsSection` більше не ховає секцію мовчки при
+  помилці джерела (раніше — та сама поведінка, що й для "нічого не знайдено"), показує помилку
+  окремо, поки решта секцій рендеряться як завжди. Якщо УСІ спробувані джерела провалились цього
+  разу — НЕ "Нічого не знайдено" (пошук фактично не відбувся), а `QueryErrorState` з одним retry на
+  всі джерела одразу. Offline-стан (`OfflineNotice`) лишається окремим, не плутається з провалом
+  провайдера. Дедуплікація/gate ISBNdb ("осіло") — поведінково БЕЗ ЗМІН, лише винесені в
+  `src/lib/searchProviderCombine.ts` (`isbnKey`/`dedupeAgainst`/`withSeen`/`isProviderSettled`/
+  `haveAllProvidersFailed`) заради прямого юніт-тестування чистої логіки комбінування кількох
+  провайдерів (те саме, слово в слово, що раніше жило лише всередині компонента).
+- `src/data/providers/index.ts` — довиправлено реекспорт: `ProviderSearchOutcome`/
+  `ProviderSearchError`/`ProviderSearchErrorKind` раніше НЕ реекспортувались із публічного барела,
+  хоч `search.tsx`/`useProviderSearch.ts` вже імпортували `ProviderSearchError` саме звідти —
+  виявлено й виправлено в межах цього ж пасу.
+
+**Тести (нові файли):**
+- `src/data/repositories/calendarHistoricalConsistency.test.ts` — крос-узгодженість Calendar-
+  проекцій (сесії, `listWithDetailsByIdsIncludingDeleted`, `rankBooksForDay`,
+  `listStartedOrFinishedBetween`, `rankTopBooksOfMonth`) для ОДНОГО історичного набору активності,
+  до/після soft-delete, включно з "жива + історична книга в тому самому місяці" і
+  "перечитування, потім видалення" сценаріями; контрольно підтверджує, що Library-запити
+  (`listAll`/`listByStatus`/`listByIds`) і далі книгу НЕ бачать.
+- `src/data/repositories/ReadingRunRepository.test.ts` — існуючий тест, що раніше стверджував
+  СТАРУ (баговану) поведінку `listStartedOrFinishedBetween`, переписаний на нову; додано контрольну
+  пару "фізичне видалення (CASCADE)" на противагу "м'яке видалення (History Preservation)".
+- `src/lib/providerSearchError.test.ts`, `src/lib/searchProviderCombine.test.ts` — чиста логіка
+  класифікації/комбінування (усі kind, дедуплікація, gate "осіло", "усі провалились" проти
+  "усі порожні, але не провал").
+- `src/data/remote/googleBooksProxyClient.test.ts`, `src/data/remote/isbndbProxyClient.test.ts` —
+  success+книги, success+порожньо, 429, 5xx, мережева помилка, client-side timeout, malformed
+  JSON, "проксі не налаштовано", і підтвердження, що секрети (анонімний Supabase-ключ, платний
+  ISBNdb-ключ) ніколи не потрапляють у серіалізований клієнтський результат.
+- `src/data/providers/GoogleBooksProvider.test.ts` — обидва шляхи (проксі/прямий), і окремий
+  регресійний блок на щойно знайдений і виправлений `lookupByISBN`-баг вище.
+
+**Owner action:** новий `docs/OWNER_MANUAL_TEST_LOG.md` розділ (PENDING OWNER CHECK) — Calendar
+A-G (читана й пізніше видалена з бібліотеки книга лишається в місяці-сітці/Day Details/
+"Найчастіше цього місяця"/start-finish-мітках, Бібліотека її коректно не бачить) і Search H-O
+(звичайний пошук, справжній порожній результат, offline, один провайдер падає-інший встигає,
+retry, повний тимчасовий збій усіх джерел, dark mode, великий текст) — докладніше
+`docs/FOUNDATION_FINAL_POLISH_REPORT.md`.
+
+**Доповнення (той самий день, 2026-09-15) — реальний прогін quality gates власником продукту:**
+власник виконав `npx tsc --noEmit`, `npx eslint . --max-warnings=0` і `npm test` на реальній
+машині (`C:\polytsya-m11`) і надіслав повний термінальний вивід — перше фактичне виконання цих
+трьох команд для роботи цього пасу. `npm test` пройшов повністю зелений з першого разу (88
+suites / 1214 tests, 0 falls). `npx tsc --noEmit` і `npx eslint . --max-warnings=0` натомість
+знайшли реальні проблеми, усі виправлені в цій же сесії й повторно задеплойовані (byte-verified):
+- **Ще дві регресії** (на додачу до двох, задокументованих вище, знайдених ДО деплою власним
+  ручним рев'ю) — обидва виробничі виклики `provider.searchBooks(...)`, які існували ДО цього
+  пасу й були зламані зміною контракту повернення на `ProviderSearchOutcome`, але не потрапили в
+  ручне рев'ю під час початкової реалізації: `app/isbn-scan.tsx`'s `findByIsbnWithFallback`
+  (фолбек-пошук за ISBN при ручному скануванні) і
+  `src/features/tomorrow/useTomorrowRecommendation.ts` (фолбек-каскад "Що почитати завтра?" на
+  Google Books, коли кураторська добірка не дала кандидата для пари жанр+мета). В обох випадках
+  фікс — той самий graceful-degradation принцип, що діяв і раніше (провалений запит просто не
+  додає кандидатів, не кидає виняток і не показує помилку користувачу через тимчасовий збій
+  джерела).
+- Дві `noUncheckedIndexedAccess`-помилки TypeScript у власному новому тесті
+  (`calendarHistoricalConsistency.test.ts`) — виправлено опціональним ланцюжком (`?.`).
+- Шість ESLint-попереджень (`@typescript-eslint/no-require-imports` + 3 "unused eslint-disable
+  directive" через неправильну назву правила в коментарі) у трьох нових тестових файлах
+  (`GoogleBooksProvider.test.ts`, `googleBooksProxyClient.test.ts`, `isbndbProxyClient.test.ts`) —
+  виправлено переходом з `jest.resetModules() + require()` на `jest.resetModules() + await
+  import()`.
+
+**Друге доповнення (той самий день, 2026-09-15) — повторний прогін підтвердив 0/0:** власник
+запустив `npx tsc --noEmit` і `npx eslint . --max-warnings=0` ще раз після деплою всіх шести
+фіксів вище. Обидві команди завершились без жодного рядка виводу — **0 помилок компілятора, 0
+ESLint-попереджень**, підтверджено реальним другим прогоном, не лише ручним вичитуванням фіксу.
+Усі три quality gates, доступні поза CI (`jest`/`tsc`/`eslint`), тепер зелені й підтверджені
+фактичним виконанням на машині власника. Деталі — `docs/FOUNDATION_FINAL_POLISH_REPORT.md`,
+розділ 12 і 17 (verdict оновлено на **FOUNDATION CLOSED**).
+
 ## КАЛЕНДАР — візуальна композиція та redesign дня читання
 
 **Дата:** 2026-09-14

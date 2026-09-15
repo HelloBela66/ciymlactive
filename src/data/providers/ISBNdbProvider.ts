@@ -41,9 +41,13 @@ export const ISBNdbProvider: BookMetadataProvider = {
   displayName: 'ISBNdb',
   isEnabled: isIsbndbProxyConfigured(),
 
+  // FOUNDATION FINAL POLISH — `ProviderSearchOutcome`, не голий масив: `IsbndbProxyClient.search`
+  // тепер розрізняє "нічого не знайдено" від "проксі/мережа не відповіли" (докладніше —
+  // `src/lib/providerSearchError.ts`, `isbndbProxyClient.ts`).
   async searchBooks(query, signal) {
-    const books = await IsbndbProxyClient.search(query, signal);
-    return books.map(toRawBook);
+    const result = await IsbndbProxyClient.search(query, signal);
+    if (result.status === 'error') return result;
+    return { status: 'success', items: result.items.map(toRawBook) };
   },
 
   async lookupByISBN(isbn) {

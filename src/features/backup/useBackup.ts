@@ -109,6 +109,23 @@ export interface RestoreBackupResult {
    * впала (докладніше — коментар над викликом нижче); ніколи не `null` через "нема проблем" —
    * для цього є `report.hasIssues === false`. */
   integrityReport: DataIntegrityReport | null;
+  /** RESTORE SUCCESS / SEMANTIC-REPAIR INVARIANT FIX (POLYTSIA POST-V1.6.2 FOUNDATION CLOSURE).
+   *
+   * `true`, лише якщо `backfillAllLegacyReadingRunLinks` (ОБОВ'ЯЗКОВЕ відновлення зв'язків
+   * ReadingRun, не best-effort крок — на відміну від нагадувань капсул і Data Doctor нижче)
+   * дійсно впав. ДО цього фіксу такий збій лише логувався (`log.error`) і мовчки ковтався —
+   * `app/backup.tsx` показував звичайне "Дані відновлено" незалежно від того, чи справді
+   * відбулось обов'язкове відновлення семантики перечитувань. Це порушувало інваріант: "success"
+   * не повинен показуватись, поки обов'язковий семантичний ремонт не завершився. `restoreAll`
+   * (сирі дані бібліотеки) на цей момент УЖЕ закомічено — див. коментар "ЧОМУ ЦЕ НЕ ВСЕРЕДИНІ
+   * restoreAll" у `src/data/db/legacyRunBackfill.ts`, тож при `true` тут це явно НЕ "нічого не
+   * змінилось, спробуй ще раз" (як для звичайного `onError` цієї мутації) — `app/backup.tsx`
+   * показує окреме, чесне повідомлення. Повторний виклик `backfillAllLegacyReadingRunLinks`
+   * (напр. повторний Restore того самого файлу) — завжди безпечний no-op на вже узгодженій
+   * частині (докладніше й підтверджено тестом — `legacyRunBackfill.test.ts`, "повторний виклик
+   * ... симуляція retry після збою"), тож саме "спробуй ще раз" — коректна й безпечна порада
+   * користувачу. */
+  backfillFailed: boolean;
 }
 
 /** Сам запис — replace-all в одній транзакції (`BackupRepository.restoreAll`) — якщо щось
@@ -136,11 +153,26 @@ export function useRestoreBackup() {
       // спрацює. `backfillAllLegacyReadingRunLinks` — той самий backfill-алгоритм цих міграцій,
       // винесений у спільний модуль (`docs/READING_RUN.md` §Restore) — заповнює прогалину
       // одразу після restore; для СВІЖОГО бекапу (де `reading_run` вже заповнена) — безпечний
-      // no-op (докладніше — коментар над самою функцією). Той самий "збій допоміжного кроку не
-      // позначає весь restore невдалим" підхід, що й нижче для нагадувань капсул.
+      // no-op (докладніше — коментар над самою функцією).
+      //
+      // RESTORE SUCCESS / SEMANTIC-REPAIR INVARIANT FIX (POLYTSIA POST-V1.6.2 FOUNDATION
+      // CLOSURE) — на відміну від нагадувань капсул і Data Doctor нижче (справді best-effort:
+      // жоден з них не є ЧАСТИНОЮ значення "дані відновлені коректно"), цей крок — ОБОВ'ЯЗКОВИЙ
+      // семантичний ремонт: без нього сесії/спогади/капсули/рейтинги/нотатки "До"/DNF-знімки
+      // старого файлу лишаються без reading_run_id, а це відразу і масово розходиться з
+      // ReadingRun-архітектурою (Trends, Book Memory, порівняння перечитувань — усе очікує
+      // зв'язок). ДО цього фіксу збій тут так само тихо ковтався try/catch'ем нижче — і
+      // `app/backup.tsx` показував звичайне "Дані відновлено" незалежно від результату. Тепер
+      // збій НЕ ковтається мовчки — фіксується (`backfillFailed`) і йде в результат мутації, щоб
+      // UI показав чесне, окреме повідомлення (НЕ generic "не вдалося відновити" — `restoreAll`
+      // уже закомічено, бібліотека вже змінена, тож той текст був би неправдою). Повторний
+      // виклик після збою — безпечний no-op (докладніше й підтверджено тестом —
+      // `legacyRunBackfill.test.ts`).
+      let backfillFailed = false;
       try {
         await backfillAllLegacyReadingRunLinks(db);
       } catch (error) {
+        backfillFailed = true;
         log.error('Не вдалося доповнити легасі-прочитання (ReadingRun) після відновлення', {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -177,7 +209,7 @@ export function useRestoreBackup() {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      return { integrityReport };
+      return { integrityReport, backfillFailed };
     },
     onSuccess: () => {
       queryClient.invalidateQueries();

@@ -1,4 +1,5 @@
 import { createLogger } from '@/lib/logger';
+import { classifyHttpStatus, type ProviderSearchOutcome } from '@/lib/providerSearchError';
 
 const log = createLogger('remote/isbndbProxy');
 
@@ -51,13 +52,24 @@ export interface IsbndbProxyBook {
  * "timeout"-відповідь замість того, щоб дати їй дійти. */
 const CLIENT_TIMEOUT_MS = 10_000;
 
-async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal): Promise<T | null> {
+/** Той самий розширений контракт, що й `googleBooksProxyClient.ts` (FOUNDATION FINAL POLISH,
+ * `src/lib/providerSearchError.ts`) — `null` лише коли проксі НЕ налаштовано (виклик навіть не
+ * стався; для ISBNdb це означає провайдер просто вимкнений — `ISBNdbProvider.isEnabled`, тож
+ * `search` нижче сюди фактично ніколи не потрапляє з `null`), `{ ok: false, kind }` — реальна
+ * HTTP/мережева помилка. */
+type ProxyCallResult<T> = { ok: true; data: T } | { ok: false; kind: import('@/lib/providerSearchError').ProviderSearchErrorKind };
+
+async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal): Promise<ProxyCallResult<T> | null> {
   if (!isIsbndbProxyConfigured()) return null;
 
   const controller = new AbortController();
   const onExternalAbort = () => controller.abort();
   signal?.addEventListener('abort', onExternalAbort);
-  const timeoutId = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, CLIENT_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/isbndb-proxy`, {
@@ -73,23 +85,37 @@ async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal)
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '');
       log.warn('ISBNdb proxy: не-OK відповідь', { status: response.status, body: bodyText.slice(0, 300) });
-      return null;
+      return { ok: false, kind: classifyHttpStatus(response.status) };
     }
-    return (await response.json()) as T;
+    try {
+      const data = (await response.json()) as T;
+      return { ok: true, data };
+    } catch (parseError) {
+      log.warn('ISBNdb proxy: не вдалось розпарсити відповідь', {
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+      });
+      return { ok: false, kind: 'invalid_response' };
+    }
   } catch (error) {
     // Скасування зовнішнім `signal` (React Query — новий символ під час набору тексту,
     // `BookMetadataProvider.searchBooks`) має пробитись до виклику, той самий контракт, що й
-    // в інших провайдерів. Внутрішній таймаут-abort — звичайна graceful-деградація до `null`.
+    // в інших провайдерів. Внутрішній таймаут-abort — тепер класифікується як `kind: 'timeout'`
+    // (FOUNDATION FINAL POLISH), а не тиха деградація до `null`.
     // Перевіряємо ЛИШЕ `signal?.aborted` (зовнішній сигнал), без `error.name === 'AbortError'`:
     // на iOS/Expo Go нативний fetch кидає власний `FetchRequestCanceledException` без цього
     // імені (реальна знахідка з логів пристрою) — стара AND-перевірка з іменем ніколи не
     // спрацьовувала там. НЕ використовуємо спільний `isFetchAborted` тут навмисно: обидва
     // abort'и (зовнішній і внутрішній таймаут) йдуть через той самий `controller`, тож OR з
     // `error.name === 'AbortError'` на платформах, де це ім'я надійне, хибно трактував би
-    // внутрішній таймаут як зовнішнє скасування — лише `signal?.aborted` коректно розрізняє.
+    // внутрішній таймаут як зовнішнє скасування — лише `signal?.aborted` коректно розрізняє;
+    // `timedOut` (встановлений усередині `setTimeout`) розрізняє внутрішній timeout від
+    // справжнього мережевого збою.
     if (signal?.aborted) throw error;
-    log.warn('ISBNdb proxy: помилка запиту', { error: error instanceof Error ? error.message : String(error) });
-    return null;
+    log.warn('ISBNdb proxy: помилка запиту', {
+      error: error instanceof Error ? error.message : String(error),
+      timedOut,
+    });
+    return { ok: false, kind: timedOut ? 'timeout' : 'network' };
   } finally {
     clearTimeout(timeoutId);
     signal?.removeEventListener('abort', onExternalAbort);
@@ -97,13 +123,19 @@ async function callProxy<T>(body: Record<string, unknown>, signal?: AbortSignal)
 }
 
 export const IsbndbProxyClient = {
-  async search(query: string, signal?: AbortSignal): Promise<IsbndbProxyBook[]> {
+  /** FOUNDATION FINAL POLISH — `ProviderSearchOutcome`, не голий масив (докладніше —
+   * коментар над однойменним методом `googleBooksProxyClient.ts`). */
+  async search(query: string, signal?: AbortSignal): Promise<ProviderSearchOutcome<IsbndbProxyBook>> {
     const result = await callProxy<{ books: IsbndbProxyBook[] }>({ op: 'search', query }, signal);
-    return result?.books ?? [];
+    if (result === null) return { status: 'success', items: [] };
+    if (!result.ok) return { status: 'error', error: { kind: result.kind } };
+    return { status: 'success', items: result.data.books ?? [] };
   },
 
+  /** Поза межами цього фіксу (ISBN-лукап, не вільнотекстовий пошук) — той самий "success ⇄
+   * null" контракт, що й раніше. */
   async lookupByIsbn(isbn: string, signal?: AbortSignal): Promise<IsbndbProxyBook | null> {
     const result = await callProxy<{ book: IsbndbProxyBook | null }>({ op: 'lookup', isbn }, signal);
-    return result?.book ?? null;
+    return result?.ok ? (result.data.book ?? null) : null;
   },
 };

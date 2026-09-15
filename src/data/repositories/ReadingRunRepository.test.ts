@@ -444,7 +444,13 @@ describe('ReadingRunRepository.listStartedOrFinishedBetween', () => {
     expect(result).toEqual([]);
   });
 
-  it('run книги, м\'яко видаленої з бібліотеки (user_book.deleted_at), не потрапляє в результат', async () => {
+  // POLYTSIA FOUNDATION FINAL POLISH — Calendar Historical Consistency, Gap B
+  // (`POST_V1_6_2_FINAL_AUDIT_REPORT.md`, розділ 7): ДО цього фіксу тест тут стверджував
+  // протилежне ("не потрапляє в результат") — саме ЦЕ й було задокументованим геп-ом.
+  // Видалення книги з бібліотеки не повинно стирати легітимну історичну подію
+  // старту/фінішу читання (той самий History Preservation Principle, що вже діє для
+  // сесій/обкладинок — `UserBookRepository.listWithDetailsByIdsIncludingDeleted`).
+  it("run книги, м'яко видаленої з бібліотеки (user_book.deleted_at), і ДАЛІ потрапляє в результат (History Preservation Principle)", async () => {
     const db = await openMigratedTestDb();
     await seedUserBook(db, 'ub-range5');
     const run = await ReadingRunRepository.start(db, {
@@ -452,6 +458,28 @@ describe('ReadingRunRepository.listStartedOrFinishedBetween', () => {
       startedAt: '2026-03-15T12:00:00.000Z',
     });
     await db.runAsync(`UPDATE user_book SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), 'ub-range5']);
+
+    const result = await ReadingRunRepository.listStartedOrFinishedBetween(
+      db,
+      '2026-03-15T00:00:00.000Z',
+      '2026-03-16T00:00:00.000Z',
+    );
+
+    expect(result.find((r) => r.id === run.id)?.id).toBe(run.id);
+  });
+
+  // Контрольна пара до теста вище — фізично ВИДАЛЕНИЙ (не soft-deleted) user_book все одно не
+  // повинен нічого зламати: `JOIN user_book` лишається (без `deleted_at`-умови), тож run без
+  // існуючого user_book-рядка просто не приєднається — той самий graceful-фолбек, що й
+  // `attachDetailsBatch`, а не виняток.
+  it("run книги, ФІЗИЧНО видаленої (не soft-delete) — коректно НЕ потрапляє в результат (ON DELETE CASCADE забирає й сам run)", async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-range5b');
+    const run = await ReadingRunRepository.start(db, {
+      userBookId: 'ub-range5b',
+      startedAt: '2026-03-15T12:00:00.000Z',
+    });
+    await db.runAsync(`DELETE FROM user_book WHERE id = ?`, ['ub-range5b']);
 
     const result = await ReadingRunRepository.listStartedOrFinishedBetween(
       db,

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createLogger } from '@/lib/logger';
 import { isFetchAborted } from '@/lib/isFetchAborted';
 import { GoogleBooksProxyClient, isGoogleBooksProxyConfigured, type GoogleBooksProxyBook } from '@/data/remote/googleBooksProxyClient';
+import { classifyHttpStatus, type ProviderSearchOutcome } from '@/lib/providerSearchError';
 import type { NormalizedBookDraft } from '@/types/bookDraft';
 import type { BookMetadataProvider, RawProviderBook } from './BookMetadataProvider';
 
@@ -96,42 +97,55 @@ function proxyBookToRaw(book: GoogleBooksProxyBook): RawProviderBook {
   };
 }
 
-/** Один HTTP-запит з м'яким degradation: будь-яка помилка мережі/парсингу — порожній
- * результат ([] чи null), НІКОЛИ не кидає далі в UI (docs/BOOK_PROVIDERS.md, "Технічні
- * ризики": rate limit чи зміна контракту не повинні ламати пошук — лишається manual entry).
- * Виняток — скасування через `signal` (React Query перервало застарілий запит під час
- * набору тексту): це навмисне скасування, а не помилка, тож прокидаємо його далі, щоб
- * React Query позначив запит "cancelled", а не "error" (і не залогувало його як помилку).
+/** Один HTTP-запит з м'яким degradation: будь-яка помилка мережі/парсингу класифікується
+ * (FOUNDATION FINAL POLISH, `src/lib/providerSearchError.ts`), АЛЕ ніколи не кидає далі в UI
+ * (docs/BOOK_PROVIDERS.md, "Технічні ризики": rate limit чи зміна контракту не повинні ламати
+ * пошук — лишається manual entry) — розрізняється лише те, ЩО саме сталось ("нічого не
+ * знайдено" проти "джерело не відповіло"), а не сам факт "показати щось користувачу замість
+ * падіння застосунку". Виняток — скасування через `signal` (React Query перервало застарілий
+ * запит під час набору тексту): це навмисне скасування, а не помилка, тож прокидаємо його далі,
+ * щоб React Query позначив запит "cancelled", а не "error" (і не залогувало його як помилку).
  * Детектор скасування — `isFetchAborted` (`src/lib/isFetchAborted.ts`), НЕ голий
  * `error.name === 'AbortError'`: на iOS/Expo Go нативний fetch кидає власний
  * `FetchRequestCanceledException` без цього імені — реальна знахідка з логів пристрою.
  *
  * ФАЗА 4 V1.6.1 — БЕЗ жодного ключа (докладніше — коментар над файлом): цей прямий шлях тепер
- * лише fallback, коли проксі не налаштовано, завжди анонімний.
+ * лише fallback, коли проксі не налаштовано, завжди анонімний. Цей шлях НЕ має власного
+ * client-side timeout (на відміну від `googleBooksProxyClient.ts`/`isbndbProxyClient.ts`) — той
+ * самий обсяг, що й до цієї фази, тож `kind: 'timeout'` тут просто ніколи не з'являється, лише
+ * `network`/`rate_limited`/`server`/`invalid_response`/`unknown`.
  */
 async function fetchVolumesDirect(
   query: string,
   signal?: AbortSignal,
   langRestrict?: string,
-): Promise<z.infer<typeof VolumeSchema>[]> {
+): Promise<ProviderSearchOutcome<z.infer<typeof VolumeSchema>>> {
   try {
     const langParam = langRestrict ? `&langRestrict=${encodeURIComponent(langRestrict)}` : '';
     const response = await fetch(`${API_BASE}?q=${encodeURIComponent(query)}&maxResults=20${langParam}`, { signal });
     if (!response.ok) {
       log.warn('Google Books відповів не-OK статусом', { status: response.status });
-      return [];
+      return { status: 'error', error: { kind: classifyHttpStatus(response.status) } };
     }
-    const json: unknown = await response.json();
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch (parseError) {
+      log.warn('Google Books: не вдалось розпарсити відповідь', {
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+      });
+      return { status: 'error', error: { kind: 'invalid_response' } };
+    }
     const parsed = VolumesResponseSchema.safeParse(json);
     if (!parsed.success) {
       log.warn('Google Books: неочікувана форма відповіді');
-      return [];
+      return { status: 'error', error: { kind: 'invalid_response' } };
     }
-    return parsed.data.items ?? [];
+    return { status: 'success', items: parsed.data.items ?? [] };
   } catch (error) {
     if (isFetchAborted(error, signal)) throw error;
     log.warn('Google Books: помилка запиту', { error: error instanceof Error ? error.message : String(error) });
-    return [];
+    return { status: 'error', error: { kind: 'network' } };
   }
 }
 
@@ -148,12 +162,18 @@ export const GoogleBooksProvider: BookMetadataProvider = {
     // (`filterUkrainianBooks` у `useProviderSearch`) лишається як страхувальний другий шар,
     // бо мовна мітка від самого джерела подекуди буває недостовірною (реальний приклад з
     // ISBNdb, який спричинив цю зміну).
+    //
+    // FOUNDATION FINAL POLISH — обидва шляхи (проксі й прямий) тепер повертають той самий
+    // `ProviderSearchOutcome`: помилка одного конкретного виклику (429/5xx/timeout/мережа/
+    // malformed) прокидається як `status: 'error'`, а не тихо стає `status: 'success', items: []`.
     if (isGoogleBooksProxyConfigured()) {
-      const books = await GoogleBooksProxyClient.search(query, 'uk', signal);
-      return books.map(proxyBookToRaw);
+      const result = await GoogleBooksProxyClient.search(query, 'uk', signal);
+      if (result.status === 'error') return result;
+      return { status: 'success', items: result.items.map(proxyBookToRaw) };
     }
-    const volumes = await fetchVolumesDirect(query, signal, 'uk');
-    return volumes.map(toRawBook);
+    const result = await fetchVolumesDirect(query, signal, 'uk');
+    if (result.status === 'error') return result;
+    return { status: 'success', items: result.items.map(toRawBook) };
   },
 
   async lookupByISBN(isbn) {
@@ -161,8 +181,15 @@ export const GoogleBooksProvider: BookMetadataProvider = {
       const book = await GoogleBooksProxyClient.lookupByIsbn(isbn);
       return book ? proxyBookToRaw(book) : null;
     }
-    const volumes = await fetchVolumesDirect(`isbn:${isbn}`);
-    const first = volumes[0];
+    // POLYTSIA FOUNDATION FINAL POLISH FIX — `fetchVolumesDirect` тепер повертає
+    // `ProviderSearchOutcome<...>` (`{status, items|error}`), а НЕ голий масив: до цього рядка
+    // тут лишався старий `volumes[0]` (індексація об'єкта-outcome замість масиву), тож ISBN-
+    // лукап без налаштованого проксі мовчки завжди повертав `null`, незалежно від того, чи
+    // Google Books реально знайшов видання — виявлено й виправлено в межах цього ж пасу
+    // (регресія, внесена самим фіксом Search Provider Error Transparency, а не поза його межами).
+    const result = await fetchVolumesDirect(`isbn:${isbn}`);
+    if (result.status === 'error') return null;
+    const first = result.items[0];
     return first ? toRawBook(first) : null;
   },
 

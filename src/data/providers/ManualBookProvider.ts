@@ -1,5 +1,5 @@
 import type { NormalizedBookDraft } from '@/types/bookDraft';
-import type { BookMetadataProvider, RawProviderBook } from './BookMetadataProvider';
+import type { BookMetadataProvider, RawProviderBook, ProviderSearchOutcome } from './BookMetadataProvider';
 
 /**
  * Не мережевий "провайдер" (docs/BOOK_PROVIDERS.md) — представляє шлях, яким користувач сам
@@ -14,8 +14,10 @@ export const ManualBookProvider: BookMetadataProvider = {
   displayName: 'Вручну',
   isEnabled: true,
 
-  async searchBooks(): Promise<RawProviderBook[]> {
-    return [];
+  // FOUNDATION FINAL POLISH — той самий контракт, що й решта провайдерів
+  // (`ProviderSearchOutcome`); цей "провайдер" не мережевий, тож завжди `success`.
+  async searchBooks(): Promise<ProviderSearchOutcome<RawProviderBook>> {
+    return { status: 'success', items: [] };
   },
 
   async lookupByISBN(): Promise<RawProviderBook | null> {

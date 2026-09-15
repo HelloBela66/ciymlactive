@@ -197,14 +197,23 @@ export const ReadingRunRepository = {
    * перечитаної книги НЕ відображає дату старту/фінішу кожного окремого проходу — рівно та
    * проблема, якої це нове поле уникає.
    *
-   * `JOIN user_book` з `deleted_at IS NULL` — на відміну від решти методів цього репозиторію
-   * (які самі по собі м'якого видалення книги не знають, бо `reading_run` не несе власного
-   * поняття "жива книга"), тут це свідомо додано: ЦЕ нова функціональність цієї фази, не
-   * редагування наявної агрегації, тож пишеться одразу коректно щодо soft-delete, а не
-   * повторює відомий (окремо задокументований, НЕ виправлений цією фазою — поза її обсягом)
-   * розрив між сіткою місяця й деталями дня для хвилин-підрахунку на основі
-   * `ReadingSessionRepository` (докладніше — `docs/CALENDAR_VISUAL_REDESIGN_REPORT.md`
-   * §"Відомі обмеження").
+   * POLYTSIA FOUNDATION FINAL POLISH — Calendar Historical Consistency, Gap B (закритий gap з
+   * `POST_V1_6_2_FINAL_AUDIT_REPORT.md`, розділ 7): цей метод БІЛЬШЕ НЕ фільтрує `ub.deleted_at
+   * IS NULL`. До цього фіксу тут БУВ `JOIN user_book ... AND ub.deleted_at IS NULL` — той самий
+   * History Preservation Principle, що вже діє для сесій/обкладинок у `useCalendarSessions.ts`
+   * (`listWithDetailsByIdsIncludingDeleted`), тоді ще НЕ застосований до start/finish-подій:
+   * видалення книги з бібліотеки прибирало tiny start/finish індикатор клітинки-дня й пункт
+   * таймлайну Day Details для неї, хоча сама подія (реальний прохід читання) лишалась
+   * легітимною історією. `JOIN user_book` сам лишається (гарантує, що `user_book_id` рядка
+   * реально існує — захист від "сирітського" run, а не перевірка "жива чи ні"), лише умова на
+   * `deleted_at` знята.
+   *
+   * НЕ зачіпає `listFinishedBetween` нижче — той метод обслуговує ЛИШЕ Reading Seasons (#167,
+   * `useReadingSeason.ts`), яку цей polish pass explicitly НЕ чіпає (ТЗ FOUNDATION FINAL
+   * POLISH, п.25 "Seasons — НЕ ЧІПАТИ"); обидва методи раніше мали ідентичний
+   * `ub.deleted_at IS NULL`-guard лише тому, що обидва писались в один момент (Фаза
+   * 19/#167), а не тому, що вони мусять лишатись синхронізованими назавжди — Calendar і
+   * Seasons мають право на різну historical-семантику.
    *
    * Один запит на весь запитаний діапазон (сітка місяця чи один день) — той самий "діапазон
    * замість по одному" підхід, що й `ActivityHistoryRepository.listBetween`.
@@ -213,7 +222,7 @@ export const ReadingRunRepository = {
     const rows = await db.getAllAsync<ReadingRunRow>(
       `SELECT rr.* FROM reading_run rr
        JOIN user_book ub ON ub.id = rr.user_book_id
-       WHERE rr.deleted_at IS NULL AND ub.deleted_at IS NULL
+       WHERE rr.deleted_at IS NULL
          AND (
            (rr.started_at >= ? AND rr.started_at < ?)
            OR (rr.finished_at >= ? AND rr.finished_at < ?)
@@ -257,8 +266,12 @@ export const ReadingRunRepository = {
    * `run_number > 1` на кожному рядку результату — вже готовий сигнал "це перечитування" (ТЗ
    * §39: "small indicator: «Перечитано»"), без окремого запиту.
    *
-   * Той самий `JOIN user_book ... deleted_at IS NULL` soft-delete guard, що й
-   * `listStartedOrFinishedBetween` вище (та сама причина — див. коментар там).
+   * `JOIN user_book ... deleted_at IS NULL` soft-delete guard — POLYTSIA FOUNDATION FINAL
+   * POLISH: НАВМИСНО залишений тут БЕЗ ЗМІН (на відміну від `listStartedOrFinishedBetween`
+   * вище, де той самий guard знятий заради Calendar Historical Consistency) — цей метод
+   * обслуговує ЛИШЕ Reading Seasons (#167), яку ТЗ FOUNDATION FINAL POLISH явно забороняє
+   * чіпати (п.25 "Seasons — НЕ ЧІПАТИ"): чи має Season так само бачити прочитання
+   * soft-deleted книги — окреме продуктове рішення поза обсягом цього polish pass.
    */
   async listFinishedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingRun[]> {
     const rows = await db.getAllAsync<ReadingRunRow>(

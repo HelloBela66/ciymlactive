@@ -1,4 +1,7 @@
 import type { NormalizedBookDraft } from '@/types/bookDraft';
+import type { ProviderSearchOutcome } from '@/lib/providerSearchError';
+
+export type { ProviderSearchOutcome, ProviderSearchError, ProviderSearchErrorKind } from '@/lib/providerSearchError';
 
 /**
  * Провайдеро-незалежний "сирий" результат пошуку/лукапу (docs/BOOK_PROVIDERS.md). UI (Search,
@@ -32,8 +35,13 @@ export interface BookMetadataProvider {
   /** `signal` — необов'язковий: React Query (`useProviderSearch`) передає його, щоб
    * скасувати застарілий запит, коли користувач ввів ще один символ до відповіді сервера
    * (інакше кожна пауза під час набору лишає "висячий" запит, який дарма з'їдає ліміт
-   * безключового Google Books API — реальна знахідка з тестування на пристрої). */
-  searchBooks(query: string, signal?: AbortSignal): Promise<RawProviderBook[]>;
+   * безключового Google Books API — реальна знахідка з тестування на пристрої).
+   *
+   * FOUNDATION FINAL POLISH — повертає `ProviderSearchOutcome`, НЕ голий масив: "успішно, 0
+   * книг" і "провайдер не відповів" — це різні стани (`src/lib/providerSearchError.ts`).
+   * `lookupByISBN`/`getEdition` нижче свідомо НЕ зачеплені цим фіксом (поза межами ТЗ
+   * FOUNDATION FINAL POLISH — той самий "success ⇄ null" контракт, що й раніше). */
+  searchBooks(query: string, signal?: AbortSignal): Promise<ProviderSearchOutcome<RawProviderBook>>;
   lookupByISBN(isbn: string): Promise<RawProviderBook | null>;
   getEdition(externalId: string): Promise<RawProviderBook | null>;
   /** -> Work+Edition draft; та сама модель, у яку розкладається й ручне введення

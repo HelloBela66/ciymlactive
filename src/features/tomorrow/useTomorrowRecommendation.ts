@@ -160,7 +160,13 @@ export function useTomorrowRecommendation() {
       // той самий, що й після fix1/fix2, без змін.
       const queries = buildSearchQueries(genreNameUk, purpose);
       const resultsByQuery = await Promise.all(queries.map((query) => GoogleBooksProvider.searchBooks(query)));
-      const merged = dedupeByKey(resultsByQuery.flat());
+      // FOUNDATION FINAL POLISH FIX — `searchBooks` тепер повертає `ProviderSearchOutcome`, не
+      // голий масив (регресія, знайдена `tsc` після деплою). Той самий graceful-degradation
+      // принцип, що й раніше (коли помилка тихо ставала `[]`): запит, що провалився, просто не
+      // додає кандидатів до злиття — "Завтра" не падає й не показує помилку користувачу через
+      // тимчасовий збій Google Books, лише пропускає ту query.
+      const itemsByQuery = resultsByQuery.map((outcome) => (outcome.status === 'success' ? outcome.items : []));
+      const merged = dedupeByKey(itemsByQuery.flat());
 
       const { books: languagePool, confidence: languageConfidence } = pickLanguageTier([
         filterUkrainianBooks(merged),

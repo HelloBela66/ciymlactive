@@ -50,9 +50,15 @@ export const SharedCatalogProvider: BookMetadataProvider = {
     return isSharedCatalogConfigured();
   },
 
+  // FOUNDATION FINAL POLISH — `BookMetadataProvider.searchBooks` тепер повертає
+  // `ProviderSearchOutcome`, не голий масив (`src/lib/providerSearchError.ts`). Спільний каталог
+  // НАВМИСНО поза межами цього фіксу (він не входить у "зовнішній provider" з ТЗ — власна,
+  // швидка, довірена Supabase-інфраструктура, не платне/безкоштовне зовнішнє API):
+  // `SharedCatalogClient.search` як і раніше сам ковтає власні помилки до `[]`, тут лише
+  // обгортка форми, без жодної зміни поведінки цього джерела.
   async searchBooks(query, signal) {
     const rows = await SharedCatalogClient.search(query, 20, signal);
-    return rows.map(toRawBook);
+    return { status: 'success', items: rows.map(toRawBook) };
   },
 
   async lookupByISBN(isbn) {

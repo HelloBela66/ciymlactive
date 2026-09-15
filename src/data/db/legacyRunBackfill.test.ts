@@ -291,4 +291,35 @@ describe('backfillAllLegacyReadingRunLinks — наскрізний сценар
     expect(reExported.reading_run?.[0]?.id).toBe(exported.reading_run?.[0]?.id);
     expect(reExported.rating?.[0]?.reading_run_id).toBe(exported.rating?.[0]?.reading_run_id);
   });
+
+  /** POLYTSIA POST-V1.6.2 FOUNDATION CLOSURE — Restore success/semantic-repair invariant.
+   *
+   * `useRestoreBackup` (`src/features/backup/useBackup.ts`) тепер, якщо цей виклик впаде
+   * ПЕРШИЙ раз (напр. тимчасовий збій), повідомляє користувача й пропонує повторити
+   * відновлення ще раз із того самого файлу — а це, зі свого боку, викликає
+   * `backfillAllLegacyReadingRunLinks` ЗНОВУ на БД, де backfill уже частково (чи повністю)
+   * відбувся першого разу. Це підтверджує саме ту гарантію, на якій тримається текст
+   * повідомлення користувачу: ПОВТОРНИЙ виклик після часткового чи повного успіху — завжди
+   * безпечний no-op, без дублікатів run/зв'язків, незалежно від того, на якому кроці стався
+   * (гіпотетичний) збій першого разу. */
+  it('повторний виклик backfillAllLegacyReadingRunLinks (симуляція retry після збою) — безпечний no-op, без дублікатів', async () => {
+    const db = await openMigratedTestDb();
+    await BackupRepository.restoreAll(db, buildOldV16BackupData());
+
+    await backfillAllLegacyReadingRunLinks(db);
+    const afterFirstCall = await BackupRepository.exportAll(db);
+    expect(afterFirstCall.reading_run).toHaveLength(2);
+
+    // Retry — точнісінько те, що зробить користувач, натиснувши "Спробувати ще раз" після
+    // повідомлення про збій обов'язкового відновлення історії перечитувань.
+    await backfillAllLegacyReadingRunLinks(db);
+    const afterSecondCall = await BackupRepository.exportAll(db);
+
+    expect(afterSecondCall.reading_run).toHaveLength(2);
+    expect(afterSecondCall.reading_run?.map((r) => r.id).sort()).toEqual(afterFirstCall.reading_run?.map((r) => r.id).sort());
+    expect(afterSecondCall.reading_session?.[0]?.reading_run_id).toBe(afterFirstCall.reading_session?.[0]?.reading_run_id);
+    expect(afterSecondCall.rating?.[0]?.reading_run_id).toBe(afterFirstCall.rating?.[0]?.reading_run_id);
+    expect(afterSecondCall.book_memory?.[0]?.reading_run_id).toBe(afterFirstCall.book_memory?.[0]?.reading_run_id);
+    expect(afterSecondCall.dnf_reflection?.[0]?.reading_run_id).toBe(afterFirstCall.dnf_reflection?.[0]?.reading_run_id);
+  });
 });

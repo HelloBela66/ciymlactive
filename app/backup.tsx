@@ -137,8 +137,31 @@ export default function BackupScreen() {
                     onProgress: (done, total) => setRestoreProgressPercent(Math.round((done / total) * 100)),
                   },
                   {
-                    onSuccess: ({ integrityReport }) => {
+                    onSuccess: ({ integrityReport, backfillFailed }) => {
                       setRestoreProgressPercent(null);
+                      // RESTORE SUCCESS / SEMANTIC-REPAIR INVARIANT FIX (POLYTSIA POST-V1.6.2
+                      // FOUNDATION CLOSURE) — на відміну від `integrityReport == null` нижче
+                      // (перевірка не best-effort ЩОДО success — вона лише advisory), збій
+                      // ОБОВ'ЯЗКОВОГО семантичного ремонту (`backfillFailed`) НЕ повинен
+                      // показувати звичайне "Дані відновлено" так, ніби нічого не сталось: дані
+                      // бібліотеки вже реально замінені (`restoreAll` закомічено), але зв'язки
+                      // ReadingRun можуть лишитись недобудованими — тому окреме, чесне
+                      // повідомлення з порадою повторити (повторний виклик — безпечний no-op,
+                      // докладніше — коментар у `useRestoreBackup`), а НЕ звичайний generic
+                      // `onError` цієї ж мутації (той текст каже "бібліотека лишилась незмінною",
+                      // що тут було б неправдою).
+                      if (backfillFailed) {
+                        Alert.alert(
+                          'Дані відновлено частково',
+                          'Бібліотеку відновлено з файлу, але не вдалося завершити обов’язкове ' +
+                            'відновлення історії перечитувань (ReadingRun) — частина спогадів, ' +
+                            'оцінок чи нотаток "До" може тимчасово не мати зв’язку зі своїм ' +
+                            'прочитанням.\n\nСпробуй відновити ще раз із того самого файлу — це ' +
+                            'безпечно, дублікатів не буде.',
+                        );
+                        setStatusMessage('Дані відновлено частково — спробуй відновити ще раз, щоб завершити.');
+                        return;
+                      }
                       // POST-RESTORE DATA DOCTOR FIX (POLYTSIA V1.6.2, Фаза 3) — `integrityReport`
                       // може бути `null` лише якщо сама перевірка впала (best-effort, докладніше —
                       // коментар у `useRestoreBackup`) — тоді НЕ кажемо "без зауважень" (це

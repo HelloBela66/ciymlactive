@@ -259,3 +259,45 @@ finished_at`, які "заморожені" на перше входження �
 `maxFontSizeMultiplier={1.2}` — без обмеження велике системне масштабування шрифту ламало
 компоновку клітинки місяць-сітки (той самий клас фіксу, що й на 2 інших екранах цієї фази,
 докладніше `docs/A11Y_LARGE_TEXT_AUDIT.md`).
+
+## Історична семантика: soft-delete НЕ стирає минулу активність (POST-V1.6.2 → FOUNDATION FINAL POLISH)
+
+**Продуктовий інваріант:** якщо користувач справді читав книгу в минулому, а потім прибрав її з
+активної бібліотеки (soft-delete `user_book.deleted_at`) — історичні факти Календаря (клітинка
+дня, Day Details, хвилини сесії, ранжування "Найчастіше цього місяця", start/finish-мітки) НЕ
+повинні зникати лише через це. Водночас **"жива бібліотека" ≠ "історичний запит"**: soft-deleted
+книга НІКОЛИ не повертається в Library/активне читання/будь-яку alive-only вибірку
+(`UserBookRepository.listAll`/`listByStatus`/`listByIds`) — цей другий інваріант лишається БЕЗ
+ЗМІН обома фазами нижче.
+
+Це відбувалось у ДВА кроки, окремими milestone'ами:
+
+1. **POST-V1.6.2 FOUNDATION CLOSURE** (`docs/POST_V1_6_2_FOUNDATION_CLOSURE_REPORT.md`) —
+   `useMonthCalendarData` (місяць-сітка) і `useDaySessions` (Day Details) переведені на
+   `UserBookRepository.listWithDetailsByIdsIncludingDeleted` замість alive-only
+   `listWithDetailsByIds`: книжкова обкладинка/деталі для клітинки й дня резолвляться незалежно
+   від `deleted_at`, `attachDetailsBatch` усередині все одно gracefully пропускає книгу, чиї
+   Edition/Work самі не знайдені.
+2. **FOUNDATION FINAL POLISH** (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`) закрила два geps,
+   виявлені наступним аудитом (`POST_V1_6_2_FINAL_AUDIT_REPORT.md`, розділ 7):
+   - **Gap A — `useMonthSummary`'s `topBooks`.** Той самий `listWithDetailsByIds` (alive-only)
+     лишався в місячному підсумку — сесія soft-deleted книги тихо випадала лише з "Найчастіше
+     цього місяця" (`totalMinutes`/`totalPages`/`activeDaysCount` рахуються напряму з `sessions`,
+     цього gap не торкались). Виправлено тим самим переходом на
+     `listWithDetailsByIdsIncludingDeleted`.
+   - **Gap B — `ReadingRunRepository.listStartedOrFinishedBetween`.** Мав `AND ub.deleted_at IS
+     NULL` у `JOIN user_book` — джерело tiny start/finish-позначки місяця-сітки ТА таймлайну
+     "Початок і завершення" Day Details (обидва вже викликали цей самий метод, отже фікс одразу
+     закрив обидві поверхні одним рядком SQL). Умову прибрано.
+
+**Свідома асиметрія:** `ReadingRunRepository.listFinishedBetween` — окремий метод, використовується
+ЛИШЕ Reading Seasons (#167) — той самий gap там лишається НЕ виправленим цим пасом: Seasons —
+заморожений продуктовий скоуп (`docs/READING_SEASONS.md`), і зміна його історичної семантики не
+входила в мандат жодної з двох фаз вище. `listStartedOrFinishedBetween`'s doc-коментар прямо каже
+"лише для Календаря" — саме це розділення дозволило виправити Календар, не чіпаючи Seasons.
+
+**Регресійне покриття** — `src/data/repositories/calendarHistoricalConsistency.test.ts`: одна
+книга (soft-deleted після прочитання), дві книги того самого місяця (одна жива, одна історична),
+перечитування (два run, обидва завершені, потім soft-delete) — для кожного сценарію перевіряється,
+що сесії/`listWithDetailsByIdsIncludingDeleted`/`rankBooksForDay`/`listStartedOrFinishedBetween`/
+`rankTopBooksOfMonth` УЗГОДЖЕНО бачать активність, а Library-запити її НЕ бачать.

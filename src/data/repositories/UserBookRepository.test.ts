@@ -444,6 +444,88 @@ describe('UserBookRepository.listByIds / listWithDetailsByIds — порядок
   });
 });
 
+describe('UserBookRepository.listByIdsIncludingDeleted / listWithDetailsByIdsIncludingDeleted — POST-V1.6.2 Calendar consistency fix', () => {
+  it('listByIdsIncludingDeleted: жива книга повертається так само, як listByIds', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'work-alive');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+
+    const result = await UserBookRepository.listByIdsIncludingDeleted(db, [created.id]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe(created.id);
+  });
+
+  it('listByIdsIncludingDeleted: видалена книга ПОВЕРТАЄТЬСЯ (на відміну від listByIds)', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'work-removed');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+    await UserBookRepository.remove(db, created.id);
+
+    const excluding = await UserBookRepository.listByIds(db, [created.id]);
+    expect(excluding).toEqual([]);
+
+    const including = await UserBookRepository.listByIdsIncludingDeleted(db, [created.id]);
+    expect(including).toHaveLength(1);
+    expect(including[0]?.id).toBe(created.id);
+  });
+
+  it('listByIdsIncludingDeleted: неіснуючі id пропускаються, не кидає виняток', async () => {
+    const db = await openMigratedTestDb();
+    const result = await UserBookRepository.listByIdsIncludingDeleted(db, ['nonexistent']);
+    expect(result).toEqual([]);
+  });
+
+  it('listByIdsIncludingDeleted: зберігає порядок переданих ids (мікс живих і видалених)', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId: e1 } = await seedWorkAndEdition(db, 'work-order-a');
+    const { editionId: e2 } = await seedWorkAndEdition(db, 'work-order-b');
+    const ub1 = await UserBookRepository.addToLibrary(db, e1, 'reading');
+    const ub2 = await UserBookRepository.addToLibrary(db, e2, 'reading');
+    await UserBookRepository.remove(db, ub1.id);
+
+    const result = await UserBookRepository.listByIdsIncludingDeleted(db, [ub2.id, ub1.id]);
+    expect(result.map((ub) => ub.id)).toEqual([ub2.id, ub1.id]);
+  });
+
+  it('listWithDetailsByIdsIncludingDeleted: видалена книга з живими edition/work має коректні деталі (History Preservation)', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'work-history');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'finished');
+    await UserBookRepository.remove(db, created.id);
+
+    const result = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, [created.id]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.edition.id).toBe(editionId);
+  });
+
+  it('listWithDetailsByIdsIncludingDeleted: рядок user_book без Edition/Work (граничний випадок) коректно пропускається, а не кидає виняток', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId } = await seedWorkAndEdition(db, 'work-orphan');
+    const created = await UserBookRepository.addToLibrary(db, editionId, 'reading');
+    await UserBookRepository.remove(db, created.id);
+    // Симулюємо крайній випадок "сирітського" user_book: edition сам фізично видалений
+    // (наприклад, старі дані до впровадження м'якого видалення edition). attachDetailsBatch
+    // це вже гарантовано (і до цього фіксу) пропускає — тест лише підтверджує, що
+    // listWithDetailsByIdsIncludingDeleted успадковує ту саму graceful-поведінку.
+    await db.runAsync(`DELETE FROM edition WHERE id = ?`, [editionId]);
+
+    const result = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, [created.id]);
+    expect(result).toEqual([]);
+  });
+
+  it('listWithDetailsByIdsIncludingDeleted: мікс живої і видаленої книги — обидві присутні з деталями', async () => {
+    const db = await openMigratedTestDb();
+    const { editionId: eAlive } = await seedWorkAndEdition(db, 'work-mix-alive');
+    const { editionId: eRemoved } = await seedWorkAndEdition(db, 'work-mix-removed');
+    const alive = await UserBookRepository.addToLibrary(db, eAlive, 'reading');
+    const removed = await UserBookRepository.addToLibrary(db, eRemoved, 'finished');
+    await UserBookRepository.remove(db, removed.id);
+
+    const result = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, [alive.id, removed.id]);
+    expect(result.map((ub) => ub.edition.id).sort()).toEqual([eAlive, eRemoved].sort());
+  });
+});
+
 describe('UserBookRepository.listByStatus / listAll / listStatusOnly', () => {
   it('listByStatus: лише книги заданого статусу', async () => {
     const db = await openMigratedTestDb();

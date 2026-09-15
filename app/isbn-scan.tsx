@@ -51,8 +51,15 @@ function activeProviders(): BookMetadataProvider[] {
 async function findByIsbnWithFallback(provider: BookMetadataProvider, isbn: string): Promise<RawProviderBook | null> {
   const exact = await provider.lookupByISBN(isbn);
   if (exact) return exact;
+  // FOUNDATION FINAL POLISH FIX — `searchBooks` тепер повертає `ProviderSearchOutcome`, не
+  // голий масив: до цього рядка тут лишався старий `results.filter(...)`, тобто цей файл
+  // компілювався б лише проти старого контракту. Регресія, знайдена `tsc` після деплою (не
+  // виявлена ручним вичитуванням у межах самого пасу) — виправлено тим самим принципом
+  // graceful degradation, що й усюди в цьому файлі: помилка провайдера тут означає лише
+  // "резервний пошук нічого не дав", НЕ падіння сканування ISBN.
   const results = await provider.searchBooks(isbn);
-  const isbnMatches = results.filter((book) => book.isbn10 === isbn || book.isbn13 === isbn);
+  if (results.status === 'error') return null;
+  const isbnMatches = results.items.filter((book) => book.isbn10 === isbn || book.isbn13 === isbn);
   return isbnMatches.find(isLikelyUkrainianBook) ?? isbnMatches[0] ?? null;
 }
 

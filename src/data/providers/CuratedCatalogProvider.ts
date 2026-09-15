@@ -40,9 +40,12 @@ export const CuratedCatalogProvider: BookMetadataProvider = {
     return isCuratedCatalogConfigured();
   },
 
+  // FOUNDATION FINAL POLISH — та сама обгортка форми, що й `SharedCatalogProvider.ts` (own
+  // catalog — навмисно НЕ ЧІПАТИ, поза межами ТЗ FOUNDATION FINAL POLISH): `CuratedCatalogClient.
+  // search` як і раніше сам ковтає власні помилки до `[]`, без жодної зміни поведінки.
   async searchBooks(query, signal) {
     const rows = await CuratedCatalogClient.search(query, 20, signal);
-    return rows.map(toRawBook);
+    return { status: 'success', items: rows.map(toRawBook) };
   },
 
   async lookupByISBN(isbn) {

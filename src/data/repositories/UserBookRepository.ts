@@ -191,6 +191,38 @@ export const UserBookRepository = {
     return attachDetailsBatch(db, userBooks);
   },
 
+  /** POLYTSIA POST-V1.6.2 FOUNDATION CLOSURE — Calendar soft-delete consistency.
+   *
+   * Варіант `listByIds`, що НЕ фільтрує `deleted_at IS NULL` — для читальних моделей, яким
+   * потрібна історична правда, а не поточний стан полиці (Calendar: місячна сітка й деталі дня
+   * мають показувати ту саму активність читання за книгою, яку користувач згодом прибрав з
+   * бібліотеки — видалення книги не повинно стирати легітимну історію читання). Порядок `ids`
+   * зберігається так само, як у `listByIds`.
+   *
+   * НЕ використовувати там, де потрібен саме "поточний стан бібліотеки" (Library tab,
+   * Статистика тощо) — для цього лишається `listByIds`/`listByStatus`/`listAll`.
+   */
+  async listByIdsIncludingDeleted(db: SQLiteDatabase, ids: string[]): Promise<UserBook[]> {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await db.getAllAsync<UserBookRow>(
+      `SELECT * FROM user_book WHERE id IN (${placeholders})`,
+      ids,
+    );
+    const byId = new Map(rows.map((row) => [row.id, mapRow(row)]));
+    return ids.map((id) => byId.get(id)).filter((ub): ub is UserBook => ub != null);
+  },
+
+  /** Пакетна версія `listByIdsIncludingDeleted` з деталями — `attachDetailsBatch` вже гарантовано
+   * (і навмисно, ще до цього фіксу) пропускає елементи, чий Edition/Work сам не знайдений
+   * (`if (!edition) continue` / `if (!work) continue`), тож книга з м'яко видаленими
+   * Edition/Work тут коректно не потрапить у результат — без жодних змін у самому
+   * `attachDetailsBatch`. */
+  async listWithDetailsByIdsIncludingDeleted(db: SQLiteDatabase, ids: string[]): Promise<UserBookWithDetails[]> {
+    const userBooks = await UserBookRepository.listByIdsIncludingDeleted(db, ids);
+    return attachDetailsBatch(db, userBooks);
+  },
+
   /**
    * Оновлення статусу. `started_at`/`finished_at` виставляються автоматично при першому
    * переході в 'reading'/'rereading' чи 'finished' (і не перезаписуються, якщо вже стоять) —

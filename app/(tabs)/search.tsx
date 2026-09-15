@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { OfflineNotice } from '@/components/ui/OfflineNotice';
+import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
 import { useTheme } from '@/design/ThemeProvider';
 import { journalEntryTypeLabels } from '@/design/i18n-labels';
@@ -16,7 +17,14 @@ import { useProviderSearch } from '@/features/search/useProviderSearch';
 import { usePersonalSearch, type PersonalSearchResult } from '@/features/search/usePersonalSearch';
 import { useImportDraftStore } from '@/stores/importDraftStore';
 import { GoogleBooksProvider, ISBNdbProvider, SharedCatalogProvider, CuratedCatalogProvider } from '@/data/providers';
-import type { BookMetadataProvider, RawProviderBook } from '@/data/providers';
+import type { BookMetadataProvider, RawProviderBook, ProviderSearchError } from '@/data/providers';
+import { describeProviderSearchError } from '@/lib/providerSearchError';
+import {
+  dedupeAgainst,
+  withSeen,
+  isProviderSettled,
+  haveAllProvidersFailed,
+} from '@/lib/searchProviderCombine';
 import type { WorkSearchResult } from '@/data/repositories/WorkRepository';
 import type { Series } from '@/types/series';
 import type { ShelfWithCount } from '@/types/shelf';
@@ -197,28 +205,68 @@ function ProviderResultRow({ provider, book }: { provider: BookMetadataProvider;
   );
 }
 
+/**
+ * FOUNDATION FINAL POLISH (Search Provider Error Transparency) — inline, "книжковий" (не
+ * тривожний) стан ОДНІЄЇ секції провайдера, коли САМЕ ЦЕ джерело не відповіло (429/5xx/timeout/
+ * мережа/malformed — `src/lib/providerSearchError.ts`), а не тому, що книг справді немає.
+ * Навмисно НЕ великий червоний error screen (§19 ТЗ: "UI має залишатися спокійним і
+ * книжковим") — той самий делікатний inline-Card вигляд, що й `OfflineNotice` поруч, лише з
+ * додатковою кнопкою retry, коли є сенс повторити (є конкретний `onRetry`).
+ */
+function ProviderErrorNotice({ error, providerName, onRetry }: { error: ProviderSearchError; providerName: string; onRetry: () => void }) {
+  const theme = useTheme();
+  return (
+    <Card style={{ flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing.sm }}>
+      <Ionicons name="alert-circle-outline" size={20} color={theme.colors.textSecondary} style={{ marginTop: 2 }} />
+      <View style={{ flex: 1, gap: theme.spacing.sm }}>
+        <AppText variant="body" color="secondary">
+          {describeProviderSearchError(error.kind, providerName)}
+        </AppText>
+        <Button
+          label="Спробувати ще раз"
+          variant="secondary"
+          onPress={onRetry}
+          accessibilityHint={`Повторно надішле пошуковий запит до джерела «${providerName}»`}
+        />
+      </View>
+    </Card>
+  );
+}
+
 /** Презентаційна секція результатів одного зовнішнього провайдера — саме отримання даних
  * (`useProviderSearch`) підняте в `SearchScreen` (Milestone 10 fix6, `docs/STATUS_V1.md`
  * п. 3.2, докладніше — коментар над `dedupeAgainst` нижче): щоб прибрати дублікати книги між
  * секціями, батьківський компонент мусить бачити результати ВСІХ секцій одразу, перш ніж
  * вирішити, що саме показати кожній — окремий незалежний `useProviderSearch` усередині кожної
  * секції (як було раніше) цього не дозволяв. `show`/`isLoading`/`data` — уже готові, відфільтровані
- * значення, ця функція лише рендерить. */
+ * значення, ця функція лише рендерить.
+ *
+ * FOUNDATION FINAL POLISH — новий `error`/`onRetry`: коли САМЕ ЦЕ джерело провалилось (а не
+ * просто "нічого не знайшло"), секція більше НЕ ховається мовчки (`!isLoading && data.length
+ * === 0 → return null`, як робилося для порожнього результату) — показує `ProviderErrorNotice`
+ * замість того, щоб виглядати так само, як "цієї книги немає". Якщо ІНШІ секції тим часом
+ * успішно повернули результати — вони рендеряться поруч як завжди (мультипровайдерний пошук не
+ * ламається через одне джерело, §14 ТЗ).
+ */
 function ProviderResultsSection({
   provider,
   data,
+  error,
   isLoading,
   show,
+  onRetry,
 }: {
   provider: BookMetadataProvider;
   data: RawProviderBook[];
+  error: ProviderSearchError | null;
   isLoading: boolean;
   show: boolean;
+  onRetry: () => void;
 }) {
   const theme = useTheme();
 
   if (!show) return null;
-  if (!isLoading && data.length === 0) return null;
+  if (!isLoading && !error && data.length === 0) return null;
 
   return (
     <View style={{ gap: theme.spacing.sm }}>
@@ -229,17 +277,13 @@ function ProviderResultsSection({
         <AppText variant="caption" color="tertiary">
           Шукаю…
         </AppText>
+      ) : error ? (
+        <ProviderErrorNotice error={error} providerName={provider.displayName} onRetry={onRetry} />
       ) : (
         data.map((book) => <ProviderResultRow key={book.externalId} provider={provider} book={book} />)
       )}
     </View>
   );
-}
-
-/** Порожній список результатів "осів" (не завантажується і нічого не знайшов) — допоміжна
- * перевірка для gate ISBNdb нижче. */
-function isSettledEmpty(result: { isLoading: boolean; data?: RawProviderBook[] }): boolean {
-  return !result.isLoading && (result.data?.length ?? 0) === 0;
 }
 
 /**
@@ -259,27 +303,6 @@ function isSettledEmpty(result: { isLoading: boolean; data?: RawProviderBook[] }
  * провайдерів мають хоч якийсь ISBN), і краще показати можливий рідкісний дублікат, ніж
  * помилково сховати різні книги з однаковим `null`-ключем.
  */
-function isbnKey(book: RawProviderBook): string | null {
-  return book.isbn13 ?? book.isbn10 ?? null;
-}
-
-function dedupeAgainst(books: RawProviderBook[] | undefined, seen: ReadonlySet<string>): RawProviderBook[] {
-  if (!books) return [];
-  return books.filter((book) => {
-    const key = isbnKey(book);
-    return key === null || !seen.has(key);
-  });
-}
-
-function withSeen(books: RawProviderBook[] | undefined, seen: ReadonlySet<string>): Set<string> {
-  const next = new Set(seen);
-  for (const book of books ?? []) {
-    const key = isbnKey(book);
-    if (key !== null) next.add(key);
-  }
-  return next;
-}
-
 type SearchMode = 'personal' | 'catalog';
 
 function PersonalSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -429,7 +452,10 @@ export default function SearchScreen() {
   const curatedResult = useProviderSearch(CuratedCatalogProvider, query, { enabled: !isOffline });
   const googleBooksResult = useProviderSearch(GoogleBooksProvider, query, { enabled: !isOffline });
   const isbndbEnabled =
-    !isOffline && isSettledEmpty(catalogResult) && isSettledEmpty(curatedResult) && isSettledEmpty(googleBooksResult);
+    !isOffline &&
+    isProviderSettled(catalogResult) &&
+    isProviderSettled(curatedResult) &&
+    isProviderSettled(googleBooksResult);
   const isbndbResult = useProviderSearch(ISBNdbProvider, query, { enabled: isbndbEnabled });
 
   // Каталог показується як є (нема кого дедуплікувати проти НЬОГО, він завжди перший) — потім
@@ -437,17 +463,43 @@ export default function SearchScreen() {
   // "вже показаного" для секції після себе. Добірка «Полиці» (Milestone 11, доповнення) —
   // одразу за спільним каталогом, з тієї самої причини, що й у `ALL_PROVIDERS` (обидва —
   // власний Supabase, дешеві й швидкі, вищий пріоритет за платні зовнішні джерела).
-  const catalogBooks = catalogResult.data ?? [];
+  //
+  // FOUNDATION FINAL POLISH — `.data` тепер `{ items, error }`, не голий масив: дедуплікація й
+  // далі працює лише з `items` (помилка одного джерела не бере участі в дедуплікації, і не
+  // ховає результати інших — §14 ТЗ).
+  const catalogBooks = catalogResult.data?.items ?? [];
   const seenAfterCatalog = withSeen(catalogBooks, new Set());
-  const curatedBooks = dedupeAgainst(curatedResult.data, seenAfterCatalog);
-  const seenAfterCurated = withSeen(curatedResult.data, seenAfterCatalog);
-  const googleBooks = dedupeAgainst(googleBooksResult.data, seenAfterCurated);
-  const seenAfterGoogle = withSeen(googleBooksResult.data, seenAfterCurated);
-  const isbndbBooks = dedupeAgainst(isbndbResult.data, seenAfterGoogle);
+  const curatedBooks = dedupeAgainst(curatedResult.data?.items, seenAfterCatalog);
+  const seenAfterCurated = withSeen(curatedResult.data?.items, seenAfterCatalog);
+  const googleBooks = dedupeAgainst(googleBooksResult.data?.items, seenAfterCurated);
+  const seenAfterGoogle = withSeen(googleBooksResult.data?.items, seenAfterCurated);
+  const isbndbBooks = dedupeAgainst(isbndbResult.data?.items, seenAfterGoogle);
 
   const showProviderSections = query.trim().length >= 3;
   const isSearching = query.trim().length > 0;
   const hasRecent = (recentResult.data?.length ?? 0) > 0;
+
+  // FOUNDATION FINAL POLISH — "усі провалились" ≠ "нічого не знайдено" (§19 ТЗ): рахуємо лише
+  // серед провайдерів, що РЕАЛЬНО зробили запит цього разу (ISBNdb — умовно, за `isbndbEnabled`
+  // — офлайн чи ще не "осіли" інші джерела не рахуються як "спроба"), і лише коли КОЖЕН з них
+  // завершився саме помилкою (не просто порожнім результатом) і жоден не дав жодної книги.
+  const attemptedCatalogResults = [
+    catalogResult,
+    curatedResult,
+    googleBooksResult,
+    ...(isbndbEnabled ? [isbndbResult] : []),
+  ];
+  const allCatalogFailed = haveAllProvidersFailed(
+    attemptedCatalogResults,
+    catalogBooks.length + curatedBooks.length + googleBooks.length + isbndbBooks.length,
+  );
+
+  const retryAllCatalogProviders = () => {
+    void catalogResult.refetch();
+    void curatedResult.refetch();
+    void googleBooksResult.refetch();
+    if (isbndbEnabled) void isbndbResult.refetch();
+  };
 
   return (
     <ScreenContainer topInset>
@@ -542,36 +594,56 @@ export default function SearchScreen() {
             // порожніх секцій (`docs/LOCAL_FIRST.md`'s "ніколи глобальний блокуючий overlay",
             // тут аналог — і ніколи одразу чотири окремі копії того самого повідомлення).
             <OfflineNotice message="Немає з'єднання з інтернетом. Спільний каталог, Google Books та ISBNdb зараз недоступні — спробуй ще раз, коли з'явиться мережа." />
+          ) : allCatalogFailed ? (
+            // FOUNDATION FINAL POLISH, §19 ТЗ — усі джерела провалились цього разу: НЕ "Нічого
+            // не знайдено" (пошук фактично не відбувся), а чесний "не вдалося завантажити" з
+            // одним retry на всі джерела одразу. `QueryErrorState` — той самий спільний
+            // компонент, що й решта екранів застосунку для провалених запитів (не новий
+            // винахід заради цього екрана).
+            <QueryErrorState
+              message="Перевір з'єднання та спробуй ще раз."
+              onRetry={retryAllCatalogProviders}
+            />
           ) : (
             <>
               {/* Спільний каталог першим (Milestone 8.2): дешевий і швидкий запит до власного
                   Supabase, книги, додані іншими користувачами, — зверху списку. Далі Google
                   Books. ISBNdb — платна, останньою, і додатково чекає (`isbndbEnabled`), доки
-                  перші дві не "осядуть" порожніми. Кожна наступна секція вже не показує книги,
-                  чий ISBN показала попередня (`dedupeAgainst` вище, Milestone 10 fix6, п. 3.2). */}
+                  перші дві не "осядуть" (порожньо чи з помилкою). Кожна наступна секція вже не
+                  показує книги, чий ISBN показала попередня (`dedupeAgainst` вище, Milestone 10
+                  fix6, п. 3.2). Помилка ОДНОГО джерела (`error`/`onRetry` нижче, FOUNDATION
+                  FINAL POLISH) не ховає результати інших — кожна секція незалежна. */}
               <ProviderResultsSection
                 provider={SharedCatalogProvider}
                 data={catalogBooks}
+                error={catalogResult.data?.error ?? null}
                 isLoading={catalogResult.isLoading}
                 show={showProviderSections}
+                onRetry={() => void catalogResult.refetch()}
               />
               <ProviderResultsSection
                 provider={CuratedCatalogProvider}
                 data={curatedBooks}
+                error={curatedResult.data?.error ?? null}
                 isLoading={curatedResult.isLoading}
                 show={showProviderSections}
+                onRetry={() => void curatedResult.refetch()}
               />
               <ProviderResultsSection
                 provider={GoogleBooksProvider}
                 data={googleBooks}
+                error={googleBooksResult.data?.error ?? null}
                 isLoading={googleBooksResult.isLoading}
                 show={showProviderSections}
+                onRetry={() => void googleBooksResult.refetch()}
               />
               <ProviderResultsSection
                 provider={ISBNdbProvider}
                 data={isbndbBooks}
+                error={isbndbResult.data?.error ?? null}
                 isLoading={isbndbResult.isLoading}
                 show={showProviderSections}
+                onRetry={() => void isbndbResult.refetch()}
               />
             </>
           )
