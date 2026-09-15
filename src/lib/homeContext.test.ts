@@ -666,3 +666,62 @@ describe('приглушення спогаду (ТЗ модуль E §10)', () 
     expect(selectVisibleHomeContextCard(all, suppressed)).toBeNull();
   });
 });
+
+/**
+ * POLYTSIA V1.7, Phase 11 — ІНВАРІАНТ ОДНОГО СЛОТА (ТЗ §24).
+ *
+ * Окреме занепокоєння власника: «більше однієї contextual card на Home». Тести вище перевіряють
+ * ПОРЯДОК кандидатів; цей перевіряє інше й важливіше — що коли придатні ВСІ одразу, слот усе одно
+ * лишається рівно одним.
+ *
+ * ТЗ перелічує серед кандидатів Year/Month/Week Recap. У фактичній мапі Home їх немає: Recap живе
+ * власними екранами (`app/reading-recap/*`), а не карткою на головній — це звірено з кодом у
+ * Phase 10 і задокументовано в `docs/V1_7_READING_LIFE.md` §21. Тому тут перелічені всі СІМ видів,
+ * що реально існують; якби recap-картка колись з'явилась, цей тест зламався б на
+ * `HOME_CONTEXT_CARD_KIND_COUNT`, і це правильний спосіб дізнатись.
+ */
+describe('§24 — одночасно придатні всі кандидати, слот лишається один', () => {
+  const everythingEligible: HomeContextSelectionInput = {
+    staleReading: STALE_CANDIDATE,
+    capsuleDue: CAPSULE_CANDIDATE,
+    milestone: milestoneAt('finished_books:50', 1),
+    onThisDayAvailable: true,
+    memoryResurfacing: RESURFACING_CANDIDATE,
+    goalNearCompletion: GOAL_CANDIDATE,
+    tbrBookCount: 12,
+    tbrOldestWaiting: null,
+  };
+
+  it('повертається РІВНО одна картка, а не список', () => {
+    const card = selectHomeContextCard(everythingEligible);
+    expect(card).not.toBeNull();
+    // Тип результату — одна картка або `null`; масив тут неможливий за побудовою, і тест фіксує
+    // саме це, а не «довжину масиву», якої немає.
+    expect(Array.isArray(card)).toBe(false);
+    expect(card?.kind).toBe('stale_reading');
+  });
+
+  it('те саме з урахуванням приглушення: кожен наступний крок дає одну картку або жодної', () => {
+    const suppressed = new Set<string>();
+    const seen: string[] = [];
+    // Приглушуємо переможця й дивимось, хто наступний — доки кандидати не закінчаться.
+    for (let step = 0; step < 10; step++) {
+      const card = selectVisibleHomeContextCard(everythingEligible, suppressed);
+      if (!card) break;
+      seen.push(card.kind);
+      suppressed.add(getHomeContextCardSuppressionKey(card));
+    }
+    // Сім видів — сім кроків, кожен рівно один, без повторів і без зациклення.
+    expect(seen).toEqual([
+      'stale_reading',
+      'capsule_due',
+      'milestone',
+      'on_this_day',
+      'memory_resurfacing',
+      'goal_near_completion',
+      'tbr_suggestion',
+    ]);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(selectVisibleHomeContextCard(everythingEligible, suppressed)).toBeNull();
+  });
+});

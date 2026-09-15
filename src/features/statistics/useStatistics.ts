@@ -5,7 +5,7 @@ import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { computeStreaks } from '@/lib/streaks';
 import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
-import { dayRange, readingDayKey, readingDayKeyOf } from '@/lib/readingCalendar';
+import { dayRange, readingDayKeyOf } from '@/lib/readingCalendar';
 
 export interface OverallStatistics {
   totalMinutes: number;
@@ -67,17 +67,20 @@ export function useOverallStatistics() {
       // `listStatusOnly` замість `listByStatus` (Milestone 8, продуктивність) — тут
       // потрібні лише `finishedAt`/кількість, а `listByStatus` тягнув би повний
       // edition/work/authors/publisher/translators на кожну завершену книгу даремно.
-      const [lifetimeTotals, startInstants, todaySessions, finishedBooks] = await Promise.all([
+      const [lifetimeTotals, activeDayKeys, todaySessions, finishedBooks] = await Promise.all([
         ReadingSessionRepository.getLifetimeCompletedTotals(db),
-        ReadingSessionRepository.listCompletedStartInstants(db),
+        ReadingSessionRepository.listCompletedCalendarDays(db),
         ReadingSessionRepository.listStartedBetween(db, today.startIso, today.endIso),
         UserBookRepository.listStatusOnly(db, 'finished'),
       ]);
 
-      // Унікальні ЛОКАЛЬНІ дні, відсортовані — рівно той контракт, що його очікує
-      // `computeStreaks` (і той самий, що раніше давав `SELECT DISTINCT ... ORDER BY`, лише
-      // тепер у правильному часовому поясі).
-      const activeDayKeys = [...new Set(startInstants.map(readingDayKey))].sort();
+      /**
+       * POLYTSIA V1.7, Phase 11 (ТЗ §9, §8) — дні приходять уже ДНЯМИ, з урахуванням збереженої
+       * календарної дати. До цієї фази Statistics виводила їх із моментів сама
+       * (`startInstants.map(readingDayKey)`), тобто streak і лічильник активних днів лишались
+       * останнім місцем, де історія все ще їхала б від зміни поясу — попри те, що запити періодів
+       * уже стабільні. Саме таку розбіжність шукав §21.
+       */
 
       const { current, longest } = computeStreaks(activeDayKeys, todayKey);
       const todayMinutes = sumSessionMinutes(todaySessions);

@@ -40,17 +40,26 @@ export function useMemoryHub() {
         ReadingRunRepository.listUserBookIdsWithMultipleFinishedRuns(db),
       ]);
 
-      // Дешевий попередній фільтр ДО N+1 деталей — той самий прийом, що й
-      // `useHomeContextCard.ts`'s `attachCapsuleDetails` (переглянуті due-капсули не варті
-      // зайвого запиту на деталі книги).
+      // Дешевий попередній фільтр ДО запиту деталей: переглянуті due-капсули не варті зайвої
+      // роботи (`findCapsuleDueCandidate` однаково відфільтрував би їх).
       const unopenedDueCapsules = rawDueCapsules.filter((c) => c.openedAt == null);
-      const dueCapsuleInputs = await Promise.all(
-        unopenedDueCapsules.map(async (capsule) => ({
-          capsule,
-          userBook: await UserBookRepository.getByIdWithDetails(db, capsule.userBookId),
-        })),
+
+      /**
+       * POLYTSIA V1.7, Phase 11 (ТЗ §17) — ВИПРАВЛЕНИЙ N+1. Раніше тут був послідовний
+       * `getByIdWithDetails` на КОЖНУ due-капсулу. Виправдання «due-капсул завжди мало» вірне
+       * для ОДНОГО Home-слоту, але цей екран показує їх УСІ: людина, що роками ставила капсули
+       * на 6-12 місяців, легко накопичує десятки прострочених одночасно — і кожна коштувала
+       * окремого запиту з трьома JOIN'ами. Пакетний метод уже існував (`listWithDetailsByIds`,
+       * ним користується сусідній розділ «Перечитання» в цьому ж хуку) — тут його просто не
+       * застосували.
+       */
+      const dueUserBooks = await UserBookRepository.listWithDetailsByIds(
+        db,
+        [...new Set(unopenedDueCapsules.map((c) => c.userBookId))],
       );
-      const dueCapsuleCandidateInputs: CapsuleDueCandidateInput[] = dueCapsuleInputs
+      const dueUserBookById = new Map(dueUserBooks.map((ub) => [ub.id, ub]));
+      const dueCapsuleCandidateInputs: CapsuleDueCandidateInput[] = unopenedDueCapsules
+        .map((capsule) => ({ capsule, userBook: dueUserBookById.get(capsule.userBookId) }))
         .filter((x): x is { capsule: typeof x.capsule; userBook: NonNullable<typeof x.userBook> } => x.userBook != null)
         .map(({ capsule, userBook }) => ({
           capsuleId: capsule.id,
@@ -64,9 +73,8 @@ export function useMemoryHub() {
         }));
       const dueCapsules = listDueCapsuleCandidates(dueCapsuleCandidateInputs, now);
 
-      // Пакетний запит (`listWithDetailsByIds`, фіксована кількість запитів незалежно від
-      // розміру списку) — на відміну від due-капсул (завжди мало), книг з ≥2 завершеними
-      // прочитаннями з часом може стати помітно більше, тож послідовний N+1 тут не годиться.
+      // Той самий пакетний запит, що й для капсул вище: фіксована кількість запитів незалежно
+      // від розміру списку.
       const rereadUserBooks = await UserBookRepository.listWithDetailsByIds(db, rereadUserBookIds);
       const rereadCandidates: RereadCandidate[] = rereadUserBooks.map((userBook) => ({
         userBookId: userBook.id,

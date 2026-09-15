@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { generateId } from '@/lib/uuid';
 import { nowIso } from '@/lib/dateUtils';
 import { computeElapsedMs, isCurrentlyPaused } from '@/lib/sessionTiming';
-import { calendarDateBounds, calendarDateOf } from '@/lib/readingCalendar';
+import { calendarDateBounds, calendarDateOf, resolveEventCalendarDate } from '@/lib/readingCalendar';
 import type { PausedInterval, ReadingSession } from '@/types/readingSession';
 import type { UserBookStatus } from '@/types/userBook';
 import type { ReadingRunStatus } from '@/types/readingRun';
@@ -557,6 +557,32 @@ export const ReadingSessionRepository = {
   },
 
   /**
+   * POLYTSIA V1.7, Phase 11 (ТЗ §9, §8) — унікальні КАЛЕНДАРНІ ДНІ всіх завершених сесій за весь
+   * час, відсортовані. Вхід для streak'ів і лічильника активних днів.
+   *
+   * ── ЧОМУ ОКРЕМИЙ МЕТОД, А НЕ ЗМІНА `listCompletedStartInstants` ──────────────────────────────
+   * Той метод чесно називається «моменти» і саме моменти й віддає; є місця, яким потрібні саме
+   * вони. Тут потрібні ДНІ — і після §9 це вже не те саме, бо день може бути збережений, а не
+   * виведений. Переліт «моментів» у «дні» всередині старої назви зробив би контракт брехливим.
+   *
+   * Резолв — у JS через `resolveEventCalendarDate`, а не в SQL: це та сама єдина точка правила
+   * «збережена дата перша, legacy другим», якою користуються всі інші поверхні. Обсяг тут —
+   * дві колонки на сесію, тобто той самий порядок даних, що й раніше (ТЗ §17 про продуктивність
+   * Statistics цим не порушується).
+   */
+  async listCompletedCalendarDays(db: SQLiteDatabase): Promise<string[]> {
+    const rows = await db.getAllAsync<{ started_at: string; started_calendar_date: string | null }>(
+      `SELECT started_at, started_calendar_date FROM reading_session
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL
+       ORDER BY started_at ASC`,
+    );
+    const days = new Set(
+      rows.map((row) => resolveEventCalendarDate(row.started_calendar_date, row.started_at)),
+    );
+    return [...days].sort();
+  },
+
+  /**
    * Метрики УСІХ завершених сесій за весь час — рівно ті чотири колонки, які приймає
    * canonical-двигун періодів (`PeriodSessionInput`, `src/lib/readingPeriodSummary.ts`).
    * POLYTSIA V1.7, Phase 4 (Reading Life, `docs/V1_7_READING_LIFE.md`).
@@ -588,6 +614,8 @@ export const ReadingSessionRepository = {
       id: string;
       userBookId: string;
       startedAt: string;
+      /** POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена дата старту; `null` для legacy. */
+      startedCalendarDate: string | null;
       durationSeconds: number | null;
       startPage: number;
       endPage: number | null;
@@ -597,11 +625,13 @@ export const ReadingSessionRepository = {
       id: string;
       user_book_id: string;
       started_at: string;
+      started_calendar_date: string | null;
       duration_seconds: number | null;
       start_page: number;
       end_page: number | null;
     }>(
-      `SELECT id, user_book_id, started_at, duration_seconds, start_page, end_page FROM reading_session
+      `SELECT id, user_book_id, started_at, started_calendar_date, duration_seconds, start_page, end_page
+       FROM reading_session
        WHERE deleted_at IS NULL AND ended_at IS NOT NULL
        ORDER BY started_at ASC`,
     );
@@ -609,6 +639,7 @@ export const ReadingSessionRepository = {
       id: row.id,
       userBookId: row.user_book_id,
       startedAt: row.started_at,
+      startedCalendarDate: row.started_calendar_date,
       durationSeconds: row.duration_seconds,
       startPage: row.start_page,
       endPage: row.end_page,

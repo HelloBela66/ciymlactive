@@ -263,6 +263,9 @@ async function buildLifeLikeHook(db: SQLiteDatabase) {
       runNumber: run.runNumber,
       status: run.status,
       finishedAt: run.finishedAt,
+      // POLYTSIA V1.7, Phase 11 — те саме поле, що передає справжній хук: без нього тест
+      // перевіряв би власну спрощену копію виклику, а не продакшн-шлях.
+      finishedCalendarDate: run.finishedCalendarDate,
     })),
     journalInstants,
   });

@@ -43,17 +43,24 @@ interface HomeContextRestData {
   tbrOldestWaiting: ReturnType<typeof findOldestWaitingBook>;
 }
 
-/** Деталі книги, потрібні лише для due-капсул (обкладинка/назва) — послідовний N+1, той самий
- * прийнятний прийом, що й `rebuildCapsuleRemindersAsync` (`useBookCapsule.ts`): due-капсул
- * завжди мало (п.45 ТЗ), і це не "гарячий" шлях (рахується разово на Home-рендер, не в циклі). */
+/**
+ * Деталі книг due-капсул (обкладинка/назва) ОДНИМ пакетним запитом.
+ *
+ * POLYTSIA V1.7, Phase 11 (ТЗ §17) — ВИПРАВЛЕНИЙ N+1. Раніше тут був послідовний
+ * `getByIdWithDetails` на кожну капсулу, з виправданням «due-капсул завжди мало». Home справді
+ * показує лише ОДНУ, але запит робився по ВСІХ прострочених — а їх у людини з роками історії
+ * може бути десятки. Пакетний метод уже існував; його просто не застосували.
+ */
 async function attachCapsuleDetails(
   db: SQLiteDatabase,
   capsules: BookCapsule[],
 ): Promise<Parameters<typeof findCapsuleDueCandidate>[0]> {
-  const withDetails = await Promise.all(
-    capsules.map(async (capsule) => ({ capsule, userBook: await UserBookRepository.getByIdWithDetails(db, capsule.userBookId) })),
-  );
-  return withDetails
+  const userBooks = await UserBookRepository.listWithDetailsByIds(db, [
+    ...new Set(capsules.map((capsule) => capsule.userBookId)),
+  ]);
+  const userBookById = new Map(userBooks.map((ub) => [ub.id, ub]));
+  return capsules
+    .map((capsule) => ({ capsule, userBook: userBookById.get(capsule.userBookId) }))
     .filter((x): x is { capsule: BookCapsule; userBook: NonNullable<typeof x.userBook> } => x.userBook != null)
     .map(({ capsule, userBook }) => ({
       capsuleId: capsule.id,
@@ -111,9 +118,8 @@ function useHomeContextRestData() {
         now,
       );
 
-      // Дешевий попередній фільтр ДО N+1 деталей — переглянуті due-капсули не варті зайвого
-      // запиту (`findCapsuleDueCandidate` однаково відфільтрував би їх, але без потреби
-      // тягнути `UserBookRepository.getByIdWithDetails` на кожну).
+      // Дешевий попередній фільтр ДО запиту деталей: переглянуті due-капсули однаково
+      // відфільтрувались би (`findCapsuleDueCandidate`), тож тягнути їхні книги не варто.
       const unopenedDueCapsules = dueCapsules.filter((c) => c.openedAt == null);
       const capsuleDue =
         unopenedDueCapsules.length > 0
