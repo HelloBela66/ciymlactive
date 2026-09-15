@@ -27,9 +27,9 @@ type GoogleBooksProxyClientModule = typeof import('./googleBooksProxyClient');
 
 async function loadClient(): Promise<GoogleBooksProxyClientModule> {
   jest.resetModules();
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- динамічний import() ламає
-  // CI під jest-expo (див. коментар над файлом); require() — єдиний робочий спосіб
-  // перезавантажити цей env-залежний модуль між тестами.
+  // Динамічний import() ламає CI під jest-expo (див. коментар над файлом); require() — єдиний
+  // робочий спосіб перезавантажити цей env-залежний модуль між тестами.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- require() навмисний, див. коментар вище
   return require('./googleBooksProxyClient') as GoogleBooksProxyClientModule;
 }
 
