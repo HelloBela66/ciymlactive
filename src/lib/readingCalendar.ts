@@ -226,3 +226,51 @@ export function monthSpanRange(year: number, month: number, monthCount: number):
 export function inclusiveEnd(range: ReadingPeriodRange): string {
   return new Date(new Date(range.endIso).getTime() - 1).toISOString();
 }
+
+// ─── ПЕРСИСТЕНТНА КАЛЕНДАРНА ІДЕНТИЧНІСТЬ (POLYTSIA V1.7, Phase 11, ТЗ §9) ────────────────────
+
+/**
+ * ЄДИНА точка правди «до якого читацького дня належить ця подія».
+ *
+ * ── ДВА ПРАВИЛА, ОДНЕ МІСЦЕ (ТЗ §8) ──────────────────────────────────────────────────────────
+ * `persistedDate` є  → вона канонічна. Записана в момент самої події, у поясі, який був активним
+ *                      тоді; ніколи не перераховується пізніше.
+ * `persistedDate` `NULL` → **legacy reconstructed calendar attribution**: день відновлюється з
+ *                      абсолютного моменту в ПОТОЧНОМУ локальному календарі.
+ *
+ * Друга гілка — свідомо неоднозначна, і так і має називатись. Справжній offset на момент запису
+ * ніколи не зберігався, тож для старих рядків застосунок не знає правди й не вдає, що знає
+ * (ТЗ §1, §15). Backfill заборонений саме тому: він перетворив би сьогоднішню здогадку на
+ * незворотний «факт».
+ *
+ * ТЗ §8 прямо вимагає не змішувати ці правила непомітно — тому вони не розсипані по запитах, а
+ * живуть тут, і кожен, кому потрібен день події, проходить крізь цю функцію.
+ */
+export function resolveEventCalendarDate(
+  persistedDate: string | null | undefined,
+  instantIso: string,
+): string {
+  return persistedDate ?? readingDayKey(instantIso);
+}
+
+/**
+ * Календарна дата моменту «зараз» — те, що записується в `*_calendar_date` при створенні події
+ * (ТЗ §5, §6, §7). Окрема назва від `readingDayKeyOf` навмисно: та відповідає на питання «який це
+ * день», ця — «що саме зберегти назавжди», і плутати їх на місці запису не варто.
+ */
+export function calendarDateOf(instant: Date): string {
+  return readingDayKeyOf(instant);
+}
+
+/**
+ * Межі періоду як ВКЛЮЧНІ календарні дати — форма, у якій діапазон порівнюється з
+ * `*_calendar_date` у SQL. `ReadingPeriodRange` напіввідкритий в інстантах (`endIso` — уже
+ * наступний період), тож верхня межа береться з `inclusiveEnd`, інакше останній день періоду
+ * випадав би з вибірки.
+ */
+export function calendarDateBounds(range: ReadingPeriodRange): { startDate: string; endDate: string } {
+  return {
+    startDate: readingDayKey(range.startIso),
+    endDate: readingDayKey(inclusiveEnd(range)),
+  };
+}

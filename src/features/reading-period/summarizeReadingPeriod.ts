@@ -78,6 +78,8 @@ export async function summarizeReadingPeriod(
       runNumber: run.runNumber,
       status: run.status,
       finishedAt: run.finishedAt,
+      // ТЗ §9 — проноситься далі, щоб споживачі періодів не мусили знову йти в репозиторій.
+      finishedCalendarDate: run.finishedCalendarDate,
     })),
     journalCount,
   });

@@ -1,4 +1,4 @@
-import { parseReadingMonthKey, readingMonthKey } from './readingCalendar';
+import { parseReadingMonthKey, readingMonthKey, resolveEventCalendarDate } from './readingCalendar';
 import {
   computeReadingPeriodSummary,
   type PeriodFinishedRunInput,
@@ -85,6 +85,19 @@ function emptyBucket(): MonthBucket {
   return { sessions: [], finishedRuns: [], journalCount: 0 };
 }
 
+/**
+ * POLYTSIA V1.7, Phase 11 (ТЗ §9) — місяць події з її КАЛЕНДАРНОГО ДНЯ, а не з інстанта.
+ *
+ * Збережена дата вже має вигляд `YYYY-MM-DD`, тож місяць — це просто її префікс; для legacy-рядка
+ * день спершу відновлюється з моменту (`resolveEventCalendarDate`). Проміжний крок через день, а
+ * не прямий `readingMonthKey(instant)`, тут принциповий: інакше збережена дата впливала б на межі
+ * запитів, але НЕ на те, у який місяць подія лягла в Reading Life, і на межі місяця з'явилась би
+ * рівно та розбіжність, проти якої вся ця робота.
+ */
+function monthKeyOfEvent(persistedDate: string | null | undefined, instantIso: string): string {
+  return resolveEventCalendarDate(persistedDate, instantIso).slice(0, 7);
+}
+
 function bucketFor(buckets: Map<string, MonthBucket>, monthKey: string): MonthBucket {
   const existing = buckets.get(monthKey);
   if (existing) return existing;
@@ -99,13 +112,16 @@ export function buildReadingLife(input: ReadingLifeInput): ReadingLife {
   const byMonth = new Map<string, MonthBucket>();
 
   for (const session of sessions) {
-    bucketFor(byMonth, readingMonthKey(session.startedAt)).sessions.push(session);
+    // POLYTSIA V1.7, Phase 11 (ТЗ §9) — місяць береться з КАЛЕНДАРНОГО ДНЯ події (збереженого
+    // або відновленого), а не з інстанта напряму: інакше після зміни поясу сесія могла б
+    // переїхати в сусідній місяць саме тут, попри те, що запити періодів уже стабільні.
+    bucketFor(byMonth, monthKeyOfEvent(session.startedCalendarDate, session.startedAt)).sessions.push(session);
   }
 
   for (const run of finishedRuns) {
     // Прохід, який ще триває, не має дати завершення — і не належить жодному місяцю історії.
     if (run.finishedAt == null) continue;
-    bucketFor(byMonth, readingMonthKey(run.finishedAt)).finishedRuns.push(run);
+    bucketFor(byMonth, monthKeyOfEvent(run.finishedCalendarDate, run.finishedAt)).finishedRuns.push(run);
   }
 
   if (journalInstants) {

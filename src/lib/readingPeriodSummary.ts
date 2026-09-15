@@ -1,4 +1,4 @@
-import { readingDayKey } from '@/lib/readingCalendar';
+import { resolveEventCalendarDate } from '@/lib/readingCalendar';
 import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
 import { pagesPerMinuteFromTotals } from '@/lib/readingPace';
 
@@ -45,6 +45,13 @@ export interface PeriodSessionInput {
   durationSeconds: number | null;
   startPage: number;
   endPage: number | null;
+  /**
+   * POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена календарна дата старту, якщо вона є. `null`/
+   * відсутнє поле = legacy-рядок, день якого відновлюється з `startedAt`
+   * (`resolveEventCalendarDate`). Опціональне, щоб чисту функцію можна було кликати і з
+   * не-репозиторних джерел, не вигадуючи для них дату.
+   */
+  startedCalendarDate?: string | null;
 }
 
 /**
@@ -60,6 +67,11 @@ export interface PeriodFinishedRunInput {
   runNumber: number;
   status: string;
   finishedAt: string | null;
+  /**
+   * POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена календарна дата завершення, якщо є. Потрібна
+   * там, де прохід розкладається по ПЕРІОДАХ (Reading Life), а не просто рахується.
+   */
+  finishedCalendarDate?: string | null;
 }
 
 export interface ReadingPeriodSummary {
@@ -159,7 +171,12 @@ export function computeReadingPeriodSummary(input: ReadingPeriodSummaryInput): R
   // Локальний календарний день (`readingCalendar.ts`), НЕ `startedAt.slice(0, 10)` — саме ця
   // заміна усуває misattribution нічних сесій (`docs/V1_7_TEMPORAL_SEMANTICS.md` §4).
   const dayKeys = new Set<string>();
-  for (const session of sessions) dayKeys.add(readingDayKey(session.startedAt));
+  // ТЗ §8 — «активний день» тепер питає ту саму центральну функцію, що й усе інше: збережена
+  // дата канонічна, legacy відновлюється з моменту. Саме тут персистентність і починає працювати:
+  // після переїзду активний день НЕ переїжджає разом із поясом.
+  for (const session of sessions) {
+    dayKeys.add(resolveEventCalendarDate(session.startedCalendarDate, session.startedAt));
+  }
   const activeDayKeys = [...dayKeys].sort();
 
   const finished = finishedRuns.filter((run) => run.status === 'finished');

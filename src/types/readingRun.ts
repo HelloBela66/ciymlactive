@@ -24,6 +24,19 @@ export const ReadingRunSchema = z.object({
    * користувача. UI/аналітика МОЖУТЬ (не зобов'язані) показувати такий run з нижчою
    * впевненістю — докладніше `docs/READING_RUN.md` §Backfill. */
   isLegacyBackfill: z.boolean(),
+  /**
+   * POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена локальна календарна дата (`YYYY-MM-DD`)
+   * відповідного `*At`, зафіксована в момент самої події. `null` для legacy-рядків: справжній
+   * пояс тоді не зберігався, тож застосунок не вдає, що знає його (backfill свідомо заборонений).
+   * Для таких рядків день відновлюється з абсолютного моменту — `resolveEventCalendarDate`.
+   *
+   * `nullish`, а не `nullable`: поле СТВОРЮЄТЬСЯ лише репозиторіями (єдиний write-path), тож
+   * робити його обов'язковим означало б змусити кожен тестовий літерал дописати `null` без
+   * жодного виграшу в коректності — `resolveEventCalendarDate` однаково трактує `undefined` і
+   * `null` як «немає збереженої дати, відновлюй з моменту».
+   */
+  startedCalendarDate: z.string().nullish(),
+  finishedCalendarDate: z.string().nullish(),
   createdAt: z.string(),
   updatedAt: z.string(),
   /** SOFT-DELETE READINESS (POLYTSIA V1.6.1, Фаза 26) — DB-колонка `deleted_at` існувала з

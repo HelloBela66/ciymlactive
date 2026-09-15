@@ -66,6 +66,8 @@ export function useReadingLife() {
           runNumber: run.runNumber,
           status: run.status,
           finishedAt: run.finishedAt,
+          // ТЗ §9 — збережена дата завершення, якщо є: саме за нею прохід лягає в місяць.
+          finishedCalendarDate: run.finishedCalendarDate,
         })),
         journalInstants,
       });

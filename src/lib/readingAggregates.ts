@@ -1,6 +1,6 @@
 import type { ReadingExperienceId } from '@/design/readingExperience';
 import { isReadingExperienceId } from '@/design/readingExperience';
-import { readingDayKey } from '@/lib/readingCalendar';
+import { resolveEventCalendarDate } from '@/lib/readingCalendar';
 
 /**
  * Спільні domain-calculator'и для аналітичних "підсумків за період" (POLYTSIA V1.6.1, Фаза 15
@@ -133,6 +133,8 @@ export function computeTopGenreAmong(genreNamesByBook: string[][]): TopGenreAmon
 
 export interface ActiveDayInput {
   startedAt: string;
+  /** POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена дата, якщо є; `null`/відсутнє = legacy. */
+  startedCalendarDate?: string | null;
 }
 
 /**
@@ -150,12 +152,19 @@ export interface ActiveDayInput {
  * Тобто UTC тут спирався на невірну передумову, і в результаті сесія о 00:30 у Києві давала
  * активний день ПОПЕРЕДНЬОЇ дати — та сама сесія, яку Календар показував правильно.
  *
- * Тепер день обчислює `readingDayKey` (`src/lib/readingCalendar.ts`) — ЄДИНА canonical-точка
- * перетворення instant → день читацької історії, спільна для Календаря, Статистики, Сезонів,
- * Wrapped і всіх періодичних підсумків V1.7.
+ * Тепер день обчислює `resolveEventCalendarDate` (`src/lib/readingCalendar.ts`) — ЄДИНА
+ * canonical-точка «до якого дня читацької історії належить подія», спільна для Календаря,
+ * Статистики, Сезонів, Wrapped і всіх періодичних підсумків V1.7.
+ *
+ * POLYTSIA V1.7, Phase 11 (ТЗ §9): з появою персистентної календарної дати ця точка стала
+ * двогілковою — збережена дата канонічна, legacy-рядок (`null`) відновлюється з абсолютного
+ * моменту. Обидві гілки живуть усередині `resolveEventCalendarDate`, а не тут.
  */
 export function computeActiveDays(sessions: ActiveDayInput[]): number {
-  return new Set(sessions.map((s) => readingDayKey(s.startedAt))).size;
+  // POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена дата канонічна, legacy відновлюється з моменту.
+  return new Set(
+    sessions.map((s) => resolveEventCalendarDate(s.startedCalendarDate, s.startedAt)),
+  ).size;
 }
 
 /** Мінімум сесій із заповненим `reading_experience` у періоді, перш ніж "Як читалося" (ТЗ §50)

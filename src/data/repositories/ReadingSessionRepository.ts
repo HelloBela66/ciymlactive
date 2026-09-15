@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { generateId } from '@/lib/uuid';
 import { nowIso } from '@/lib/dateUtils';
 import { computeElapsedMs, isCurrentlyPaused } from '@/lib/sessionTiming';
+import { calendarDateBounds, calendarDateOf } from '@/lib/readingCalendar';
 import type { PausedInterval, ReadingSession } from '@/types/readingSession';
 import type { UserBookStatus } from '@/types/userBook';
 import type { ReadingRunStatus } from '@/types/readingRun';
@@ -25,6 +26,8 @@ interface ReadingSessionRow {
   created_at: string;
   updated_at: string;
   reading_run_id: string | null;
+  /** POLYTSIA V1.7, Phase 11 (ТЗ §9) — `NULL` для legacy-рядків, і це легальний стан. */
+  started_calendar_date: string | null;
 }
 
 function parseIntervals(raw: string): PausedInterval[] {
@@ -53,6 +56,9 @@ function mapRow(row: ReadingSessionRow): ReadingSession {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     readingRunId: row.reading_run_id,
+    // ТЗ §9 — `null` означає «ми не знаємо», а не «дати не було»: read-path сам застосує
+    // задокументований fallback (`resolveEventCalendarDate`, `readingCalendar.ts`).
+    startedCalendarDate: row.started_calendar_date,
   };
 }
 
@@ -170,6 +176,13 @@ export const ReadingSessionRepository = {
   ): Promise<ReadingSession> {
     const id = generateId();
     const now = nowIso();
+    /**
+     * POLYTSIA V1.7, Phase 11 (ТЗ §9, §5) — календарний день СТАРТУ, зафіксований у поясі,
+     * активному саме зараз. Сесія `23:50 → 00:40` цілком належить цій даті — це вже чинне
+     * canonical-правило V1.7, і персистентність його не змінює, а робить незворотним: уся
+     * тривалість, сторінки й сам факт сесії лишаться в цьому дні, навіть якщо людина переїде.
+     */
+    const startedCalendarDate = calendarDateOf(new Date(now));
 
     const existingActiveRun = await ReadingRunRepository.getActiveByUserBookId(db, params.userBookId);
     let readingRunId = existingActiveRun?.id ?? null;
@@ -204,9 +217,9 @@ export const ReadingSessionRepository = {
         `INSERT INTO reading_session (
            id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
            start_page, end_page, duration_seconds, mood_note, is_edited, created_at, updated_at,
-           reading_run_id
-         ) VALUES (?, ?, ?, NULL, ?, '[]', ?, NULL, NULL, NULL, 0, ?, ?, ?)`,
-        [id, params.userBookId, now, params.goalMinutes ?? null, params.startPage, now, now, readingRunId],
+           reading_run_id, started_calendar_date
+         ) VALUES (?, ?, ?, NULL, ?, '[]', ?, NULL, NULL, NULL, 0, ?, ?, ?, ?)`,
+        [id, params.userBookId, now, params.goalMinutes ?? null, params.startPage, now, now, readingRunId, startedCalendarDate],
       );
     });
 
@@ -226,6 +239,7 @@ export const ReadingSessionRepository = {
       createdAt: now,
       updatedAt: now,
       readingRunId,
+      startedCalendarDate,
     };
   },
 
@@ -431,11 +445,35 @@ export const ReadingSessionRepository = {
    * випадково перетнула північ.
    */
   async listStartedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingSession[]> {
+    /**
+     * POLYTSIA V1.7, Phase 11 (ТЗ §9, §8, §9-SQL) — ЗМІШАНИЙ набір: нові рядки зі збереженою
+     * календарною датою й legacy-рядки без неї. Дві гілки, обидві явні.
+     *
+     * ── ЧОМУ ДВІ ГІЛКИ, А НЕ `COALESCE(...strftime...)` ──────────────────────────────────────
+     * Спокуса — звести все до одного виразу: `COALESCE(date, strftime('%Y-%m-%d', started_at,
+     * <offset>))`. Це було б ТИХОЮ РЕГРЕСІЄЮ для legacy-історії: `strftime` довелось би годувати
+     * ОДНИМ offset'ом (поточним), а він неправильний для рядків, записаних за іншого DST. Сесія
+     * 20 січня о 23:30 за київським часом (тоді UTC+2) під літнім offset'ом (+3) переїхала б на
+     * 21 січня. Абсолютні межі, які будує `readingCalendar`, такої вади не мають: JS застосовує
+     * ІСТОРИЧНИЙ offset кожного моменту.
+     *
+     * Тому legacy-гілка лишається рівно такою, якою була (`started_at` у напіввідкритому
+     * діапазоні інстантів), а нова гілка працює з датою — і саме вона переживає зміну поясу.
+     *
+     * Індексу на `started_calendar_date` навмисно не додано (ТЗ §11): `OR` по двох колонках
+     * однаково не дасть простого index scan, а speculative index без виміряного сповільнення —
+     * саме те, чого ТЗ просить не робити.
+     */
+    const { startDate, endDate } = calendarDateBounds({ startIso, endIso });
     const rows = await db.getAllAsync<ReadingSessionRow>(
       `SELECT * FROM reading_session
-       WHERE started_at >= ? AND started_at < ? AND deleted_at IS NULL AND ended_at IS NOT NULL
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL
+         AND (
+           (started_calendar_date IS NOT NULL AND started_calendar_date >= ? AND started_calendar_date <= ?)
+           OR (started_calendar_date IS NULL AND started_at >= ? AND started_at < ?)
+         )
        ORDER BY started_at ASC`,
-      [startIso, endIso],
+      [startDate, endDate, startIso, endIso],
     );
     return rows.map(mapRow);
   },

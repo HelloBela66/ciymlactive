@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { generateId } from '@/lib/uuid';
 import { nowIso } from '@/lib/dateUtils';
+import { calendarDateBounds, calendarDateOf } from '@/lib/readingCalendar';
 import type { ReadingRun, ReadingRunStatus } from '@/types/readingRun';
 
 interface ReadingRunRow {
@@ -14,6 +15,9 @@ interface ReadingRunRow {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  /** POLYTSIA V1.7, Phase 11 (ТЗ §9) — `NULL` для legacy-рядків, і це легальний стан. */
+  started_calendar_date: string | null;
+  finished_calendar_date: string | null;
 }
 
 function mapRow(row: ReadingRunRow): ReadingRun {
@@ -32,6 +36,10 @@ function mapRow(row: ReadingRunRow): ReadingRun {
     // проноситься все одно, щоб домен-тип чесно відповідав ТЗ (id+createdAt+updatedAt+deletedAt
     // обов'язково), а не тому, що тут колись може прийти не-NULL значення.
     deletedAt: row.deleted_at,
+    // ТЗ §9 — `null` означає «ми не знаємо», а не «дати не було»: read-path сам застосує
+    // задокументований fallback (`resolveEventCalendarDate`, `readingCalendar.ts`).
+    startedCalendarDate: row.started_calendar_date,
+    finishedCalendarDate: row.finished_calendar_date,
   };
 }
 
@@ -113,12 +121,16 @@ export const ReadingRunRepository = {
     const now = nowIso();
     const startedAt = params.startedAt ?? now;
 
+    // POLYTSIA V1.7, Phase 11 (ТЗ §9, §6) — календарна дата старту фіксується ОДИН раз, у поясі,
+    // активному саме зараз, і надалі ніколи не перераховується з `started_at` у поточному поясі.
+    const startedCalendarDate = calendarDateOf(new Date(startedAt));
+
     await db.runAsync(
       `INSERT INTO reading_run (
          id, user_book_id, run_number, status, started_at, finished_at,
-         is_legacy_backfill, created_at, updated_at
-       ) VALUES (?, ?, ?, 'in_progress', ?, NULL, 0, ?, ?)`,
-      [id, params.userBookId, runNumber, startedAt, now, now],
+         is_legacy_backfill, created_at, updated_at, started_calendar_date
+       ) VALUES (?, ?, ?, 'in_progress', ?, NULL, 0, ?, ?, ?)`,
+      [id, params.userBookId, runNumber, startedAt, now, now, startedCalendarDate],
     );
 
     return {
@@ -132,6 +144,8 @@ export const ReadingRunRepository = {
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
+      startedCalendarDate,
+      finishedCalendarDate: null,
     };
   },
 
@@ -150,13 +164,17 @@ export const ReadingRunRepository = {
 
     const now = nowIso();
     const finishedAt = params.finishedAt ?? now;
+    // ТЗ §7 — записується з календарною семантикою МОМЕНТУ ЗАВЕРШЕННЯ; пізніше не derive'иться.
+    const finishedCalendarDate = calendarDateOf(new Date(finishedAt));
 
     await db.runAsync(
-      `UPDATE reading_run SET status = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
-      [params.status, finishedAt, now, id],
+      `UPDATE reading_run
+         SET status = ?, finished_at = ?, updated_at = ?, finished_calendar_date = ?
+       WHERE id = ?`,
+      [params.status, finishedAt, now, finishedCalendarDate, id],
     );
 
-    return { ...existing, status: params.status, finishedAt, updatedAt: now };
+    return { ...existing, status: params.status, finishedAt, updatedAt: now, finishedCalendarDate };
   },
 
   /** М'яке видалення — помилково розпочатий run (наприклад, одразу скасований перехід у
@@ -219,16 +237,22 @@ export const ReadingRunRepository = {
    * замість по одному" підхід, що й `ActivityHistoryRepository.listBetween`.
    */
   async listStartedOrFinishedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingRun[]> {
+    // ТЗ §9 — те саме двогілкове правило, застосоване окремо до старту й до завершення: у
+    // Календарі прохід видно і в день початку, і в день завершення, і кожна з цих дат має власну
+    // персистентність.
+    const { startDate, endDate } = calendarDateBounds({ startIso, endIso });
     const rows = await db.getAllAsync<ReadingRunRow>(
       `SELECT rr.* FROM reading_run rr
        JOIN user_book ub ON ub.id = rr.user_book_id
        WHERE rr.deleted_at IS NULL
          AND (
-           (rr.started_at >= ? AND rr.started_at < ?)
-           OR (rr.finished_at >= ? AND rr.finished_at < ?)
+           (rr.started_calendar_date IS NOT NULL AND rr.started_calendar_date >= ? AND rr.started_calendar_date <= ?)
+           OR (rr.started_calendar_date IS NULL AND rr.started_at >= ? AND rr.started_at < ?)
+           OR (rr.finished_calendar_date IS NOT NULL AND rr.finished_calendar_date >= ? AND rr.finished_calendar_date <= ?)
+           OR (rr.finished_calendar_date IS NULL AND rr.finished_at >= ? AND rr.finished_at < ?)
          )
        ORDER BY rr.started_at ASC`,
-      [startIso, endIso, startIso, endIso],
+      [startDate, endDate, startIso, endIso, startDate, endDate, startIso, endIso],
     );
     return rows.map(mapRow);
   },
@@ -290,14 +314,23 @@ export const ReadingRunRepository = {
    * Бібліотеку, лише в історичні поверхні.
    */
   async listFinishedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingRun[]> {
+    /**
+     * POLYTSIA V1.7, Phase 11 (ТЗ §9) — дві явні гілки для змішаного набору; обґрунтування,
+     * чому саме дві, а не `COALESCE(...strftime...)` — у `ReadingSessionRepository.listStartedBetween`
+     * (коротко: один поточний offset неправильний для рядків, записаних за іншого DST).
+     */
+    const { startDate, endDate } = calendarDateBounds({ startIso, endIso });
     const rows = await db.getAllAsync<ReadingRunRow>(
       `SELECT rr.* FROM reading_run rr
        JOIN user_book ub ON ub.id = rr.user_book_id
        WHERE rr.deleted_at IS NULL
          AND rr.status IN ('finished', 'did_not_finish')
-         AND rr.finished_at >= ? AND rr.finished_at < ?
+         AND (
+           (rr.finished_calendar_date IS NOT NULL AND rr.finished_calendar_date >= ? AND rr.finished_calendar_date <= ?)
+           OR (rr.finished_calendar_date IS NULL AND rr.finished_at >= ? AND rr.finished_at < ?)
+         )
        ORDER BY rr.finished_at ASC`,
-      [startIso, endIso],
+      [startDate, endDate, startIso, endIso],
     );
     return rows.map(mapRow);
   },

@@ -40,6 +40,13 @@ export const ReadingSessionSchema = z.object({
    * `020_reading_run_backfill.ts`).
    */
   readingRunId: z.string().nullable(),
+  /**
+   * POLYTSIA V1.7, Phase 11 (ТЗ §9) — збережена локальна календарна дата (`YYYY-MM-DD`) старту
+   * сесії, зафіксована в момент старту. `null` для legacy-рядків: справжній пояс тоді не
+   * зберігався, тож застосунок не вдає, що знає його (backfill свідомо заборонений). Для таких
+   * рядків день відновлюється з `startedAt` — `resolveEventCalendarDate`.
+   */
+  startedCalendarDate: z.string().nullish(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
