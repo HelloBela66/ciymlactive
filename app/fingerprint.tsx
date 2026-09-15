@@ -1,27 +1,21 @@
-import React, { useRef, useState } from 'react';
-import { View, Linking } from 'react-native';
+import React, { useRef } from 'react';
+import { View } from 'react-native';
 import { Stack } from 'expo-router';
-import { useMutation } from '@tanstack/react-query';
-import { captureRef } from 'react-native-view-shot';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { QueryErrorState } from '@/components/ui/QueryErrorState';
 import { FingerprintCardPreview } from '@/components/fingerprint/FingerprintCardPreview';
+import { ShareCardActions } from '@/components/share/ShareCardActions';
 import { useTheme } from '@/design/ThemeProvider';
 import { useReadingFingerprint } from '@/features/fingerprint/useReadingFingerprint';
+import { useShareCard } from '@/features/share/useShareCard';
 import { BADGE_META } from '@/lib/readingFingerprint';
-import { shareFingerprintCardImage, saveFingerprintCardImageToLibrary } from '@/lib/fingerprintCardFile';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('app/fingerprint');
-
-/** Спільні опції захоплення — той самий PNG/максимальна якість, що й `CAPTURE_OPTIONS` у
- * `app/seasons/[seasonKey].tsx`/`app/memory/[workId].tsx`. */
-const CAPTURE_OPTIONS = { format: 'png', quality: 1 } as const;
 
 function BadgeRow({ icon, label }: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string }) {
   const theme = useTheme();
@@ -62,66 +56,7 @@ export default function FingerprintScreen() {
   const { data, isLoading, isError, refetch } = useReadingFingerprint();
 
   const cardRef = useRef<View>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [permissionError, setPermissionError] = useState<string | null>(null);
-  const [permissionBlocked, setPermissionBlocked] = useState(false);
-
-  const shareCard = useMutation({
-    mutationFn: async () => {
-      const uri = await captureRef(cardRef, CAPTURE_OPTIONS);
-      return shareFingerprintCardImage(uri);
-    },
-    onSuccess: (shared) => {
-      setStatusMessage(shared ? null : 'Системне "Поділитися" тут недоступне.');
-    },
-    onError: (error) => {
-      log.error('Не вдалося поділитися карткою відбитку', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      setStatusMessage('Не вдалося поділитися карткою. Спробуй ще раз.');
-    },
-  });
-
-  const saveCard = useMutation({
-    mutationFn: async () => {
-      const uri = await captureRef(cardRef, CAPTURE_OPTIONS);
-      return saveFingerprintCardImageToLibrary(uri);
-    },
-    onSuccess: (outcome) => {
-      if (outcome.kind === 'saved') {
-        setStatusMessage('Картку збережено в галерею.');
-        return;
-      }
-      setPermissionError(
-        outcome.canAskAgain
-          ? 'Немає дозволу зберегти в галерею.'
-          : 'Доступ до збереження фото відхилено назавжди — увімкни дозвіл для «Полиці» в налаштуваннях пристрою.',
-      );
-      setPermissionBlocked(!outcome.canAskAgain);
-    },
-    onError: (error) => {
-      log.error('Не вдалося зберегти картку відбитку в галерею', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      setStatusMessage('Не вдалося зберегти картку. Спробуй ще раз.');
-    },
-  });
-
-  const handleShare = () => {
-    if (shareCard.isPending || saveCard.isPending) return;
-    setStatusMessage(null);
-    setPermissionError(null);
-    setPermissionBlocked(false);
-    shareCard.mutate();
-  };
-
-  const handleSave = () => {
-    if (shareCard.isPending || saveCard.isPending) return;
-    setStatusMessage(null);
-    setPermissionError(null);
-    setPermissionBlocked(false);
-    saveCard.mutate();
-  };
+  const shareController = useShareCard({ cardRef, dialogTitle: 'Мій читацький відбиток', log });
 
   return (
     <>
@@ -164,36 +99,7 @@ export default function FingerprintScreen() {
                 <FingerprintCardPreview badges={data.shareCardBadges} />
               </View>
 
-              <View style={{ gap: theme.spacing.sm }}>
-                <Button
-                  label={shareCard.isPending ? 'Готую зображення…' : 'Поділитися'}
-                  onPress={handleShare}
-                  disabled={shareCard.isPending || saveCard.isPending}
-                />
-                <Button
-                  label={saveCard.isPending ? 'Зберігаю…' : 'Зберегти в галерею'}
-                  variant="secondary"
-                  onPress={handleSave}
-                  disabled={shareCard.isPending || saveCard.isPending}
-                />
-                {statusMessage ? (
-                  <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
-                    {statusMessage}
-                  </AppText>
-                ) : null}
-                {permissionError ? (
-                  <AppText variant="caption" color="danger" style={{ textAlign: 'center' }}>
-                    {permissionError}
-                  </AppText>
-                ) : null}
-                {permissionBlocked ? (
-                  <Button
-                    label="Відкрити налаштування пристрою"
-                    variant="secondary"
-                    onPress={() => Linking.openSettings()}
-                  />
-                ) : null}
-              </View>
+              <ShareCardActions controller={shareController} />
             </View>
           </View>
         )}

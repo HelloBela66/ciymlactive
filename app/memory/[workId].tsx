@@ -1,9 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { View, Linking } from 'react-native';
+import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useMutation } from '@tanstack/react-query';
-import { captureRef } from 'react-native-view-shot';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
@@ -18,6 +16,7 @@ import { JournalTimeline } from '@/components/memory/JournalTimeline';
 import { ReadingExperienceTimeline } from '@/components/memory/ReadingExperienceTimeline';
 import { ReadingRunsHistorySection } from '@/components/reading-runs/ReadingRunsHistorySection';
 import { SpoilerHiddenNotice } from '@/components/journal/SpoilerHiddenNotice';
+import { ShareCardActions } from '@/components/share/ShareCardActions';
 import { useTheme } from '@/design/ThemeProvider';
 import { memoryCardTemplateLabels, memoryCardTemplateDescriptions } from '@/design/i18n-labels';
 import { REACTION_META, isReactionId } from '@/design/reactions';
@@ -38,7 +37,7 @@ import { usePreReadingReflection } from '@/features/memory/usePreReadingReflecti
 import { canCreateCapsule } from '@/lib/bookCapsule';
 import { pickBeforeCardText } from '@/lib/beforeAfter';
 import { computeBookStats } from '@/lib/bookStats';
-import { shareMemoryCardImage, saveMemoryCardImageToLibrary } from '@/lib/memoryCardFile';
+import { useShareCard } from '@/features/share/useShareCard';
 import { createLogger } from '@/lib/logger';
 import type { Href } from 'expo-router';
 import type { MemoryCardTemplateId } from '@/types/bookMemory';
@@ -66,14 +65,6 @@ const log = createLogger('app/memory');
 const TEMPLATE_OPTIONS: { value: MemoryCardTemplateId; label: string }[] = (
   Object.keys(memoryCardTemplateLabels) as MemoryCardTemplateId[]
 ).map((id) => ({ value: id, label: memoryCardTemplateLabels[id] }));
-
-/** Спільні опції захоплення (Milestone 11, Фаза 9) — PNG, максимальна якість. Той самий
- * знімок іде і на "Поділитися", і на "Зберегти в галерею", тож знято в одному місці, а не
- * дубльовано в обох обробниках. Без `result` — типове значення `'tmpfile'` (реальний файл на
- * диску з розширенням `.png` у URI), навмисно НЕ `'base64'`/`'data-uri'`: і `Sharing.shareAsync`,
- * і `MediaLibrary.saveToLibraryAsync` (`memoryCardFile.ts`) чекають саме `file://`-шлях з
- * розширенням, а не рядок даних. */
-const CAPTURE_OPTIONS = { format: 'png', quality: 1 } as const;
 
 /** Один рядок запису в розділі "Повернутися до цих думок" — той самий вигляд, що й
  * `MemoryEntryLine` на `app/completion/[workId].tsx` (тип запису + іконка реакції, якщо є,
@@ -497,73 +488,11 @@ export default function MemoryCardScreen() {
   // задокументоване обмеження `react-native-view-shot`).
   const cardRef = useRef<View>(null);
 
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [permissionError, setPermissionError] = useState<string | null>(null);
-  const [permissionBlocked, setPermissionBlocked] = useState(false);
-
-  // Інлайн `useMutation` прямо в екрані (не в `features/memory/`) — той самий вибір, що й
-  // `saveMutation` у `app/cover-photo/[editionId].tsx`: це взаємодія з пристроєм (захоплення
-  // View, системний "Поділитися", фотогалерея), а не SQLite-мутація даних, тож їй тут і місце.
-  const shareCard = useMutation({
-    mutationFn: async () => {
-      const uri = await captureRef(cardRef, CAPTURE_OPTIONS);
-      return shareMemoryCardImage(uri);
-    },
-    onSuccess: (shared) => {
-      setStatusMessage(shared ? null : 'Системне "Поділитися" тут недоступне.');
-    },
-    onError: (error) => {
-      log.error('Не вдалося поділитися карткою', { error: error instanceof Error ? error.message : String(error) });
-      setStatusMessage('Не вдалося поділитися карткою. Спробуй ще раз.');
-    },
-  });
-
-  const saveCard = useMutation({
-    mutationFn: async () => {
-      const uri = await captureRef(cardRef, CAPTURE_OPTIONS);
-      return saveMemoryCardImageToLibrary(uri);
-    },
-    onSuccess: (outcome) => {
-      if (outcome.kind === 'saved') {
-        setStatusMessage('Картку збережено в галерею.');
-        return;
-      }
-      setPermissionError(
-        outcome.canAskAgain
-          ? 'Немає дозволу зберегти в галерею.'
-          : 'Доступ до збереження фото відхилено назавжди — увімкни дозвіл для «Полиці» в налаштуваннях пристрою.',
-      );
-      setPermissionBlocked(!outcome.canAskAgain);
-    },
-    onError: (error) => {
-      log.error('Не вдалося зберегти картку в галерею', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      setStatusMessage('Не вдалося зберегти картку. Спробуй ще раз.');
-    },
-  });
-
-  // Явна синхронна перевірка "вже виконується" (аудит M11, п.6.3) — той самий захист, що й
-  // `handleStatusChange` в `app/work/[workId].tsx` (`if (isStatusPending) return;`), а не лише
-  // покладання на `Button.disabled`: `disabled` стає `true` тільки ПІСЛЯ повторного рендеру з
-  // новим `isPending`, тож швидкий подвійний тап теоретично встигає натиснути двічі до того,
-  // як кнопка візуально стане неактивною — тут же другий виклик відсікається одразу, без
-  // очікування на рендер.
-  const handleShare = () => {
-    if (shareCard.isPending || saveCard.isPending) return;
-    setStatusMessage(null);
-    setPermissionError(null);
-    setPermissionBlocked(false);
-    shareCard.mutate();
-  };
-
-  const handleSave = () => {
-    if (shareCard.isPending || saveCard.isPending) return;
-    setStatusMessage(null);
-    setPermissionError(null);
-    setPermissionBlocked(false);
-    saveCard.mutate();
-  };
+  // POLYTSIA V1.7, Phase 5 (SHARE INFRASTRUCTURE CONSOLIDATION, ТЗ §13/§98) — захоплення картки,
+  // системне «Поділитися», збереження в галерею й уся обробка дозволів тепер в одному місці
+  // (`useShareCard`), спільному з Сезонами, Відбитком і Recap. До цього тут жила власна копія
+  // тих самих ~60 рядків.
+  const shareController = useShareCard({ cardRef, dialogTitle: 'Спогад про книгу', log });
 
   const selectedEntries = useMemo(() => {
     if (!memory || !allEntries) return [];
@@ -738,36 +667,7 @@ export default function MemoryCardScreen() {
               </AppText>
             </Card>
 
-            <View style={{ gap: theme.spacing.sm }}>
-              <Button
-                label={shareCard.isPending ? 'Готую зображення…' : 'Поділитися'}
-                onPress={handleShare}
-                disabled={shareCard.isPending || saveCard.isPending}
-              />
-              <Button
-                label={saveCard.isPending ? 'Зберігаю…' : 'Зберегти в галерею'}
-                variant="secondary"
-                onPress={handleSave}
-                disabled={shareCard.isPending || saveCard.isPending}
-              />
-              {statusMessage ? (
-                <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
-                  {statusMessage}
-                </AppText>
-              ) : null}
-              {permissionError ? (
-                <AppText variant="caption" color="danger" style={{ textAlign: 'center' }}>
-                  {permissionError}
-                </AppText>
-              ) : null}
-              {permissionBlocked ? (
-                <Button
-                  label="Відкрити налаштування пристрою"
-                  variant="secondary"
-                  onPress={() => Linking.openSettings()}
-                />
-              ) : null}
-            </View>
+            <ShareCardActions controller={shareController} />
 
             {preReadingReflection ? (
               <BeforeAfterSection

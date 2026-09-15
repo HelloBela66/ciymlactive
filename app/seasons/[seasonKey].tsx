@@ -1,22 +1,21 @@
 import React, { useRef, useState } from 'react';
-import { View, Pressable, Linking } from 'react-native';
+import { View, Pressable } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useMutation } from '@tanstack/react-query';
-import { captureRef } from 'react-native-view-shot';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { SeasonCardPreview, type SeasonCardFormat } from '@/components/seasons/SeasonCardPreview';
+import { ShareCardActions } from '@/components/share/ShareCardActions';
 import { useTheme } from '@/design/ThemeProvider';
 import { SEASON_META } from '@/design/season';
 import { READING_EXPERIENCE_LABELS } from '@/design/readingExperience';
 import { journalEntryTypeLabels } from '@/design/i18n-labels';
 import { useReadingSeason } from '@/features/seasons/useReadingSeason';
+import { useShareCard } from '@/features/share/useShareCard';
 import {
   parseSeasonKey,
   currentSeasonKey,
@@ -25,17 +24,11 @@ import {
   formatSeasonHeroTitle,
 } from '@/lib/season';
 import type { SeasonKey } from '@/lib/season';
-import { shareSeasonCardImage, saveSeasonCardImageToLibrary } from '@/lib/seasonCardFile';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 import { createLogger } from '@/lib/logger';
 import type { JournalFeedEntry } from '@/types/journalEntry';
 
 const log = createLogger('app/seasons');
-
-/** Спільні опції захоплення — той самий PNG/максимальна якість, що й `CAPTURE_OPTIONS` у
- * `app/memory/[workId].tsx`; той самий знімок іде і на "Поділитися", і на "Зберегти в
- * галерею" (докладніше — коментар там-таки), тож лишається тут в одному місці. */
-const CAPTURE_OPTIONS = { format: 'png', quality: 1 } as const;
 
 const FORMAT_OPTIONS: { value: SeasonCardFormat; label: string }[] = [
   { value: '4:5', label: 'Стрічка (4:5)' },
@@ -157,67 +150,7 @@ export default function ReadingSeasonScreen() {
   // застережник для Android, що й `cardRef` у `app/memory/[workId].tsx` (без нього нативна
   // оптимізація дерева view може "сплющити"/прибрати цей вузол).
   const cardRef = useRef<View>(null);
-
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [permissionError, setPermissionError] = useState<string | null>(null);
-  const [permissionBlocked, setPermissionBlocked] = useState(false);
-
-  const shareCard = useMutation({
-    mutationFn: async () => {
-      const uri = await captureRef(cardRef, CAPTURE_OPTIONS);
-      return shareSeasonCardImage(uri);
-    },
-    onSuccess: (shared) => {
-      setStatusMessage(shared ? null : 'Системне "Поділитися" тут недоступне.');
-    },
-    onError: (error) => {
-      log.error('Не вдалося поділитися карткою сезону', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      setStatusMessage('Не вдалося поділитися карткою. Спробуй ще раз.');
-    },
-  });
-
-  const saveCard = useMutation({
-    mutationFn: async () => {
-      const uri = await captureRef(cardRef, CAPTURE_OPTIONS);
-      return saveSeasonCardImageToLibrary(uri);
-    },
-    onSuccess: (outcome) => {
-      if (outcome.kind === 'saved') {
-        setStatusMessage('Картку збережено в галерею.');
-        return;
-      }
-      setPermissionError(
-        outcome.canAskAgain
-          ? 'Немає дозволу зберегти в галерею.'
-          : 'Доступ до збереження фото відхилено назавжди — увімкни дозвіл для «Полиці» в налаштуваннях пристрою.',
-      );
-      setPermissionBlocked(!outcome.canAskAgain);
-    },
-    onError: (error) => {
-      log.error('Не вдалося зберегти картку сезону в галерею', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      setStatusMessage('Не вдалося зберегти картку. Спробуй ще раз.');
-    },
-  });
-
-  const handleShare = () => {
-    if (shareCard.isPending || saveCard.isPending) return;
-    setStatusMessage(null);
-    setPermissionError(null);
-    setPermissionBlocked(false);
-    shareCard.mutate();
-  };
-
-  const handleSave = () => {
-    if (shareCard.isPending || saveCard.isPending) return;
-    setStatusMessage(null);
-    setPermissionError(null);
-    setPermissionBlocked(false);
-    saveCard.mutate();
-  };
+  const shareController = useShareCard({ cardRef, dialogTitle: 'Мій читацький сезон', log });
 
   const goToAdjacent = (direction: 'prev' | 'next') => {
     setKey((current) => adjacentSeasonKey(current, direction));
@@ -319,36 +252,7 @@ export default function ReadingSeasonScreen() {
               ) : null}
             </Card>
 
-            <View style={{ gap: theme.spacing.sm }}>
-              <Button
-                label={shareCard.isPending ? 'Готую зображення…' : 'Поділитися'}
-                onPress={handleShare}
-                disabled={shareCard.isPending || saveCard.isPending}
-              />
-              <Button
-                label={saveCard.isPending ? 'Зберігаю…' : 'Зберегти картку'}
-                variant="secondary"
-                onPress={handleSave}
-                disabled={shareCard.isPending || saveCard.isPending}
-              />
-              {statusMessage ? (
-                <AppText variant="caption" color="secondary" style={{ textAlign: 'center' }}>
-                  {statusMessage}
-                </AppText>
-              ) : null}
-              {permissionError ? (
-                <AppText variant="caption" color="danger" style={{ textAlign: 'center' }}>
-                  {permissionError}
-                </AppText>
-              ) : null}
-              {permissionBlocked ? (
-                <Button
-                  label="Відкрити налаштування пристрою"
-                  variant="secondary"
-                  onPress={() => Linking.openSettings()}
-                />
-              ) : null}
-            </View>
+            <ShareCardActions controller={shareController} saveLabel="Зберегти картку" />
 
             {/* ТЗ §46/47 — "Що залишилося з тобою": ЕКРАННА секція, ніколи не захоплюється в
                 зображення (поза `cardRef` вище) — той самий поділ "нормальний екран/export", що

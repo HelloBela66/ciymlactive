@@ -216,7 +216,8 @@ google-books-proxy/`), з нюансом "секрет опційний, дег�
 - **Файлова система / шляхи.** `backupFile.ts`/`csvFile.ts` будують імена файлів лише з
   timestamp'ів, ніколи з користувацьких/мережевих рядків. `coverPhotoStorage.ts` будує шляхи
   з внутрішньо згенерованого `editionId` (UUID) — не з чогось, до чого має доступ атакуючий.
-  `memoryCardFile.ts` працює лише з `uri`, який сам згенерував `react-native-view-shot`.
+  `shareCardFile.ts` (до V1.7 Phase 5 — три окремі `memoryCardFile.ts`/`seasonCardFile.ts`/
+  `fingerprintCardFile.ts`) працює лише з `uri`, який сам згенерував `react-native-view-shot`.
   Restore бекапу: `parseBackupJson` — `JSON.parse` у try/catch, Zod-валідація конверта,
   перевірка `app`/`schemaVersion` до будь-якого запису в БД, сам restore — в одній транзакції
   з повним rollback при помилці.

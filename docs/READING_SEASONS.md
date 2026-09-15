@@ -129,7 +129,12 @@ React Query test harness, якого тут свідомо ще немає. `use
 - Прибрано рядок `topGenre`/`busiestMonth` — дашбордний, не емоційний.
 - Формат (`'9:16' | '4:5'`) і сам механізм захоплення/доставки (`react-native-view-shot`,
   `expo-sharing`/`expo-media-library`, PNG) — без змін, той самий один шаблон (не кілька, як
-  картка-спогад), той самий окремий `src/lib/seasonCardFile.ts`.
+  картка-спогад).
+
+  **POLYTSIA V1.7, Phase 5 (ТЗ §13/§98):** `src/lib/seasonCardFile.ts` більше не існує —
+  його зведено з `memoryCardFile.ts` і `fingerprintCardFile.ts` в один `src/lib/shareCardFile.ts`
+  (+ `useShareCard`/`ShareCardActions`). Поведінка картки сезону не змінилась: той самий PNG, той
+  самий системний діалог, лише `dialogTitle` тепер параметр, а не окремий файл.
 
 ## Приватність (ТЗ §61, P0-фікс)
 

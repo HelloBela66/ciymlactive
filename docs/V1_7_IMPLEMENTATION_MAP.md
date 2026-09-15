@@ -68,7 +68,7 @@
 | §30 формат тривалості | `lib/calendarFormat.ts` (компактний «1 год 12 хв» + повнословесний) | **Перевикористати** |
 | §74 spoiler safety | `lib/spoilerSafe.ts` + spoiler-aware `ActivityHistoryRepository` | **Перевикористати.** Третьої реалізації не створювати |
 | §58 memory resurfacing | `lib/onThisDay.ts`, `lib/recall.ts`, capsule reminders, `OnThisDayCard.tsx` | **Спільний шар поверх**, не четверта система |
-| §47/§98 share | `memoryCardFile.ts` + `seasonCardFile.ts` + `fingerprintCardFile.ts` (три майже ідентичні) і `MemoryCardPreview`/`SeasonCardPreview`/`FingerprintCardPreview` | **Витягнути спільний примітив.** Не додавати 4-й і 5-й |
+| §47/§98 share | ~~`memoryCardFile.ts` + `seasonCardFile.ts` + `fingerprintCardFile.ts` (три майже ідентичні)~~ → **зведено в `lib/shareCardFile.ts` + `lib/shareCardMessages.ts` + `features/share/useShareCard.ts` + `components/share/ShareCardActions.tsx` (Phase 5)**; `MemoryCardPreview`/`SeasonCardPreview`/`FingerprintCardPreview` лишаються окремими — це РІЗНІ шаблони, не дублювання | **ЗРОБЛЕНО.** Recap користується спільним примітивом, 4-го файлу не з'явилось |
 | §73 історія ≠ жива бібліотека | `UserBookRepository.listWithDetailsByIdsIncludingDeleted` / `listByIdsIncludingDeleted` | **Перевикористати** для всіх історичних поверхонь |
 | §68/§69 продуктивність | `getLifetimePaceTotals`/`getLifetimeCompletedTotals` (SQL-агрегати), `listLastCompletedByUserBookIds`, `RatingRepository.listByUserBookIds`, `GenreRepository.listByWorkIds` (batch) | **Прецедент уже є** — наслідувати, не винаходити |
 
