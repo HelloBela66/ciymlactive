@@ -9,6 +9,8 @@ import { JournalPreview } from '@/components/ui/JournalPreview';
 import { useTheme } from '@/design/ThemeProvider';
 import { readingGoalTypeLabels } from '@/design/i18n-labels';
 import { useDismissHomeContextCard, useHomeContextCard } from '@/features/home/useHomeContextCard';
+import { useReadingMilestones } from '@/features/milestones/useReadingMilestones';
+import { MilestoneRow } from '@/components/milestones/MilestoneList';
 import { describeStaleReading } from '@/lib/staleReading';
 import { formatBookCountSentence, formatOldestWaitingSentence } from '@/lib/tbrPersonality';
 import { OnThisDayCard } from './OnThisDayCard';
@@ -176,6 +178,33 @@ function TbrSuggestionContextCard({
  * `OnThisDayCard`, що веде на `/on-this-day` — так, щоб тап по "×" не запускав навігацію (власний
  * `Pressable` кнопки перехоплює подію першим, `zIndex` вище картки під ним).
  */
+/**
+ * POLYTSIA V1.7, Phase 8 (ТЗ §21-§23) — віха на Home.
+ *
+ * Той самий `MilestoneRow`, що в Reading Life і Recap: одне формулювання на всі поверхні, а не
+ * третій варіант тексту спеціально для головної. Показує РІВНО ОДНУ віху — ту, що обрала
+ * пріоритезація; жодного списку досягнень тут немає (ТЗ §25).
+ *
+ * `onDismiss` приховує саме цю віху до завтра (ТЗ §23) — і НЕ видаляє її з Reading Life: вона
+ * лишається частиною історії, просто перестає займати слот на головній.
+ */
+function MilestoneContextCard({ milestoneId, onDismiss }: { milestoneId: string; onDismiss: () => void }) {
+  const theme = useTheme();
+  const { data } = useReadingMilestones();
+  const view = data?.find((entry) => entry.milestone.id === milestoneId);
+  // Віха зникла між вибором і рендером (рідко: інвалідація кешу) — тихо нічого, не порожня картка.
+  if (!view) return null;
+
+  return (
+    <View>
+      <MilestoneRow view={view} />
+      <View style={{ position: 'absolute', top: theme.spacing.sm, right: theme.spacing.sm, zIndex: 1 }}>
+        <DismissButton onPress={onDismiss} />
+      </View>
+    </View>
+  );
+}
+
 function OnThisDayContextCard({ onDismiss }: { onDismiss: () => void }) {
   const theme = useTheme();
   return (
@@ -207,6 +236,8 @@ export function HomeContextCard() {
       return <StaleReadingContextCard candidate={card.candidate} onDismiss={onDismiss} />;
     case 'capsule_due':
       return <CapsuleDueContextCard candidate={card.candidate} onDismiss={onDismiss} />;
+    case 'milestone':
+      return <MilestoneContextCard milestoneId={card.candidate.id} onDismiss={onDismiss} />;
     case 'on_this_day':
       return <OnThisDayContextCard onDismiss={onDismiss} />;
     case 'goal_near_completion':

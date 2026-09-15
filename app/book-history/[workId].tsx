@@ -12,6 +12,7 @@ import { useBookDetails } from '@/features/book-details/useBookDetails';
 import { useBookRelationshipTimeline } from '@/features/book-history/useBookRelationshipTimeline';
 import { formatCompactDuration } from '@/lib/calendarFormat';
 import { pluralizeUk } from '@/lib/pluralizeUk';
+import { formatReturnGap } from '@/lib/readingMilestoneCopy';
 import type {
   BookTimelineChapter,
   BookTimelineEvent,
@@ -147,6 +148,14 @@ function ChapterCard({ chapter }: { chapter: BookTimelineChapter }) {
   const theme = useTheme();
   const quietJournalCount = chapter.journalCount - chapter.meaningfulJournalCount;
 
+  // ТЗ V1.7 §8 (Phase 8) — «повернувся до цієї книги через 2 роки 4 місяці». Подія стосунків
+  // САМЕ з цією книгою, не глобальна віха: тому вона тут, у хронології книги, і ніде більше.
+  // Проміжок менший за місяць не показується — «через 3 дні» це не повернення через роки.
+  const returnGap =
+    chapter.previousRunFinishedAt && chapter.startedAt
+      ? formatReturnGap(chapter.previousRunFinishedAt, chapter.startedAt)
+      : null;
+
   return (
     <Card style={{ gap: theme.spacing.sm }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -157,6 +166,12 @@ function ChapterCard({ chapter }: { chapter: BookTimelineChapter }) {
           </AppText>
         ) : null}
       </View>
+
+      {returnGap ? (
+        <AppText variant="caption" color="secondary">
+          Повернувся до книги {returnGap}
+        </AppText>
+      ) : null}
 
       <View style={{ gap: theme.spacing.sm }}>
         {chapter.events.map((event, index) => (

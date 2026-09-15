@@ -17,7 +17,13 @@ import type { ReadingGoal, ReadingGoalProgress } from '@/types/readingGoal';
  * обґрунтування цього вибору — `docs/HOME_REDESIGN.md` §Порядок пріоритету) — перелік вище був
  * просто списком назв карток, не порядком показу.
  */
-export type HomeContextCardKind = 'stale_reading' | 'capsule_due' | 'on_this_day' | 'goal_near_completion' | 'tbr_suggestion';
+export type HomeContextCardKind =
+  | 'stale_reading'
+  | 'capsule_due'
+  | 'milestone'
+  | 'on_this_day'
+  | 'goal_near_completion'
+  | 'tbr_suggestion';
 
 export interface StaleReadingBookInput {
   userBookId: string;
@@ -154,9 +160,41 @@ export function findGoalNearCompletionCandidate(goals: GoalCandidate[]): GoalCan
   return best;
 }
 
+/**
+ * POLYTSIA V1.7, Phase 8 (ТЗ §21-§23) — віха як кандидат на контекстну картку.
+ *
+ * Свідомо МІНІМАЛЬНИЙ тип: лише id (для приглушення) і момент. Сам текст віхи будує
+ * `formatMilestoneCopy`, а дані — `useReadingMilestones`; цей чистий модуль про віхи нічого не
+ * знає й знати не мусить — він лише обирає, чий слот.
+ */
+export interface MilestoneCandidate {
+  id: string;
+  at: string;
+}
+
+/**
+ * Скільки днів віха лишається «новиною» для Home. Стара віха не спливає раптово на головній через
+ * рік — вона лишається в Reading Life, де їй і місце. Це НЕ нагадування й не pre-milestone
+ * сповіщення (ТЗ §26): картка показується лише тому, що подія щойно сталась.
+ */
+export const MILESTONE_HOME_CARD_MAX_AGE_DAYS = 14;
+
+/** Найновіша віха, якщо вона достатньо свіжа, щоб бути новиною (див. константу вище). */
+export function findRecentMilestoneCandidate(
+  milestones: MilestoneCandidate[],
+  now: Date,
+): MilestoneCandidate | null {
+  const latest = milestones.length > 0 ? milestones[milestones.length - 1] : undefined;
+  if (!latest) return null;
+  const ageMs = now.getTime() - new Date(latest.at).getTime();
+  if (ageMs < 0) return null;
+  return ageMs <= MILESTONE_HOME_CARD_MAX_AGE_DAYS * 24 * 60 * 60 * 1000 ? latest : null;
+}
+
 export type HomeContextCard =
   | { kind: 'stale_reading'; candidate: StaleReadingCandidate }
   | { kind: 'capsule_due'; candidate: CapsuleDueCandidate }
+  | { kind: 'milestone'; candidate: MilestoneCandidate }
   | { kind: 'on_this_day' }
   | { kind: 'goal_near_completion'; candidate: GoalCandidate }
   | { kind: 'tbr_suggestion'; bookCount: number; oldestWaiting: OldestWaitingInsight | null };
@@ -168,6 +206,8 @@ export interface HomeContextSelectionInput {
    * `src/lib/onThisDay.ts`) — сам вміст картки лишається повністю в `OnThisDayCard`, тут
    * потрібен лише булевий сигнал "чи вона хоче зайняти слот". */
   onThisDayAvailable: boolean;
+  /** POLYTSIA V1.7, Phase 8 — найсвіжіша віха, якщо вона є (`findRecentMilestoneCandidate`). */
+  milestone: MilestoneCandidate | null;
   goalNearCompletion: GoalCandidate | null;
   tbrBookCount: number;
   tbrOldestWaiting: OldestWaitingInsight | null;
@@ -184,6 +224,12 @@ export interface HomeContextSelectionInput {
 export function selectHomeContextCard(input: HomeContextSelectionInput): HomeContextCard | null {
   if (input.staleReading) return { kind: 'stale_reading', candidate: input.staleReading };
   if (input.capsuleDue) return { kind: 'capsule_due', candidate: input.capsuleDue };
+  // POLYTSIA V1.7, Phase 8 (ТЗ §22) — віха стоїть ВИЩЕ за `on_this_day`, але нижче за дві
+  // перші. Логіка: перші дві картки — про те, що людина може зробити ЗАРАЗ (покинуте читання,
+  // капсула, час якої настав); віха — рідкісна подія, що щойно сталась; `on_this_day`
+  // ротується щодня сам і нічого не втрачає, якщо поступиться слотом раз на кілька років.
+  // Card flood не виникає: слот усе одно рівно один (ТЗ §22).
+  if (input.milestone) return { kind: 'milestone', candidate: input.milestone };
   if (input.onThisDayAvailable) return { kind: 'on_this_day' };
   if (input.goalNearCompletion) return { kind: 'goal_near_completion', candidate: input.goalNearCompletion };
   if (input.tbrBookCount > 0) {
@@ -210,6 +256,10 @@ export function getHomeContextCardSuppressionKey(card: HomeContextCard): string 
       return `stale_reading:${card.candidate.userBookId}`;
     case 'capsule_due':
       return `capsule_due:${card.candidate.capsuleId}`;
+    // Ключ — КОНКРЕТНА віха, не тип: приховати «50-ту книгу» сьогодні не повинно приховати
+    // «100 годин» наступного місяця (ТЗ §23). Приглушення не видаляє віху з Reading Life.
+    case 'milestone':
+      return `milestone:${card.candidate.id}`;
     case 'on_this_day':
       return 'on_this_day';
     case 'goal_near_completion':
@@ -236,6 +286,8 @@ export function nullifyHomeContextCandidate(
       return { ...input, staleReading: null };
     case 'capsule_due':
       return { ...input, capsuleDue: null };
+    case 'milestone':
+      return { ...input, milestone: null };
     case 'on_this_day':
       return { ...input, onThisDayAvailable: false };
     case 'goal_near_completion':
@@ -247,7 +299,7 @@ export function nullifyHomeContextCandidate(
 
 /** Скільки типів карток існує — межа циклу нижче, щоб приглушення НЕ МОГЛО зациклитись
  * (кожна ітерація або повертає картку, або приглушує рівно один тип і ніколи не повертає його). */
-const HOME_CONTEXT_CARD_KIND_COUNT = 5;
+const HOME_CONTEXT_CARD_KIND_COUNT = 6;
 
 /**
  * #169 — той самий вибір, що й `selectHomeContextCard`, але з урахуванням приглушених сьогодні

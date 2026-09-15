@@ -10,11 +10,13 @@ import { queryKeys } from '@/lib/queryKeys';
 import { findOldestWaitingBook } from '@/lib/tbrPersonality';
 import { selectHomePrimaryMemory } from '@/lib/onThisDay';
 import { useOnThisDay } from '@/features/on-this-day/useOnThisDay';
+import { useReadingMilestones } from '@/features/milestones/useReadingMilestones';
 import { HomeContextSuppressionStorage } from '@/lib/homeContextSuppressionStorage';
 import {
   findStaleReadingCandidate,
   findCapsuleDueCandidate,
   findGoalNearCompletionCandidate,
+  findRecentMilestoneCandidate,
   selectVisibleHomeContextCard,
   getHomeContextCardSuppressionKey,
   type StaleReadingCandidate,
@@ -149,12 +151,27 @@ export function useHomeContextCard(): HomeContextCard | null {
   const onThisDayQuery = useOnThisDay();
   const restQuery = useHomeContextRestData();
   const suppressedQuery = useHomeContextSuppressedKeys();
+  // POLYTSIA V1.7, Phase 8 (ТЗ §22) — той самий спільний кеш-запис віх, що й Reading Life/Recap.
+  // Home не рахує власних віх: якби рахував, «50-та книга» на головній і в Reading Life могли б
+  // колись розійтись.
+  const milestonesQuery = useReadingMilestones();
 
   if (!restQuery.data || !suppressedQuery.data) return null;
 
   const onThisDayAvailable = !!onThisDayQuery.data && selectHomePrimaryMemory(onThisDayQuery.data) != null;
+  // «Зараз» — тут, а не в чистій функції (house convention). Доки віхи вантажаться, кандидата
+  // просто немає: картка не блимає й не з'являється з затримкою поверх іншої.
+  const milestone = milestonesQuery.data
+    ? findRecentMilestoneCandidate(
+        milestonesQuery.data.map((view) => ({ id: view.milestone.id, at: view.milestone.at })),
+        new Date(),
+      )
+    : null;
 
-  return selectVisibleHomeContextCard({ ...restQuery.data, onThisDayAvailable }, suppressedQuery.data);
+  return selectVisibleHomeContextCard(
+    { ...restQuery.data, onThisDayAvailable, milestone },
+    suppressedQuery.data,
+  );
 }
 
 /**

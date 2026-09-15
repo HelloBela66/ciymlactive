@@ -13,7 +13,10 @@ import {
   type GoalCandidate,
   type StaleReadingCandidate,
   type CapsuleDueCandidate,
+  findRecentMilestoneCandidate,
+  MILESTONE_HOME_CARD_MAX_AGE_DAYS,
   type HomeContextSelectionInput,
+  type MilestoneCandidate,
 } from './homeContext';
 import type { ReadingGoal, ReadingGoalProgress } from '@/types/readingGoal';
 
@@ -207,6 +210,7 @@ describe('selectHomeContextCard', () => {
         staleReading: null,
         capsuleDue: null,
         onThisDayAvailable: false,
+        milestone: null,
         goalNearCompletion: null,
         tbrBookCount: 0,
         tbrOldestWaiting: null,
@@ -219,6 +223,7 @@ describe('selectHomeContextCard', () => {
       staleReading: STALE_CANDIDATE,
       capsuleDue: CAPSULE_CANDIDATE,
       onThisDayAvailable: true,
+      milestone: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -231,6 +236,7 @@ describe('selectHomeContextCard', () => {
       staleReading: null,
       capsuleDue: CAPSULE_CANDIDATE,
       onThisDayAvailable: true,
+      milestone: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -243,6 +249,7 @@ describe('selectHomeContextCard', () => {
       staleReading: null,
       capsuleDue: null,
       onThisDayAvailable: true,
+      milestone: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -255,6 +262,7 @@ describe('selectHomeContextCard', () => {
       staleReading: null,
       capsuleDue: null,
       onThisDayAvailable: false,
+      milestone: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -267,6 +275,7 @@ describe('selectHomeContextCard', () => {
       staleReading: null,
       capsuleDue: null,
       onThisDayAvailable: false,
+      milestone: null,
       goalNearCompletion: null,
       tbrBookCount: 3,
       tbrOldestWaiting: null,
@@ -279,6 +288,7 @@ describe('selectHomeContextCard', () => {
       staleReading: null,
       capsuleDue: null,
       onThisDayAvailable: false,
+      milestone: null,
       goalNearCompletion: null,
       tbrBookCount: 0,
       tbrOldestWaiting: null,
@@ -332,6 +342,7 @@ const FULL_INPUT: HomeContextSelectionInput = {
   staleReading: STALE_CANDIDATE,
   capsuleDue: CAPSULE_CANDIDATE,
   onThisDayAvailable: true,
+  milestone: null,
   goalNearCompletion: GOAL_CANDIDATE,
   tbrBookCount: 3,
   tbrOldestWaiting: null,
@@ -402,10 +413,120 @@ describe('selectVisibleHomeContextCard', () => {
       staleReading: null,
       capsuleDue: null,
       onThisDayAvailable: false,
+      milestone: null,
       goalNearCompletion: null,
       tbrBookCount: 0,
       tbrOldestWaiting: null,
     };
     expect(selectVisibleHomeContextCard(empty, new Set(['stale_reading:anything']))).toBeNull();
+  });
+});
+
+
+/**
+ * POLYTSIA V1.7, Phase 8 (ТЗ §21-§23) — віха в системі контекстних карток Home.
+ *
+ * Перевіряється не «чи гарна картка», а три правила: віха НЕ створює шосту одночасну картку
+ * (слот лишається один), приглушується поштучно, і не спливає на головній через роки.
+ */
+const MILESTONE_NOW = new Date(2030, 5, 15, 12, 0);
+
+function milestoneAt(id: string, daysAgo: number): MilestoneCandidate {
+  return { id, at: new Date(MILESTONE_NOW.getTime() - daysAgo * 24 * 60 * 60 * 1000).toISOString() };
+}
+
+describe('findRecentMilestoneCandidate (ТЗ §21)', () => {
+  it('свіжа віха — кандидат', () => {
+    expect(findRecentMilestoneCandidate([milestoneAt('finished_books:50', 1)], MILESTONE_NOW)?.id).toBe(
+      'finished_books:50',
+    );
+  });
+
+  it('стара віха НЕ спливає на головній через роки', () => {
+    expect(findRecentMilestoneCandidate([milestoneAt('finished_books:10', 400)], MILESTONE_NOW)).toBeNull();
+  });
+
+  it('межа вікна — рівно останній день ще рахується', () => {
+    expect(
+      findRecentMilestoneCandidate([milestoneAt('x', MILESTONE_HOME_CARD_MAX_AGE_DAYS)], MILESTONE_NOW),
+    ).not.toBeNull();
+    expect(
+      findRecentMilestoneCandidate([milestoneAt('x', MILESTONE_HOME_CARD_MAX_AGE_DAYS + 1)], MILESTONE_NOW),
+    ).toBeNull();
+  });
+
+  it('береться НАЙНОВІША віха зі списку', () => {
+    const list = [milestoneAt('old', 10), milestoneAt('new', 1)];
+    expect(findRecentMilestoneCandidate(list, MILESTONE_NOW)?.id).toBe('new');
+  });
+
+  it('порожня історія — кандидата немає', () => {
+    expect(findRecentMilestoneCandidate([], MILESTONE_NOW)).toBeNull();
+  });
+});
+
+describe('віха в пріоритеті Home (ТЗ §22)', () => {
+  const withMilestone: HomeContextSelectionInput = {
+    ...FULL_INPUT,
+    staleReading: null,
+    capsuleDue: null,
+    milestone: milestoneAt('finished_books:50', 1),
+  };
+
+  it('віха важливіша за «Цей день» — але слот усе одно РІВНО один', () => {
+    const card = selectHomeContextCard(withMilestone);
+    expect(card?.kind).toBe('milestone');
+  });
+
+  it('покинуте читання й капсула лишаються важливішими за віху', () => {
+    expect(selectHomeContextCard({ ...withMilestone, staleReading: STALE_CANDIDATE })?.kind).toBe(
+      'stale_reading',
+    );
+    expect(selectHomeContextCard({ ...withMilestone, capsuleDue: CAPSULE_CANDIDATE })?.kind).toBe(
+      'capsule_due',
+    );
+  });
+
+  it('без віхи пріоритет поводиться рівно як до Phase 8', () => {
+    expect(selectHomeContextCard({ ...withMilestone, milestone: null })?.kind).toBe('on_this_day');
+  });
+});
+
+describe('приглушення віхи (ТЗ §23)', () => {
+  it('ключ ідентифікує КОНКРЕТНУ віху, не тип', () => {
+    expect(
+      getHomeContextCardSuppressionKey({
+        kind: 'milestone',
+        candidate: milestoneAt('finished_books:50', 1),
+      }),
+    ).toBe('milestone:finished_books:50');
+  });
+
+  it('приховати одну віху не приховує наступну', () => {
+    const input: HomeContextSelectionInput = {
+      ...FULL_INPUT,
+      staleReading: null,
+      capsuleDue: null,
+      onThisDayAvailable: false,
+      goalNearCompletion: null,
+      tbrBookCount: 0,
+      milestone: milestoneAt('reading_hours:100', 1),
+    };
+    expect(
+      selectVisibleHomeContextCard(input, new Set(['milestone:finished_books:50']))?.kind,
+    ).toBe('milestone');
+    expect(selectVisibleHomeContextCard(input, new Set(['milestone:reading_hours:100']))).toBeNull();
+  });
+
+  it('приглушена віха поступається слотом наступному кандидату, а не ховає його', () => {
+    const input: HomeContextSelectionInput = {
+      ...FULL_INPUT,
+      staleReading: null,
+      capsuleDue: null,
+      milestone: milestoneAt('finished_books:50', 1),
+    };
+    expect(selectVisibleHomeContextCard(input, new Set(['milestone:finished_books:50']))?.kind).toBe(
+      'on_this_day',
+    );
   });
 });

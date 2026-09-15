@@ -120,6 +120,22 @@ export interface BookTimelineChapter {
   /** Скільки з них показано окремими подіями (обране / «повернутися пізніше»). */
   meaningfulJournalCount: number;
   sessions: TimelineSessionsSummary | null;
+  /**
+   * Коли людина востаннє відклала цю книгу перед ЦИМ проходом — `finishedAt` попереднього
+   * проходу; `null` для першого проходу чи коли попередній ще не завершено.
+   *
+   * POLYTSIA V1.7, Phase 8 (ТЗ §8): «Ти повернувся до цієї книги через 5 років» — meaningful
+   * подія стосунків саме з КНИГОЮ, а не глобальне досягнення. Тому вона живе тут, у хронології
+   * книги, і НЕ стає віхою читацької історії.
+   *
+   * Тут лише ДАНІ: сам проміжок форматує `formatReturnGap` («через 2 роки 4 місяці», ніколи
+   * «через 854 дні») на боці екрана — щоб цей модуль лишався вільним від копірайту.
+   *
+   * Статус попереднього проходу навмисно не звужується до `finished`: повернення через роки до
+   * книги, яку колись відклали, — так само повернення до книги. Чим воно було — перечитуванням
+   * чи продовженням — уже видно з номера самої глави.
+   */
+  previousRunFinishedAt: string | null;
 }
 
 export interface BookRelationshipTimelineInput {
@@ -232,6 +248,8 @@ export function buildBookRelationshipTimeline(
   }
 
   const chapters: BookTimelineChapter[] = [];
+  // Коли книгу востаннє відклали перед наступним проходом (ТЗ §8).
+  let previousRunFinishedAt: string | null = null;
 
   for (const run of orderedRuns) {
     const events: BookTimelineEvent[] = [
@@ -273,7 +291,10 @@ export function buildBookRelationshipTimeline(
       journalCount: runJournal.length,
       meaningfulJournalCount: meaningful.length,
       sessions: summary,
+      previousRunFinishedAt,
     });
+
+    previousRunFinishedAt = run.finishedAt;
   }
 
   // Активність без проходу — історичні дані до появи `reading_run` (міграції 019/020) або
@@ -297,6 +318,8 @@ export function buildBookRelationshipTimeline(
       journalCount: orphanJournal.length,
       meaningfulJournalCount: meaningful.length,
       sessions: summary,
+      // Глава без проходу не має «попереднього проходу» за визначенням.
+      previousRunFinishedAt: null,
     });
   }
 

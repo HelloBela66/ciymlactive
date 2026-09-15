@@ -374,3 +374,60 @@ describe('нічне читання — дні рахуються локальн
     expect(result.chapters[0]?.sessions?.daysSpent).toBe(1);
   });
 });
+
+/**
+ * POLYTSIA V1.7, Phase 8 (ТЗ §8) — «повернувся до цієї книги через N років».
+ *
+ * Тут перевіряються самі ДАНІ (`previousRunFinishedAt`); людський текст проміжку будує
+ * `formatReturnGap` і покривають тести `readingMilestones.test.ts`. Розділення навмисне: подія
+ * стосунків із книгою живе в хронології книги, а не серед глобальних віх.
+ */
+describe('previousRunFinishedAt — повернення до книги (ТЗ §8)', () => {
+  it('перший прохід не має попереднього — поля немає чим заповнити', () => {
+    const result = buildBookRelationshipTimeline({
+      addedAt: iso(2025, 1, 1),
+      runs: [run('r1', 1, iso(2025, 1, 2), iso(2025, 2, 1))],
+      sessions: [],
+      journal: [],
+    });
+    expect(result.chapters[0]?.previousRunFinishedAt).toBeNull();
+  });
+
+  it('другий прохід знає, коли книгу відклали перед ним', () => {
+    const result = buildBookRelationshipTimeline({
+      addedAt: iso(2025, 1, 1),
+      runs: [
+        run('r1', 1, iso(2025, 1, 2), iso(2025, 2, 1)),
+        run('r2', 2, iso(2027, 6, 10), iso(2027, 7, 1)),
+      ],
+      sessions: [],
+      journal: [],
+    });
+    const second = result.chapters.find((chapter) => chapter.runNumber === 2);
+    expect(second?.previousRunFinishedAt).toBe(iso(2025, 2, 1));
+  });
+
+  it('повернення після ВІДКЛАДЕНОЇ книги теж рахується поверненням до книги', () => {
+    const result = buildBookRelationshipTimeline({
+      addedAt: iso(2025, 1, 1),
+      runs: [
+        run('r1', 1, iso(2025, 1, 2), iso(2025, 2, 1), 'did_not_finish'),
+        run('r2', 2, iso(2028, 3, 10), null),
+      ],
+      sessions: [],
+      journal: [],
+    });
+    const second = result.chapters.find((chapter) => chapter.runNumber === 2);
+    expect(second?.previousRunFinishedAt).toBe(iso(2025, 2, 1));
+  });
+
+  it('незавершений попередній прохід не дає дати повернення', () => {
+    const result = buildBookRelationshipTimeline({
+      addedAt: iso(2025, 1, 1),
+      runs: [run('r1', 1, iso(2025, 1, 2), null), run('r2', 2, iso(2025, 6, 1), null)],
+      sessions: [],
+      journal: [],
+    });
+    expect(result.chapters.find((chapter) => chapter.runNumber === 2)?.previousRunFinishedAt).toBeNull();
+  });
+});
