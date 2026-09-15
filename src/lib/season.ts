@@ -1,9 +1,18 @@
 import { SEASON_ORDER, SEASON_META } from '@/design/season';
 import type { SeasonId } from '@/design/season';
+import { monthRangeOf } from '@/lib/readingCalendar';
 
-/** Межі сезону в UTC — `start` включно, `end` виключно (той самий контракт, що й
- * `ReadingSessionRepository.listStartedBetween`/`yearRange` у `useWrappedYear.ts`: `>= start
- * && < end`, без окремої обробки часових зон — застосунок і так усюди зберігає час в UTC ISO). */
+/**
+ * Межі сезону — `start` включно, `end` виключно (той самий контракт, що й
+ * `ReadingSessionRepository.listStartedBetween`).
+ *
+ * POLYTSIA V1.7 — ВИПРАВЛЕНО (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Раніше межі будувались як
+ * літеральний рядок `` `${year}-${MM}-01T00:00:00.000Z` `` — тобто опівніч UTC, а не опівніч
+ * за місцевим часом користувача. Наслідок: у Києві (UTC+2/+3) читання 1 червня між 00:00 і
+ * 03:00 потрапляло ще у ВЕСНУ, а читання 31 серпня о 23:50 — уже в ОСІНЬ. Тепер межі —
+ * локальні (`monthRangeOf`, `src/lib/readingCalendar.ts`), виражені інстантами для SQL:
+ * сама межа лишається однією точкою часу, але проведена там, де її проводить людина.
+ */
 export interface SeasonRange {
   start: string;
   end: string;
@@ -21,8 +30,10 @@ const SEASON_MONTH_RANGE: Record<SeasonId, { startMonth: number; startYearOffset
   autumn: { startMonth: 9, startYearOffset: 0, endMonth: 12 },
 };
 
+/** Початок місяця за ЛОКАЛЬНИМ календарем, виражений абсолютним інстантом
+ * (`monthRangeOf(...).startIso`) — єдина canonical-точка побудови меж місяця у застосунку. */
 function isoMonthStart(year: number, month: number): string {
-  return `${year}-${String(month).padStart(2, '0')}-01T00:00:00.000Z`;
+  return monthRangeOf(year, month).startIso;
 }
 
 /**
@@ -66,12 +77,17 @@ export function parseSeasonKey(key: string): SeasonKey | null {
 /**
  * Який сезон "зараз" — визначає, з якого сезону відкривається екран за замовчуванням (та сама
  * "Wrapped на поточний рік" точка входу з `app/(tabs)/profile/index.tsx`, тепер для сезону).
- * `now` — явний параметр (house convention: жодного `new Date()` усередині `lib/*.ts`),
- * місяць рахується в UTC — той самий вибір, що й решта застосунку (без часових зон).
+ * `now` — явний параметр (house convention: жодного `new Date()` усередині `lib/*.ts`).
+ *
+ * POLYTSIA V1.7 — місяць/рік рахуються за ЛОКАЛЬНИМ календарем
+ * (`docs/V1_7_TEMPORAL_SEMANTICS.md`), а не `getUTCMonth()`/`getUTCFullYear()`, як було раніше.
+ * Інакше 1 червня о 00:30 у Києві застосунок відкривав би ще ВЕСНУ, хоча межі самих сезонів
+ * (`seasonDateRange`) уже локальні — тобто "поточний сезон" розходився б із тим, у який
+ * потрапляє щойно завершена сесія.
  */
 export function currentSeasonKey(now: Date): SeasonKey {
-  const month = now.getUTCMonth() + 1; // 1-12
-  const year = now.getUTCFullYear();
+  const month = now.getMonth() + 1; // 1-12
+  const year = now.getFullYear();
   if (month === 12) return { seasonId: 'winter', year: year + 1 };
   if (month <= 2) return { seasonId: 'winter', year };
   if (month <= 5) return { seasonId: 'spring', year };

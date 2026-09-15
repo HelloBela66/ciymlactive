@@ -1,5 +1,6 @@
 import type { ReadingExperienceId } from '@/design/readingExperience';
 import { isReadingExperienceId } from '@/design/readingExperience';
+import { readingDayKey } from '@/lib/readingCalendar';
 
 /**
  * Спільні domain-calculator'и для аналітичних "підсумків за період" (POLYTSIA V1.6.1, Фаза 15
@@ -62,14 +63,21 @@ export interface BusiestMonth {
   sessionsCount: number;
 }
 
-/** Місяць (1-12, UTC) з найбільшою кількістю сесій, що почались у ньому. Рівність — перемагає
- * той, що зустрівся першим при переборі `Map` (порядок вставки, тобто порядок `sessions`) — той
- * самий tie-break, що був у `useWrappedYear.ts`/`useReadingSeason.ts` до цієї фази. `null`, якщо
- * сесій нема. */
+/**
+ * Місяць (1-12) з найбільшою кількістю сесій, що почались у ньому. Рівність — перемагає той, що
+ * зустрівся першим при переборі `Map` (порядок вставки, тобто порядок `sessions`) — той самий
+ * tie-break, що був у `useWrappedYear.ts`/`useReadingSeason.ts` до Фази 15. `null`, якщо сесій нема.
+ *
+ * POLYTSIA V1.7 — `getUTCMonth()` → `getMonth()` (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Місяць
+ * тепер визначається за ЛОКАЛЬНИМ календарем, як і всі інші періоди застосунку. Раніше сесія 1
+ * червня о 00:30 у Києві зараховувалась травню — і "найактивніший місяць" року міг розійтися з
+ * тим, що показував Календар за ті самі дати. `readingProfile.ts` уже свідомо рахував локально
+ * (його коментар прямо протиставляв себе `getUTCMonth()` тут) — тепер розбіжності нема.
+ */
 export function computeBusiestMonth(sessions: BusiestMonthInput[]): BusiestMonth | null {
   const monthCounts = new Map<number, number>();
   for (const session of sessions) {
-    const month = new Date(session.startedAt).getUTCMonth() + 1;
+    const month = new Date(session.startedAt).getMonth() + 1;
     monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
   }
   let result: BusiestMonth | null = null;
@@ -79,17 +87,22 @@ export function computeBusiestMonth(sessions: BusiestMonthInput[]): BusiestMonth
   return result;
 }
 
-export interface DateRange {
-  start: string;
-  end: string;
-}
-
-/** Книги, `finishedAt` яких потрапляє в `[range.start, range.end)` — включно зліва, виключно
- * справа (той самий діапазон, що будують `yearRange`/`seasonDateRange`). Той самий предикат, що
- * був продубльований у `useWrappedYear.ts`/`useReadingSeason.ts`. */
-export function filterFinishedInRange<T extends { finishedAt: string | null }>(books: T[], range: DateRange): T[] {
-  return books.filter((ub) => ub.finishedAt != null && ub.finishedAt >= range.start && ub.finishedAt < range.end);
-}
+/**
+ * POLYTSIA V1.7 — `DateRange` і `filterFinishedInRange` ВИЛУЧЕНІ
+ * (`docs/V1_7_READING_LIFE.md`).
+ *
+ * Предикат відбирав книги за `UserBook.finishedAt` — тобто за полем ЖИВОЇ картки книги, а не за
+ * фактом завершення конкретного прохождення. Разом із `listByStatus('finished')` у
+ * `useWrappedYear.ts` це давало три дефекти, описані в тому файлі: зникнення книги з минулого
+ * року після перечитування, невидимість повторного завершення в межах року й зникнення
+ * soft-deleted книги з історії.
+ *
+ * Canonical-джерело "що завершено в цьому періоді" тепер одне — `ReadingRunRepository.
+ * listFinishedBetween` (завершення ПРОХОДЖЕННЯ, а не статус книги), а підрахунки над ним —
+ * `src/lib/readingPeriodSummary.ts`. Функцію не залишено "про всяк випадок" навмисно: доки вона
+ * існує, наступна фаза може ненароком побудувати на ній ще один паралельний підсумок — рівно те,
+ * чого V1.7 уникає ("не п'ять різних відповідей на одне питання").
+ */
 
 export interface TopGenreAmong {
   name: string;
@@ -122,20 +135,27 @@ export interface ActiveDayInput {
   startedAt: string;
 }
 
-/** Кількість УНІКАЛЬНИХ календарних днів (за `startedAt.slice(0, 10)`) серед переданих сесій —
- * POLYTSIA V1.6.2, #167 (READING SEASONS — PRODUCT REDEFINITION, ТЗ §44: "Distinct local
- * calendar days with completed reading activity. Timezone safe"). Той самий `Set<string>`-підхід,
- * що вже є в `rereadComparison.ts#computeRunReadingStats` (там — на рівні одного run, тут — на
- * рівні періоду), і той самий UTC-based `.slice(0,10)`, яким рахує календарний день УСЯ решта
- * застосунку (`useWrappedYear.ts`, `season.ts`) — жодне місце в кодовій базі не робить
- * конверсію в локальний часовий пояс (свідомий вибір застосунку, задокументований у
- * `season.ts`). ТЗ буквально вимагає "local calendar days" — цей рядок навмисно лишається на
- * тому самому UTC-дні, що й решта застосунку, а не вводить локальну конверсію лише для Сезонів:
- * розбіжність з UTC можлива тільки для сесій, що почались близько до півночі UTC, і зміна цього
- * ОДНОГО місця зробила б "активні дні" сезону несумісними з тим, як день рахується всюди інде
- * (Wrapped/Calendar/reread-порівняння) без окремого продуктового рішення для всього застосунку. */
+/**
+ * Кількість УНІКАЛЬНИХ ЛОКАЛЬНИХ календарних днів серед переданих сесій —
+ * POLYTSIA V1.6.2, #167 (READING SEASONS, ТЗ §44: "Distinct local calendar days with completed
+ * reading activity. Timezone safe").
+ *
+ * POLYTSIA V1.7 — ВИПРАВЛЕНО (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Раніше тут був
+ * `startedAt.slice(0, 10)` — тобто UTC-день, а не локальний, попри те, що ТЗ буквально вимагало
+ * "local calendar days". Обґрунтуванням слугувало твердження в цьому ж коментарі, що "жодне
+ * місце в кодовій базі не робить конверсію в локальний часовий пояс (свідомий вибір
+ * застосунку)". Temporal Semantics Verification (V1.7) перевірила це твердження проти живого
+ * коду й встановила, що воно ФАКТИЧНО ХИБНЕ: `useCalendarSessions.ts` робив саме таку
+ * конверсію (`format(new Date(session.startedAt), 'yyyy-MM-dd')`) для ВСІХ поверхонь Календаря.
+ * Тобто UTC тут спирався на невірну передумову, і в результаті сесія о 00:30 у Києві давала
+ * активний день ПОПЕРЕДНЬОЇ дати — та сама сесія, яку Календар показував правильно.
+ *
+ * Тепер день обчислює `readingDayKey` (`src/lib/readingCalendar.ts`) — ЄДИНА canonical-точка
+ * перетворення instant → день читацької історії, спільна для Календаря, Статистики, Сезонів,
+ * Wrapped і всіх періодичних підсумків V1.7.
+ */
 export function computeActiveDays(sessions: ActiveDayInput[]): number {
-  return new Set(sessions.map((s) => s.startedAt.slice(0, 10))).size;
+  return new Set(sessions.map((s) => readingDayKey(s.startedAt))).size;
 }
 
 /** Мінімум сесій із заповненим `reading_experience` у періоді, перш ніж "Як читалося" (ТЗ §50)

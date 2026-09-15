@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { generateId } from '@/lib/uuid';
 import { nowIso } from '@/lib/dateUtils';
+import { readingDayKey } from '@/lib/readingCalendar';
 import type {
   CreateReadingGoalInput,
   ReadingGoal,
@@ -146,7 +147,11 @@ export const ReadingGoalRepository = {
     }
 
     if (goal.type === 'reading_days') {
-      const dayKeys = new Set(sessions.map((s) => s.startedAt.slice(0, 10)));
+      // POLYTSIA V1.7 (`docs/V1_7_TEMPORAL_SEMANTICS.md`): `readingDayKey`, а не
+      // `startedAt.slice(0, 10)` — "день читання" в цілі має означати те саме, що й у
+      // Календарі/Статистиці/підсумках періоду. Раніше нічна сесія зараховувалась попередньому
+      // UTC-дню, і ціль «читати N днів» могла не зарахувати день, який користувач прожив.
+      const dayKeys = new Set(sessions.map((s) => readingDayKey(s.startedAt)));
       return {
         current: dayKeys.size,
         target: goal.target,

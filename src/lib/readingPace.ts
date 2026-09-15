@@ -1,3 +1,5 @@
+import { readingDayKey } from '@/lib/readingCalendar';
+
 export interface PaceSessionInput {
   startPage: number;
   endPage: number | null;
@@ -46,7 +48,10 @@ export function computeRollingPace(sessions: PaceSessionInput[], windowSize: num
     const minutes = (session.durationSeconds ?? 0) / 60;
     totalPages += pages;
     totalMinutes += minutes;
-    if (minutes > 0) activeDayKeys.add(session.startedAt.slice(0, 10));
+    // POLYTSIA V1.7 (`docs/V1_7_TEMPORAL_SEMANTICS.md`): локальний календарний день
+    // (`readingDayKey`), а не `startedAt.slice(0, 10)` — "хвилин на активний день" має ділитись
+    // на ту саму множину днів, яку користувач бачить у Календарі й підсумках періоду.
+    if (minutes > 0) activeDayKeys.add(readingDayKey(session.startedAt));
   }
 
   return {

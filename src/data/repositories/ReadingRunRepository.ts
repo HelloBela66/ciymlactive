@@ -266,18 +266,34 @@ export const ReadingRunRepository = {
    * `run_number > 1` на кожному рядку результату — вже готовий сигнал "це перечитування" (ТЗ
    * §39: "small indicator: «Перечитано»"), без окремого запиту.
    *
-   * `JOIN user_book ... deleted_at IS NULL` soft-delete guard — POLYTSIA FOUNDATION FINAL
-   * POLISH: НАВМИСНО залишений тут БЕЗ ЗМІН (на відміну від `listStartedOrFinishedBetween`
-   * вище, де той самий guard знятий заради Calendar Historical Consistency) — цей метод
-   * обслуговує ЛИШЕ Reading Seasons (#167), яку ТЗ FOUNDATION FINAL POLISH явно забороняє
-   * чіпати (п.25 "Seasons — НЕ ЧІПАТИ"): чи має Season так само бачити прочитання
-   * soft-deleted книги — окреме продуктове рішення поза обсягом цього polish pass.
+   * `JOIN user_book ... deleted_at IS NULL` soft-delete guard — ЗНЯТО у POLYTSIA V1.7
+   * (`docs/V1_7_READING_LIFE.md`).
+   *
+   * ІСТОРІЯ РІШЕННЯ (щоб цей рядок не «повернули назад» як недогляд). FOUNDATION FINAL POLISH
+   * зняв той самий guard у `listStartedOrFinishedBetween` вище заради Calendar Historical
+   * Consistency, але тут залишив його НАВМИСНО: метод обслуговував лише Reading Seasons (#167),
+   * а ТЗ того пасу прямо забороняло чіпати Сезони, тож питання «чи має Сезон бачити прочитання
+   * книги, яку згодом прибрали з Бібліотеки» було свідомо відкладене як окреме продуктове
+   * рішення. V1.7 (§61) це рішення ПРИЙНЯЛА: **історичний Сезон переживає soft-delete книги.**
+   *
+   * Обґрунтування: Сезон — емоційний знімок минулого, а не запит до живої Бібліотеки. Якщо
+   * людина прочитала книгу влітку 2026, а у 2028 прибрала її з Бібліотеки, «Літо 2026» не
+   * повинно переписувати минуле — це та сама History Preservation, що вже діє для Календаря.
+   * Той самий метод тепер обслуговує ще й canonical-агрегацію періодів V1.7
+   * (`src/lib/readingPeriodSummary.ts`), якій потрібна рівно ця семантика, тож розбіжність між
+   * «періодом» і «сезоном» була б новим джерелом двох різних відповідей на одне питання.
+   *
+   * `JOIN` (уже без умови на `deleted_at`) лишається: для ФІЗИЧНО видаленого `user_book` рядок
+   * просто не приєднається — та сама тиха деградація, що й у `listStartedOrFinishedBetween`,
+   * а не помилка. Library-орієнтовані запити (`UserBookRepository.listAll`/`listByStatus`/
+   * `listByIds`) — БЕЗ ЗМІН, і далі alive-only: soft-deleted книга НІКОЛИ не повертається в
+   * Бібліотеку, лише в історичні поверхні.
    */
   async listFinishedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<ReadingRun[]> {
     const rows = await db.getAllAsync<ReadingRunRow>(
       `SELECT rr.* FROM reading_run rr
        JOIN user_book ub ON ub.id = rr.user_book_id
-       WHERE rr.deleted_at IS NULL AND ub.deleted_at IS NULL
+       WHERE rr.deleted_at IS NULL
          AND rr.status IN ('finished', 'did_not_finish')
          AND rr.finished_at >= ? AND rr.finished_at < ?
        ORDER BY rr.finished_at ASC`,

@@ -1,13 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { getDatabase } from '@/data/db';
 import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { computeStreaks } from '@/lib/streaks';
 import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
-
-const DAY_KEY_FORMAT = 'yyyy-MM-dd';
+import { dayRange, readingDayKey, readingDayKeyOf } from '@/lib/readingCalendar';
 
 export interface OverallStatistics {
   totalMinutes: number;
@@ -38,36 +36,58 @@ export interface OverallStatistics {
  * - `totalMinutes`/`totalPages`/`totalSessions` — один SQL-агрегат
  *   (`getLifetimeCompletedTotals`, та сама конвенція округлення хвилин на сесію, що й
  *   `sumSessionMinutes` — докладніше доккоментар методу);
- * - `activeDaysCount`/вхід для `computeStreaks` — лише УНІКАЛЬНІ ключі днів
- *   (`listDistinctActiveDayKeys`), не повні рядки сесій;
- * - "сьогодні" — окремий вузький запит (`listByStartedDayKey(todayKey)`), що повертає лише
- *   сесії сьогоднішнього `dayKey`, а не фільтрує їх із повного набору в JS; побайтово той самий
- *   `dayKey`-рядок, що й раніше (SQLite `substr` ідентичний JS `.slice(0,10)`), тож поведінка
- *   (включно з тим, що `todayKey` рахується за ЛОКАЛЬНИМ часом пристрою, а `started_at` у БД —
- *   UTC) НЕ змінена цією фазою — лише спосіб, яким дістається той самий результат.
+ * - `activeDaysCount`/вхід для `computeStreaks` — лише моменти початку сесій
+ *   (`listCompletedStartInstants`, одна колонка), не повні рядки сесій;
+ * - "сьогодні" — окремий вузький діапазонний запит (`listStartedBetween` на межах локальної
+ *   доби), а не фільтр повного набору в JS.
+ *
+ * POLYTSIA V1.7 — ВИПРАВЛЕНО ЖИВИЙ TIMEZONE-БАГ (`docs/V1_7_TEMPORAL_SEMANTICS.md` §3.1).
+ * До цієї фази тут було ДВА різні уявлення про день в одному запиті:
+ * - `todayKey` рахувався `format(new Date(), 'yyyy-MM-dd')` — ЛОКАЛЬНИЙ день пристрою;
+ * - `listByStartedDayKey` порівнював його з `substr(started_at, 1, 10)` — UTC-днем.
+ * Ключ і колонка були в різних системах координат. Наслідок для Києва (UTC+2/+3): кожне читання
+ * між 00:00 і 03:00 місцевого часу не потрапляло в "сьогодні" — екран показував «сьогодні 0
+ * хвилин» одразу після завершеної сесії. Той самий розрив ламав streak: `computeStreaks`
+ * отримував UTC-ключі днів, але локальний `todayKey`, тож "сьогодні" могло не збігтися з
+ * останнім активним днем і серія обривалась на рівному місці.
+ *
+ * Тепер обидві величини рахує одна canonical-семантика (`src/lib/readingCalendar.ts`):
+ * "сьогодні" — діапазон локальної доби, переведений в інстанти (`dayRange`); ключі днів —
+ * `readingDayKey` над моментами початку сесій. Жодного string-prefix зіставлення дат.
  */
 export function useOverallStatistics() {
   return useQuery<OverallStatistics>({
     queryKey: queryKeys.statistics.overall,
     queryFn: async () => {
       const db = await getDatabase();
-      const todayKey = format(new Date(), DAY_KEY_FORMAT);
+      const now = new Date();
+      const todayKey = readingDayKeyOf(now);
+      const today = dayRange(now);
 
       // `listStatusOnly` замість `listByStatus` (Milestone 8, продуктивність) — тут
       // потрібні лише `finishedAt`/кількість, а `listByStatus` тягнув би повний
       // edition/work/authors/publisher/translators на кожну завершену книгу даремно.
-      const [lifetimeTotals, activeDayKeys, todaySessions, finishedBooks] = await Promise.all([
+      const [lifetimeTotals, startInstants, todaySessions, finishedBooks] = await Promise.all([
         ReadingSessionRepository.getLifetimeCompletedTotals(db),
-        ReadingSessionRepository.listDistinctActiveDayKeys(db),
-        ReadingSessionRepository.listByStartedDayKey(db, todayKey),
+        ReadingSessionRepository.listCompletedStartInstants(db),
+        ReadingSessionRepository.listStartedBetween(db, today.startIso, today.endIso),
         UserBookRepository.listStatusOnly(db, 'finished'),
       ]);
+
+      // Унікальні ЛОКАЛЬНІ дні, відсортовані — рівно той контракт, що його очікує
+      // `computeStreaks` (і той самий, що раніше давав `SELECT DISTINCT ... ORDER BY`, лише
+      // тепер у правильному часовому поясі).
+      const activeDayKeys = [...new Set(startInstants.map(readingDayKey))].sort();
 
       const { current, longest } = computeStreaks(activeDayKeys, todayKey);
       const todayMinutes = sumSessionMinutes(todaySessions);
       const todayPages = sumSessionPages(todaySessions);
 
-      const currentYear = new Date().getFullYear();
+      // `getFullYear()` на локальному `Date` — уже локальний рік, тож тут розбіжності не було;
+      // лишається без змін. Перехід цього лічильника на run-based canonical-агрегацію
+      // (`readingPeriodSummary.ts`) робить Phase 6 разом із Year Recap, де "чи рахувати
+      // перечитування окремою книгою" — продуктове питання, а не технічне.
+      const currentYear = now.getFullYear();
       const booksFinishedThisYear = finishedBooks.filter(
         (ub) => ub.finishedAt != null && new Date(ub.finishedAt).getFullYear() === currentYear,
       ).length;

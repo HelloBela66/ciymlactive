@@ -152,7 +152,16 @@ forbidden") плюс "Unused eslint-disable directive" на сусідньому
 директива вимикала попередження на порожньому коментарному рядку, а не на рядку з самим
 `require()`. Виправлено переміщенням `eslint-disable-next-line` на рядок безпосередньо перед
 `return require(...)` в усіх трьох файлах (пояснювальні коментарі — вище директиви). Задеплойовано
-на `C:\polytsya-m11`, byte-verified. Потрібен ще один `git push` + зелений CI-прогін.
+на `C:\polytsya-m11`, byte-verified.
+
+**П'яте доповнення (той самий день, 2026-09-15) — власник запушив фікс вище (commit `17dabdb`), і
+CI пройшов ПОВНІСТЮ ЗЕЛЕНИМ:** job #102 — `Typecheck, lint, tests` (1m 25s, `tsc` + `eslint
+--max-warnings=0` + повний `jest`) і `Edge Functions (Deno)` (9s), обидва **Success**, 1m 29s
+загалом. Перший повністю зелений CI-прогін для роботи цього пасу. Усі чотири доступні quality
+gates (`jest`/`tsc`/`eslint`/CI) тепер підтверджені реальним виконанням із зеленим результатом.
+Деталі — `docs/FOUNDATION_FINAL_POLISH_REPORT.md`, розділ 12/17, verdict — **FOUNDATION CLOSED**
+(без застережень щодо quality gates; фізичне ручне тестування на пристрої, розділ 15, лишається
+окремим пунктом "PENDING OWNER CHECK", як і задумано).
 
 ## КАЛЕНДАР — візуальна композиція та redesign дня читання
 

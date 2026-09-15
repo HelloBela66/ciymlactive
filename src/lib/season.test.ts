@@ -9,27 +9,50 @@ import {
   type SeasonKey,
 } from './season';
 
-describe('seasonDateRange', () => {
+/**
+ * POLYTSIA V1.7 (`docs/V1_7_TEMPORAL_SEMANTICS.md`) — тести меж сезону переписані разом із
+ * `seasonDateRange`. Раніше вони звіряли межі з жорстко закодованими UTC-рядками
+ * (`'2026-06-01T00:00:00.000Z'`). Це фіксувало саме ту помилку, яку V1.7 виправляє: межа сезону
+ * проводилась опівночі UTC, а не опівночі за місцевим часом, тож у Києві читання 1 червня о
+ * 01:00 ще належало ВЕСНІ. Такий тест до того ж проходив би лише в UTC-оточенні (CI) і падав
+ * на реальному пристрої користувача.
+ *
+ * Тепер перевіряються ЛОКАЛЬНІ компоненти межі — інваріант, істинний у будь-якому поясі.
+ */
+describe('seasonDateRange — межі за ЛОКАЛЬНИМ календарем', () => {
+  function localParts(iso: string): { year: number; month: number; day: number; hour: number } {
+    const date = new Date(iso);
+    return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(), hour: date.getHours() };
+  }
+
   it('прив\'язує зиму до пізнішого року — грудень попереднього до березня поточного', () => {
-    expect(seasonDateRange('winter', 2026)).toEqual({
-      start: '2025-12-01T00:00:00.000Z',
-      end: '2026-03-01T00:00:00.000Z',
-    });
+    const range = seasonDateRange('winter', 2026);
+    expect(localParts(range.start)).toEqual({ year: 2025, month: 12, day: 1, hour: 0 });
+    expect(localParts(range.end)).toEqual({ year: 2026, month: 3, day: 1, hour: 0 });
   });
 
   it('весна/літо/осінь лишаються в межах одного календарного року', () => {
-    expect(seasonDateRange('spring', 2026)).toEqual({
-      start: '2026-03-01T00:00:00.000Z',
-      end: '2026-06-01T00:00:00.000Z',
-    });
-    expect(seasonDateRange('summer', 2026)).toEqual({
-      start: '2026-06-01T00:00:00.000Z',
-      end: '2026-09-01T00:00:00.000Z',
-    });
-    expect(seasonDateRange('autumn', 2026)).toEqual({
-      start: '2026-09-01T00:00:00.000Z',
-      end: '2026-12-01T00:00:00.000Z',
-    });
+    expect(localParts(seasonDateRange('spring', 2026).start)).toEqual({ year: 2026, month: 3, day: 1, hour: 0 });
+    expect(localParts(seasonDateRange('spring', 2026).end)).toEqual({ year: 2026, month: 6, day: 1, hour: 0 });
+    expect(localParts(seasonDateRange('summer', 2026).start)).toEqual({ year: 2026, month: 6, day: 1, hour: 0 });
+    expect(localParts(seasonDateRange('summer', 2026).end)).toEqual({ year: 2026, month: 9, day: 1, hour: 0 });
+    expect(localParts(seasonDateRange('autumn', 2026).start)).toEqual({ year: 2026, month: 9, day: 1, hour: 0 });
+    expect(localParts(seasonDateRange('autumn', 2026).end)).toEqual({ year: 2026, month: 12, day: 1, hour: 0 });
+  });
+
+  it('сезони межують без щілин і перекриття', () => {
+    expect(seasonDateRange('spring', 2026).end).toBe(seasonDateRange('summer', 2026).start);
+    expect(seasonDateRange('summer', 2026).end).toBe(seasonDateRange('autumn', 2026).start);
+    expect(seasonDateRange('autumn', 2026).end).toBe(seasonDateRange('winter', 2027).start);
+  });
+
+  it('читання 1 червня о 00:30 локального часу належить ЛІТУ, а не весні (регресія V1.7)', () => {
+    const juneFirstNight = new Date(2026, 5, 1, 0, 30).toISOString();
+    const summer = seasonDateRange('summer', 2026);
+    const spring = seasonDateRange('spring', 2026);
+    expect(juneFirstNight >= summer.start).toBe(true);
+    expect(juneFirstNight < summer.end).toBe(true);
+    expect(juneFirstNight >= spring.end).toBe(true);
   });
 });
 
@@ -53,33 +76,41 @@ describe('formatSeasonKey / parseSeasonKey', () => {
   });
 });
 
+/**
+ * POLYTSIA V1.7 — моменти будуються з ЛОКАЛЬНИХ компонентів (`new Date(2026, 11, 15)`), а не з
+ * UTC-рядків (`new Date('2026-12-15T00:00:00.000Z')`), бо `currentSeasonKey` тепер визначає
+ * місяць локально (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Старий варіант проходив лише в UTC чи за
+ * додатного offset: для UTC−5 момент `2026-03-01T00:00:00Z` — це ще 28 лютого локально, тобто
+ * ЗИМА, і межовий тест падав би на реальному пристрої.
+ */
 describe('currentSeasonKey', () => {
   it('грудень належить зимі НАСТУПНОГО року', () => {
-    expect(currentSeasonKey(new Date('2026-12-15T00:00:00.000Z'))).toEqual({ seasonId: 'winter', year: 2027 });
+    expect(currentSeasonKey(new Date(2026, 11, 15, 12, 0))).toEqual({ seasonId: 'winter', year: 2027 });
   });
 
   it('січень/лютий належать зимі того самого року', () => {
-    expect(currentSeasonKey(new Date('2026-01-01T00:00:00.000Z'))).toEqual({ seasonId: 'winter', year: 2026 });
-    expect(currentSeasonKey(new Date('2026-02-28T23:59:59.000Z'))).toEqual({ seasonId: 'winter', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 0, 1, 0, 0))).toEqual({ seasonId: 'winter', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 1, 28, 23, 59))).toEqual({ seasonId: 'winter', year: 2026 });
   });
 
   it('межа зима/весна — 1 березня', () => {
-    expect(currentSeasonKey(new Date('2026-03-01T00:00:00.000Z'))).toEqual({ seasonId: 'spring', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 1, 28, 23, 59))).toEqual({ seasonId: 'winter', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 2, 1, 0, 0))).toEqual({ seasonId: 'spring', year: 2026 });
   });
 
   it('межа весна/літо — 1 червня', () => {
-    expect(currentSeasonKey(new Date('2026-05-31T23:00:00.000Z'))).toEqual({ seasonId: 'spring', year: 2026 });
-    expect(currentSeasonKey(new Date('2026-06-01T00:00:00.000Z'))).toEqual({ seasonId: 'summer', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 4, 31, 23, 0))).toEqual({ seasonId: 'spring', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 5, 1, 0, 30))).toEqual({ seasonId: 'summer', year: 2026 });
   });
 
   it('межа літо/осінь — 1 вересня', () => {
-    expect(currentSeasonKey(new Date('2026-08-31T23:00:00.000Z'))).toEqual({ seasonId: 'summer', year: 2026 });
-    expect(currentSeasonKey(new Date('2026-09-01T00:00:00.000Z'))).toEqual({ seasonId: 'autumn', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 7, 31, 23, 0))).toEqual({ seasonId: 'summer', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 8, 1, 0, 30))).toEqual({ seasonId: 'autumn', year: 2026 });
   });
 
   it('межа осінь/зима — 1 грудня', () => {
-    expect(currentSeasonKey(new Date('2026-11-30T23:00:00.000Z'))).toEqual({ seasonId: 'autumn', year: 2026 });
-    expect(currentSeasonKey(new Date('2026-12-01T00:00:00.000Z'))).toEqual({ seasonId: 'winter', year: 2027 });
+    expect(currentSeasonKey(new Date(2026, 10, 30, 23, 0))).toEqual({ seasonId: 'autumn', year: 2026 });
+    expect(currentSeasonKey(new Date(2026, 11, 1, 0, 30))).toEqual({ seasonId: 'winter', year: 2027 });
   });
 });
 

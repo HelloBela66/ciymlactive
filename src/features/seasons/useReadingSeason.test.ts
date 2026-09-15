@@ -676,10 +676,9 @@ describe('fetchReadingSeasonData — savedThoughts / favoriteQuote: пріори
  * поведінки нижче, і важливо тестувати саме той, що реально проходить крізь
  * `fetchReadingSeasonData` до рядка `if (!userBook) continue`:
  *
- * - м'яко видалений `user_book` НІКОЛИ не потрапляє навіть у `runsInRange` — сам
- *   `ReadingRunRepository.listFinishedBetween` вже робить `JOIN user_book ... AND ub.deleted_at
- *   IS NULL` (докладніше — коментар над цим методом), тож результат порожній ще ДО
- *   `UserBookRepository.listWithDetailsByIds`;
+ * - м'яко видалений `user_book` — POLYTSIA V1.7 (§61) ЗМІНИЛА цю поведінку на протилежну:
+ *   історичний Сезон переживає видалення книги з Бібліотеки (докладніше — коментар над
+ *   `ReadingRunRepository.listFinishedBetween` і `docs/V1_7_READING_LIFE.md`);
  * - м'яко видалене (чи фізично відсутнє) `edition` цієї книги — user_book сам лишається живим
  *   (проходить JOIN вище), run потрапляє у `finishedRunRows`, але
  *   `UserBookRepository.listWithDetailsByIds` → `attachDetailsBatch` не знаходить edition
@@ -690,7 +689,13 @@ describe('fetchReadingSeasonData — savedThoughts / favoriteQuote: пріори
  * падіння) — тестуються окремо, щоб показати, що жоден із двох шляхів не кидає виняток.
  */
 describe('fetchReadingSeasonData — видалена книга пропускається мовчки (ТЗ §67)', () => {
-  it('м\'яко видалений user_book — run навіть не потрапляє в runsInRange (listFinishedBetween сам фільтрує)', async () => {
+  /**
+   * POLYTSIA V1.7 (§61) — ТЕСТ ПЕРЕПИСАНО РАЗОМ ІЗ ПОВЕДІНКОЮ. Раніше він стверджував, що
+   * м'яко видалена книга ЗНИКАЄ з сезону («run навіть не потрапляє в runsInRange»), тобто
+   * фіксував як очікуване саме те, що V1.7 визнала дефектом: минуле переписувалось, коли книгу
+   * прибирали з Бібліотеки сьогодні. Тепер перевіряється протилежне — History Preservation.
+   */
+  it('м\'яко видалений user_book — прочитання ЛИШАЄТЬСЯ в історичному сезоні (V1.7 §61)', async () => {
     const db = await openMigratedTestDb();
     await seedUserBook(db, 'ub-del1');
     await finishRun(db, 'ub-del1', { finishedAt: IN_RANGE_MID });
@@ -698,10 +703,23 @@ describe('fetchReadingSeasonData — видалена книга пропуск�
 
     const result = await fetchReadingSeasonData(db, SEASON_ID, SEASON_YEAR);
 
-    expect(result.books).toEqual([]);
-    expect(result.finishedRuns).toEqual([]);
-    expect(result.completedRuns).toBe(0);
-    expect(result.uniqueBooksCount).toBe(0);
+    expect(result.finishedRuns.map((e) => e.userBook.id)).toEqual(['ub-del1']);
+    expect(result.completedRuns).toBe(1);
+    expect(result.uniqueBooksCount).toBe(1);
+    expect(result.books.map((b) => b.id)).toEqual(['ub-del1']);
+  });
+
+  it('м\'яко видалена книга НЕ повертається в живу Бібліотеку (контроль: історія ≠ Бібліотека)', async () => {
+    const db = await openMigratedTestDb();
+    await seedUserBook(db, 'ub-del-lib');
+    await finishRun(db, 'ub-del-lib', { finishedAt: IN_RANGE_MID });
+    await db.runAsync(`UPDATE user_book SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), 'ub-del-lib']);
+
+    const season = await fetchReadingSeasonData(db, SEASON_ID, SEASON_YEAR);
+    const library = await UserBookRepository.listAll(db);
+
+    expect(season.completedRuns).toBe(1);
+    expect(library.map((ub) => ub.id)).not.toContain('ub-del-lib');
   });
 
   it('живий user_book, але видалене edition — run проходить у finishedRunRows, книга мовчки відсіюється в listWithDetailsByIds', async () => {

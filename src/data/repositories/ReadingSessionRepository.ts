@@ -486,42 +486,36 @@ export const ReadingSessionRepository = {
   },
 
   /**
-   * Завершені сесії ОДНОГО конкретного `started_at`-дня — POLYTSIA V1.6.2, #168. Замінює
-   * `listAllCompleted(db).filter(s => s.startedAt.slice(0,10) === dayKey)`, який досі був у
-   * `useStatistics.ts`'s обчисленні "сьогодні" (`today.minutes`/`today.pages`): SQLite `substr`
-   * побайтово ідентичний JS `.slice(0,10)` на тому самому ISO-рядку, тож `dayKey` тут — рівно
-   * той самий рядок, що й раніше порівнювався в JS (навмисно НЕ переписано на діапазон
-   * `started_at >= X AND < Y` — це змінило б семантику: `dayKey` тут навмисно може бути
-   * "сьогодні" за ЛОКАЛЬНИМ часом пристрою (`date-fns format(new Date(), 'yyyy-MM-dd')` у
-   * виклику), тоді як `started_at` у БД — UTC ISO; substr-порівняння відтворює точно ту саму,
-   * вже наявну поведінку байт-в-байт, а не намагається "виправити" часовий пояс мовчки заразом
-   * із цією фазою).
+   * Моменти початку УСІХ завершених сесій (лише колонка `started_at`, не повні рядки) —
+   * POLYTSIA V1.7 (`docs/V1_7_TEMPORAL_SEMANTICS.md`).
+   *
+   * ЗАМІНЮЄ два методи, вилучені цією фазою: `listByStartedDayKey(dayKey)` і
+   * `listDistinctActiveDayKeys()`. Обидва робили атрибуцію дня через SQL-підрядок
+   * `substr(started_at, 1, 10)`, тобто через UTC-день. Коментар `listByStartedDayKey` це прямо
+   * визнавав: `dayKey` приходив із `useStatistics.ts` як "сьогодні" за ЛОКАЛЬНИМ часом
+   * пристрою, а колонка порівнювалась як UTC, і фаза #168 свідомо відтворила цю розбіжність
+   * "байт-в-байт", щоб нічого не міняти мовчки. V1.7 виправляє її свідомо: у Києві кожне
+   * читання між 00:00 і 03:00 не потрапляло в "сьогодні", а streak рахувався з UTC-ключів
+   * проти локального `todayKey`.
+   *
+   * ЧОМУ САМЕ ТАК, А НЕ SQL-АГРЕГАТ: локальний календарний день залежить від часового поясу
+   * пристрою (і від того, який offset діяв у КОНКРЕТНИЙ момент — через перехід на літній час),
+   * а SQLite цього поясу не знає й знати не може. Групувати за локальним днем усередині SQL
+   * означало б зашити offset у запит, що було б неправильно принаймні двічі на рік. Тому день
+   * обчислює JS (`readingDayKey`, `src/lib/readingCalendar.ts`) — але отримує для цього лише
+   * ОДНУ коротку колонку на сесію, а не ~13 колонок повного рядка, тож виграш #168 (не тягнути
+   * повні рядки через міст заради лічильника) здебільшого збережено.
+   *
+   * Для вузького діапазону дат цей метод НЕ потрібен — є `listStartedBetween` (саме ним тепер
+   * рахується "сьогодні": межі локальної доби → інстанти → діапазонний запит).
    */
-  async listByStartedDayKey(db: SQLiteDatabase, dayKey: string): Promise<ReadingSession[]> {
-    const rows = await db.getAllAsync<ReadingSessionRow>(
-      `SELECT * FROM reading_session
-       WHERE substr(started_at, 1, 10) = ? AND deleted_at IS NULL AND ended_at IS NOT NULL
-       ORDER BY started_at ASC`,
-      [dayKey],
-    );
-    return rows.map(mapRow);
-  },
-
-  /**
-   * УНІКАЛЬНІ `started_at`-дні (UTC, `substr(started_at,1,10)`), коли була хоч одна завершена
-   * сесія — POLYTSIA V1.6.2, #168. Замінює `listAllCompleted(db).map(s =>
-   * s.startedAt.slice(0,10))` у `useStatistics.ts` (streaks/`activeDaysCount`):
-   * `computeStreaks`/`Set`-розмір потребують лише УНІКАЛЬНІ рядки-ключі днів, не повні рядки
-   * сесій — `SELECT DISTINCT` повертає рівно ту множину, яку раніше рахував JS `new
-   * Set(dayKeys)`, лише без передачі й мапінгу кожного повного рядка сесії через міст.
-   */
-  async listDistinctActiveDayKeys(db: SQLiteDatabase): Promise<string[]> {
-    const rows = await db.getAllAsync<{ day_key: string }>(
-      `SELECT DISTINCT substr(started_at, 1, 10) AS day_key FROM reading_session
+  async listCompletedStartInstants(db: SQLiteDatabase): Promise<string[]> {
+    const rows = await db.getAllAsync<{ started_at: string }>(
+      `SELECT started_at FROM reading_session
        WHERE deleted_at IS NULL AND ended_at IS NOT NULL
-       ORDER BY day_key ASC`,
+       ORDER BY started_at ASC`,
     );
-    return rows.map((row) => row.day_key);
+    return rows.map((row) => row.started_at);
   },
 
   /**

@@ -124,17 +124,25 @@ export async function fetchReadingSeasonData(
   const finishedRunRows = runsInRange.filter((run) => run.status === 'finished');
   const dnfCount = runsInRange.length - finishedRunRows.length; // ТЗ §53
 
-  // Пакетне довантаження деталей книги для УНІКАЛЬНИХ userBookId (не по одному на run — ТЗ
-  // §66) — `listWithDetailsByIds` уже мовчки пропускає видалену/відсутню книгу (ТЗ §67
-  // "deleted book" test).
+  // Пакетне довантаження деталей книги для УНІКАЛЬНИХ userBookId (не по одному на run — ТЗ §66).
+  //
+  // POLYTSIA V1.7 (§61) — `...IncludingDeleted`, а не alive-only `listWithDetailsByIds`.
+  // Продуктове рішення V1.7: історичний Сезон ПЕРЕЖИВАЄ soft-delete книги з Бібліотеки. Сезон —
+  // емоційний знімок минулого, а не запит до живої Бібліотеки: якщо людина прочитала книгу
+  // влітку 2026, а у 2028 прибрала її з Бібліотеки, «Літо 2026» не має переписувати минуле.
+  // Зняти guard лише в `ReadingRunRepository.listFinishedBetween` було б НЕДОСТАТНЬО — run
+  // пройшов би, але книга все одно відсіялась би тут, на `if (!userBook) continue`. Це той
+  // самий двоетапний фікс, що вже застосований для Календаря (Gap A/B, FOUNDATION FINAL POLISH).
   const uniqueUserBookIds = [...new Set(finishedRunRows.map((run) => run.userBookId))];
-  const userBookDetailsList = await UserBookRepository.listWithDetailsByIds(db, uniqueUserBookIds);
+  const userBookDetailsList = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, uniqueUserBookIds);
   const userBookDetailsById = new Map(userBookDetailsList.map((ub) => [ub.id, ub]));
 
   const finishedRuns: SeasonBookRun[] = [];
   for (const run of finishedRunRows) {
     const userBook = userBookDetailsById.get(run.userBookId);
-    if (!userBook) continue; // видалена книга — тихо пропускаємо, той самий підхід, що й listWithDetailsByIds
+    // Лишається для ФІЗИЧНО відсутніх/видалених edition|work — тиха деградація, не помилка
+    // (`attachDetailsBatch` не зможе зібрати деталі, і книга просто не з'явиться).
+    if (!userBook) continue;
     finishedRuns.push({ userBook, run, isReread: run.runNumber > 1 });
   }
 

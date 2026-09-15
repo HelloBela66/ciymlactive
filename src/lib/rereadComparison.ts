@@ -1,5 +1,6 @@
 import type { ReadingExperienceId } from '@/design/readingExperience';
 import { isReadingExperienceId } from '@/design/readingExperience';
+import { readingDayKey } from '@/lib/readingCalendar';
 
 /**
  * «Як змінилася книга для тебе» (REREADING MODEL, Фаза 12, `docs/READING_RUN.md` §"Фаза 12") —
@@ -49,7 +50,10 @@ export function computeRunReadingStats(sessions: RunSessionStatsInput[]): RunRea
 
   for (const session of sessions) {
     totalDurationSeconds += session.durationSeconds ?? 0;
-    dayKeys.add(session.startedAt.slice(0, 10));
+    // POLYTSIA V1.7 (`docs/V1_7_TEMPORAL_SEMANTICS.md`): локальний календарний день, а не
+    // `startedAt.slice(0, 10)` — "днів на прочитання" у порівнянні перечитувань має рахуватись
+    // тим самим днем, що й усюди в застосунку.
+    dayKeys.add(readingDayKey(session.startedAt));
     if (session.readingExperience != null && isReadingExperienceId(session.readingExperience)) {
       experienceCounts.set(session.readingExperience, (experienceCounts.get(session.readingExperience) ?? 0) + 1);
     }

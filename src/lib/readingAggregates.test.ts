@@ -2,7 +2,6 @@ import {
   sumSessionMinutes,
   sumSessionPages,
   computeBusiestMonth,
-  filterFinishedInRange,
   computeTopGenreAmong,
   computeActiveDays,
   computeDominantReadingExperience,
@@ -52,7 +51,7 @@ describe('computeBusiestMonth', () => {
     expect(computeBusiestMonth([])).toBeNull();
   });
 
-  it('обирає місяць з найбільшою кількістю сесій (UTC)', () => {
+  it('обирає місяць з найбільшою кількістю сесій (за ЛОКАЛЬНИМ календарем)', () => {
     const result = computeBusiestMonth([
       { startedAt: '2026-01-05T10:00:00.000Z' },
       { startedAt: '2026-03-01T10:00:00.000Z' },
@@ -71,29 +70,14 @@ describe('computeBusiestMonth', () => {
   });
 });
 
-describe('filterFinishedInRange', () => {
-  const range = { start: '2026-01-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z' };
-
-  it('лишає лише книги з finishedAt у межах [start, end)', () => {
-    const books = [
-      { id: 'a', finishedAt: '2026-06-15T00:00:00.000Z' },
-      { id: 'b', finishedAt: '2025-12-31T23:59:59.000Z' },
-      { id: 'c', finishedAt: '2027-01-01T00:00:00.000Z' },
-      { id: 'd', finishedAt: null },
-    ];
-    expect(filterFinishedInRange(books, range).map((b) => b.id)).toEqual(['a']);
-  });
-
-  it('межа start включна', () => {
-    const books = [{ id: 'a', finishedAt: range.start }];
-    expect(filterFinishedInRange(books, range).map((b) => b.id)).toEqual(['a']);
-  });
-
-  it('межа end виключна', () => {
-    const books = [{ id: 'a', finishedAt: range.end }];
-    expect(filterFinishedInRange(books, range)).toEqual([]);
-  });
-});
+/**
+ * POLYTSIA V1.7 — тести `filterFinishedInRange` ВИЛУЧЕНІ разом із самою функцією
+ * (`docs/V1_7_READING_LIFE.md`). Вона відбирала книги за `UserBook.finishedAt` — полем живої
+ * картки книги, а не за завершенням конкретного прохождення, — і разом із
+ * `listByStatus('finished')` давала зникнення перечитаних і soft-deleted книг із минулих
+ * періодів. Canonical-відповідник — `ReadingRunRepository.listFinishedBetween` +
+ * `src/lib/readingPeriodSummary.ts`, покриті власними тестами.
+ */
 
 describe('computeTopGenreAmong', () => {
   it('немає книг — null', () => {
@@ -119,27 +103,45 @@ describe('computeTopGenreAmong', () => {
   });
 });
 
-/** POLYTSIA V1.6.2, #167 — READING SEASONS, ТЗ §44: "активні дні" сезону. */
+/**
+ * POLYTSIA V1.6.2, #167 — READING SEASONS, ТЗ §44: "активні дні" сезону.
+ *
+ * POLYTSIA V1.7 — тести переписані разом із самою функцією
+ * (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Раніше вони фіксували UTC-поведінку жорстко закодованими
+ * `...Z`-рядками, і один із них був timezone-крихким: дві сесії `08:00Z` і `21:00Z` того самого
+ * UTC-дня — це ОДИН день лише в UTC; у Києві (+3) друга припадає вже на наступну добу, тож тест
+ * проходив у CI (UTC) і провалився б на реальному пристрої користувача. Тепер моменти будуються
+ * з ЛОКАЛЬНИХ компонентів і переводяться в instant через `.toISOString()` — інваріант істинний
+ * у будь-якому поясі, включно з UTC.
+ */
 describe('computeActiveDays', () => {
   it('немає сесій — 0', () => {
     expect(computeActiveDays([])).toBe(0);
   });
 
-  it('кілька сесій того самого UTC-дня рахуються як один день', () => {
+  it('кілька сесій того самого ЛОКАЛЬНОГО дня рахуються як один день', () => {
     const result = computeActiveDays([
-      { startedAt: '2026-07-01T08:00:00.000Z' },
-      { startedAt: '2026-07-01T21:00:00.000Z' },
+      { startedAt: new Date(2026, 6, 1, 8, 0).toISOString() },
+      { startedAt: new Date(2026, 6, 1, 21, 0).toISOString() },
     ]);
     expect(result).toBe(1);
   });
 
   it('сесії різних днів рахуються окремо', () => {
     const result = computeActiveDays([
-      { startedAt: '2026-07-01T08:00:00.000Z' },
-      { startedAt: '2026-07-02T08:00:00.000Z' },
-      { startedAt: '2026-07-10T08:00:00.000Z' },
+      { startedAt: new Date(2026, 6, 1, 8, 0).toISOString() },
+      { startedAt: new Date(2026, 6, 2, 8, 0).toISOString() },
+      { startedAt: new Date(2026, 6, 10, 8, 0).toISOString() },
     ]);
     expect(result).toBe(3);
+  });
+
+  it('23:50 і 00:30 наступної доби — ДВА активні дні (регресія V1.7, нічне читання)', () => {
+    const result = computeActiveDays([
+      { startedAt: new Date(2026, 6, 1, 23, 50).toISOString() },
+      { startedAt: new Date(2026, 6, 2, 0, 30).toISOString() },
+    ]);
+    expect(result).toBe(2);
   });
 });
 

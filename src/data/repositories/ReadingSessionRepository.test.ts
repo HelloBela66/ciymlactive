@@ -767,10 +767,12 @@ describe('ReadingSessionRepository.start — статус книги узгод�
 });
 
 /**
- * POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE) — `listRecentCompleted`/`listByStartedDayKey`/
- * `listDistinctActiveDayKeys`/`getLifetimeCompletedTotals`/`getLifetimePaceTotals`: нові
- * bounded/SQL-агрегатні методи, що замінили `listAllCompleted(db)` + JS-обчислення в
+ * POLYTSIA V1.6.2, #168 (ANALYTICS PERFORMANCE) — `listRecentCompleted`/
+ * `getLifetimeCompletedTotals`/`getLifetimePaceTotals`: нові bounded/SQL-агрегатні методи, що
+ * замінили `listAllCompleted(db)` + JS-обчислення в
  * `useOnePicker.ts`/`useStatistics.ts`/`useTbrReality.ts`/`useTomorrowRecommendation.ts`.
+ * POLYTSIA V1.7 — два з них (`listByStartedDayKey`/`listDistinctActiveDayKeys`) замінені на
+ * `listCompletedStartInstants`, див. коментар нижче.
  * Пряма SQL-вставка `reading_session` (як і `seedSession` в інших тестових файлах цього
  * репозиторію) — жоден repository-метод не приймає довільний `startedAt`/`durationSeconds`,
  * `start()`/`finish()` завжди пишуть `now()`.
@@ -839,43 +841,54 @@ describe('ReadingSessionRepository — bounded/агрегатні запити (
     });
   });
 
-  describe('listByStartedDayKey', () => {
-    it('повертає лише сесії того самого UTC-дня (перші 10 символів started_at)', async () => {
-      const db = await openMigratedTestDb();
-      await seedUserBook(db, { id: 'ub-day1' });
-      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-05T08:00:00.000Z' });
-      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-05T21:59:00.000Z' });
-      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-06T00:00:00.000Z' });
-      await seedCompletedSessionAt(db, { userBookId: 'ub-day1', startedAt: '2026-03-04T23:59:59.000Z' });
-
-      const result = await ReadingSessionRepository.listByStartedDayKey(db, '2026-03-05');
-
-      expect(result).toHaveLength(2);
-      expect(result.map((s) => s.startedAt)).toEqual(['2026-03-05T08:00:00.000Z', '2026-03-05T21:59:00.000Z']);
-    });
-
-    it('немає жодної сесії того дня — порожній масив', async () => {
-      const db = await openMigratedTestDb();
-      expect(await ReadingSessionRepository.listByStartedDayKey(db, '2026-03-05')).toEqual([]);
-    });
-  });
-
-  describe('listDistinctActiveDayKeys', () => {
+  /**
+   * POLYTSIA V1.7 (`docs/V1_7_TEMPORAL_SEMANTICS.md`) — `listByStartedDayKey` і
+   * `listDistinctActiveDayKeys` ВИЛУЧЕНІ разом із їхніми тестами. Обидва робили атрибуцію
+   * календарного дня через SQL-підрядок `substr(started_at, 1, 10)`, тобто через UTC-день, тоді
+   * як викликач (`useStatistics.ts`) передавав ЛОКАЛЬНИЙ `todayKey` — реальний виробничий баг,
+   * через який нічне читання не потрапляло в "сьогодні", а streak рахувався з розбіжних
+   * ключів. Замінені на `listCompletedStartInstants` (сирі моменти, день рахує JS у локальному
+   * поясі) і `listStartedBetween` (діапазон локальної доби в інстантах).
+   *
+   * Старі тести не «полагоджені», а свідомо видалені: вони СТВЕРДЖУВАЛИ саме UTC-атрибуцію
+   * («повертає лише сесії того самого UTC-дня») — тобто фіксували баговану поведінку як
+   * очікувану. Залишати їх означало б зберегти регресійний захист навколо дефекту.
+   */
+  describe('listCompletedStartInstants', () => {
     it('порожня таблиця — порожній масив', async () => {
       const db = await openMigratedTestDb();
-      expect(await ReadingSessionRepository.listDistinctActiveDayKeys(db)).toEqual([]);
+      expect(await ReadingSessionRepository.listCompletedStartInstants(db)).toEqual([]);
     });
 
-    it('дедуплікує кілька сесій того самого дня, повертає відсортовані ключі', async () => {
+    it('повертає моменти початку всіх завершених сесій у хронологічному порядку', async () => {
       const db = await openMigratedTestDb();
       await seedUserBook(db, { id: 'ub-days1' });
-      await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-03T08:00:00.000Z' });
       await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-03T20:00:00.000Z' });
       await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-01T08:00:00.000Z' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-days1', startedAt: '2026-02-03T08:00:00.000Z' });
 
-      const result = await ReadingSessionRepository.listDistinctActiveDayKeys(db);
+      const result = await ReadingSessionRepository.listCompletedStartInstants(db);
 
-      expect(result).toEqual(['2026-02-01', '2026-02-03']);
+      expect(result).toEqual([
+        '2026-02-01T08:00:00.000Z',
+        '2026-02-03T08:00:00.000Z',
+        '2026-02-03T20:00:00.000Z',
+      ]);
+    });
+
+    it('не включає незавершені й м\'яко видалені сесії', async () => {
+      const db = await openMigratedTestDb();
+      await seedUserBook(db, { id: 'ub-days2' });
+      await seedCompletedSessionAt(db, { userBookId: 'ub-days2', startedAt: '2026-02-05T08:00:00.000Z' });
+      await db.runAsync(
+        `INSERT INTO reading_session (
+           id, user_book_id, started_at, ended_at, goal_minutes, paused_intervals,
+           start_page, end_page, duration_seconds, mood_note, reading_experience, is_edited,
+           created_at, updated_at, reading_run_id
+         ) VALUES ('unfinished-1', 'ub-days2', '2026-02-06T08:00:00.000Z', NULL, NULL, '[]', 0, NULL, NULL, NULL, NULL, 0, '2026-02-06T08:00:00.000Z', '2026-02-06T08:00:00.000Z', NULL)`,
+      );
+
+      expect(await ReadingSessionRepository.listCompletedStartInstants(db)).toEqual(['2026-02-05T08:00:00.000Z']);
     });
   });
 
