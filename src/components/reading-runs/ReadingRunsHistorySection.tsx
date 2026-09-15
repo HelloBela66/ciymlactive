@@ -29,6 +29,31 @@ export function ReadingRunsHistorySection({ workId, details }: { workId: string;
 
   return (
     <View style={{ gap: theme.spacing.md }}>
+      {/* POLYTSIA V1.7, Phase 2 — вхід у «Мою історію з цією книгою» (ТЗ V1.7 §5).
+          Саме тут, а не окремо на Book Details і на Book Memory: ця секція вже спільна для
+          обох екранів (Фаза 13), тож один вхід автоматично з'являється на обох — без другої
+          копії розмітки й без ризику, що згодом вони розійдуться.
+          Показується за наявності БУДЬ-ЯКОЇ історії (навіть одного незавершеного проходу) —
+          на відміну від «Порівняти прочитання» нижче, якому потрібні ≥2 завершені. */}
+      {details.length > 0 ? (
+        <Pressable
+          onPress={() => router.push({ pathname: '/book-history/[workId]', params: { workId } } as unknown as Href)}
+        >
+          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+            <Ionicons name="book-outline" size={20} color={theme.colors.accent} />
+            <View style={{ flex: 1 }}>
+              <AppText variant="body" color="accent">
+                Моя історія з цією книгою
+              </AppText>
+              <AppText variant="caption" color="secondary">
+                Уся хронологія: читання, думки, повернення
+              </AppText>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+          </Card>
+        </Pressable>
+      ) : null}
+
       {comparableRuns.length >= 2 ? (
         <Pressable
           onPress={() =>

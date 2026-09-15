@@ -153,6 +153,15 @@ export const queryKeys = {
     // зі спільного результату, а не робить власний запит.
     detailByUserBook: (userBookId: string) => ['readingRuns', 'detailByUserBook', userBookId] as const,
   },
+  bookHistory: {
+    // POLYTSIA V1.7, Phase 2 («Моя історія з цією книгою», `docs/V1_7_READING_LIFE.md`) — лише
+    // те, чого НЕМАЄ в `readingRuns.detailByUserBook` вище: картка книги, сесії та
+    // spoiler-фільтрований журнал. Оцінка/спогад/капсула на кожен прохід свідомо НЕ
+    // перезапитуються — хронологія збирається над уже закешованим результатом
+    // `useReadingRunsDetail`, щоб не мати двох джерел правди про прохід (той самий "один хук,
+    // спільний кеш" принцип, що й у `readingRuns` вище).
+    sources: (userBookId: string) => ['bookHistory', 'sources', userBookId] as const,
+  },
   loreEntities: {
     // POLYTSIA V1.6, Фаза 9-10 («Персонажі» → PERSONAL LORE) — той самий рівень, що й
     // `genres.byWork`/`tags.byWork` нижче: `lore_entity.work_id`, не `user_book_id`
