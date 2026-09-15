@@ -171,6 +171,22 @@ export interface JournalListPageOptions {
    * без обмеження з відповідного боку. */
   dateFrom?: string;
   dateTo?: string;
+  /**
+   * POLYTSIA V1.7, Phase 9 (ТЗ модуль E §19) — включати записи книг, ПРИБРАНИХ з Бібліотеки
+   * (`user_book.deleted_at IS NOT NULL`). За замовчуванням `false`, тобто поведінка всіх наявних
+   * викликів не змінюється: «Мій щоденник», Календар і Сезони показують живу бібліотеку.
+   *
+   * Потрібен рівно одній поверхні — Memory Resurfacing, і з тієї самої причини, з якої віхи
+   * читають книги через `listWithDetailsByIdsIncludingDeleted`: History Preservation Principle.
+   * Прибрати книгу з Бібліотеки сьогодні не означає, що думка, записана під час її читання
+   * чотири роки тому, перестала бути частиною читацької історії. Запис, видалений САМ
+   * (`t.deleted_at`), лишається виключеним за будь-якого значення прапорця — це інше рішення
+   * користувача, і його цей прапорець не скасовує.
+   *
+   * Як і `workId`/`dateFrom` вище, поле має сенс лише для `listFeedPage`; SQL-білдер `listPage`
+   * його ігнорує (він і так скопований на один `userBookId`, відомий з контексту екрана).
+   */
+  includeDeletedBooks?: boolean;
 }
 
 export interface JournalListPageResult {
@@ -463,6 +479,12 @@ export const JournalRepository = {
       JOIN edition e ON e.id = ub.edition_id
       JOIN work w ON w.id = e.work_id`;
 
+    // ТЗ модуль E §19 — див. `includeDeletedBooks` у `JournalListPageOptions`. Видалення самого
+    // ЗАПИСУ (`t.deleted_at`) прапорцем не скасовується й лишається нижче безумовним.
+    const bookAliveFilter = options.includeDeletedBooks
+      ? ''
+      : ' AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL';
+
     // LEFT JOIN note_category — резолвить назву власної категорії користувача прямо в SQL
     // (докладніше — коментар біля `categoryLabel` у `src/types/journalEntry.ts`): стрічка
     // змішує записи багатьох книг одразу, тож клієнтський резолв означав би N+1 запит на
@@ -480,7 +502,7 @@ export const JournalRepository = {
                     ub.status AS ub_status, ub.spoiler_safe_enabled AS ub_spoiler_safe_enabled,
                     ub.current_page AS ub_current_page, e.page_count AS edition_page_count
                   FROM note t${bookJoin} ${categoryJoin}
-                  WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
+                  WHERE t.deleted_at IS NULL${bookAliveFilter}`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
       if (revisitLaterOnly) sql += ' AND t.revisit_later = 1';
       if (noteTypes && noteTypes.length > 0) {
@@ -524,7 +546,7 @@ export const JournalRepository = {
                     ub.status AS ub_status, ub.spoiler_safe_enabled AS ub_spoiler_safe_enabled,
                     ub.current_page AS ub_current_page, e.page_count AS edition_page_count
                   FROM quote t${bookJoin}
-                  WHERE t.deleted_at IS NULL AND ub.deleted_at IS NULL AND w.deleted_at IS NULL AND e.deleted_at IS NULL`;
+                  WHERE t.deleted_at IS NULL${bookAliveFilter}`;
       if (favoriteOnly) sql += ' AND t.is_favorite = 1';
       if (revisitLaterOnly) sql += ' AND t.revisit_later = 1';
       if (options.reaction) {

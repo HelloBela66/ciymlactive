@@ -14,11 +14,13 @@ import { useTheme } from '@/design/ThemeProvider';
 import { SEASON_META } from '@/design/season';
 import { READING_EXPERIENCE_LABELS } from '@/design/readingExperience';
 import { journalEntryTypeLabels } from '@/design/i18n-labels';
+import { useReadingHistoryStart } from '@/features/reading-period/readingHistoryStart';
 import { useReadingSeason } from '@/features/seasons/useReadingSeason';
 import { useShareCard } from '@/features/share/useShareCard';
 import {
-  parseSeasonKey,
-  currentSeasonKey,
+  canNavigateSeason,
+  isSeasonBeforeHistory,
+  resolveSeasonKey,
   adjacentSeasonKey,
   formatSeasonLabel,
   formatSeasonHeroTitle,
@@ -133,8 +135,12 @@ function SavedThoughtRow({ entry }: { entry: JournalFeedEntry }) {
 export default function ReadingSeasonScreen() {
   const theme = useTheme();
   const { seasonKey: seasonKeyParam } = useLocalSearchParams<{ seasonKey: string }>();
-  const [key, setKey] = useState<SeasonKey>(
-    () => parseSeasonKey(seasonKeyParam) ?? currentSeasonKey(new Date()),
+  // POLYTSIA V1.7, Phase 10 — початок читацької історії потрібен, щоб знати, де закінчується
+  // гортання назад. Той самий момент, від якого рахуються річниці віх (спільний
+  // `fetchReadingHistoryStart`), а не власна копія обчислення.
+  const { data: earliestReadingInstant } = useReadingHistoryStart();
+  const [key, setKey] = useState<SeasonKey>(() =>
+    resolveSeasonKey(seasonKeyParam, { now: new Date() }),
   );
   const { data, isLoading } = useReadingSeason(key.seasonId, key.year);
   const meta = SEASON_META[key.seasonId];
@@ -152,11 +158,34 @@ export default function ReadingSeasonScreen() {
   const cardRef = useRef<View>(null);
   const shareController = useShareCard({ cardRef, dialogTitle: 'Мій читацький сезон', log });
 
+  /**
+   * POLYTSIA V1.7, Phase 10 — гортання обмежене з ОБОХ боків.
+   *
+   * До цієї фази стрілки не мали меж узагалі: з екрана сезону можна було дійти до «Літа 2099» —
+   * і кожен такий сезон радив «читати протягом сезону», який ще не настав. Тепер уперед не далі
+   * поточного сезону (та сама межа, що вже діє в Recap через `isLatest`), назад не далі сезону,
+   * у якому почалась читацька історія (та сама межа, яку Reading Life має безкоштовно,
+   * будуючись із даних).
+   */
+  const navOptions = { now: new Date(), earliestReadingInstant: earliestReadingInstant ?? null };
+  const canGoPrev = canNavigateSeason(key, 'prev', navOptions);
+  const canGoNext = canNavigateSeason(key, 'next', navOptions);
+
   const goToAdjacent = (direction: 'prev' | 'next') => {
-    setKey((current) => adjacentSeasonKey(current, direction));
+    setKey((current) => {
+      if (!canNavigateSeason(current, direction, navOptions)) return current;
+      return adjacentSeasonKey(current, direction);
+    });
   };
 
-  const isEmpty = !data || (data.uniqueBooksCount === 0 && data.totalMinutes === 0);
+  // Порожнеча — за КАНОНІЧНИМ визначенням (`isReadingPeriodEmpty`), тим самим, що в Recap. Раніше
+  // тут стояла власна формула `uniqueBooksCount === 0 && totalMinutes === 0`, через яку сезон із
+  // самими записами щоденника чи кинутою книгою виглядав порожнім, хоча Recap показував його
+  // змістовним.
+  const isEmpty = !data || data.isEmpty;
+  // Сезон, що повністю передує читацькій історії, порожній не тому, що людина не читала, а тому,
+  // що «Полиці» тоді ще не існувало в її житті. Це різні речі, і казати їх однаково — неправда.
+  const isBeforeHistory = isSeasonBeforeHistory(key, earliestReadingInstant ?? null, navOptions.now);
 
   return (
     <>
@@ -178,38 +207,50 @@ export default function ReadingSeasonScreen() {
             marginBottom: theme.spacing.lg,
           }}
         >
-          <Pressable
-            onPress={() => goToAdjacent('prev')}
-            accessibilityRole="button"
-            accessibilityLabel="Попередній сезон"
-            hitSlop={8}
-            style={{
-              width: theme.minTouchTarget,
-              height: theme.minTouchTarget,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="chevron-back" size={22} color={theme.colors.textSecondary} />
-          </Pressable>
+          {canGoPrev ? (
+            <Pressable
+              onPress={() => goToAdjacent('prev')}
+              accessibilityRole="button"
+              accessibilityLabel="Попередній сезон"
+              hitSlop={8}
+              style={{
+                width: theme.minTouchTarget,
+                height: theme.minTouchTarget,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="chevron-back" size={22} color={theme.colors.textSecondary} />
+            </Pressable>
+          ) : (
+            // Порожній блок тієї самої ширини, а не приглушена стрілка: вимкнена кнопка обіцяє,
+            // що колись спрацює. Той самий прийом, що й `isLatest` у Recap.
+            <View style={{ width: theme.minTouchTarget }} />
+          )}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs }}>
             <Ionicons name={meta.icon} size={20} color={theme.colors.accent} />
             <AppText variant="title">{seasonLabel}</AppText>
           </View>
-          <Pressable
-            onPress={() => goToAdjacent('next')}
-            accessibilityRole="button"
-            accessibilityLabel="Наступний сезон"
-            hitSlop={8}
-            style={{
-              width: theme.minTouchTarget,
-              height: theme.minTouchTarget,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="chevron-forward" size={22} color={theme.colors.textSecondary} />
-          </Pressable>
+          {canGoNext ? (
+            <Pressable
+              onPress={() => goToAdjacent('next')}
+              accessibilityRole="button"
+              accessibilityLabel="Наступний сезон"
+              hitSlop={8}
+              style={{
+                width: theme.minTouchTarget,
+                height: theme.minTouchTarget,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="chevron-forward" size={22} color={theme.colors.textSecondary} />
+            </Pressable>
+          ) : (
+            // Поточний сезон — останній, що взагалі існує. Уперед іти нема куди, і стрілка про це
+            // не бреше (та сама поведінка, що й `isLatest` у Recap).
+            <View style={{ width: theme.minTouchTarget }} />
+          )}
         </View>
 
         {isLoading || !data ? (
@@ -217,9 +258,22 @@ export default function ReadingSeasonScreen() {
             Завантаження…
           </AppText>
         ) : isEmpty ? (
+          /**
+           * ТЗ V1.7, Phase 10 — порожній сезон говорить ПРАВДУ про те, чому він порожній.
+           *
+           * Раніше тут був один текст на всі випадки: «Читай книги протягом сезону, щоб побачити
+           * тут підсумок». Для сезону, що передує читацькій історії, це звучало як докір за роки,
+           * коли застосунку ще не існувало. Тепер таких сезонів гортанням не досягти взагалі
+           * (`canNavigateSeason`), але сюди ще можна прийти старим deep-link'ом — тож текст
+           * розрізняє два випадки, а не вдає, що вони однакові.
+           */
           <EmptyState
-            title={`Немає даних за сезон «${seasonLabel}»`}
-            description="Читай книги протягом сезону, щоб побачити тут підсумок."
+            title={`У сезоні «${seasonLabel}» читання не записувалось`}
+            description={
+              isBeforeHistory
+                ? 'Цей сезон був до того, як почалася твоя читацька історія у «Полиці».'
+                : 'Тут з\u2019являться книги, сесії та записи цього сезону.'
+            }
           />
         ) : (
           <View style={{ gap: theme.spacing.lg }}>

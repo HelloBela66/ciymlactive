@@ -18,6 +18,7 @@ import {
   type HomeContextSelectionInput,
   type MilestoneCandidate,
 } from './homeContext';
+import type { MemoryResurfacingCandidate } from './memoryResurfacing';
 import type { ReadingGoal, ReadingGoalProgress } from '@/types/readingGoal';
 
 const NOW = new Date('2026-09-12T12:00:00.000Z');
@@ -211,6 +212,7 @@ describe('selectHomeContextCard', () => {
         capsuleDue: null,
         onThisDayAvailable: false,
         milestone: null,
+        memoryResurfacing: null,
         goalNearCompletion: null,
         tbrBookCount: 0,
         tbrOldestWaiting: null,
@@ -224,6 +226,7 @@ describe('selectHomeContextCard', () => {
       capsuleDue: CAPSULE_CANDIDATE,
       onThisDayAvailable: true,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -237,6 +240,7 @@ describe('selectHomeContextCard', () => {
       capsuleDue: CAPSULE_CANDIDATE,
       onThisDayAvailable: true,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -250,6 +254,7 @@ describe('selectHomeContextCard', () => {
       capsuleDue: null,
       onThisDayAvailable: true,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -263,6 +268,7 @@ describe('selectHomeContextCard', () => {
       capsuleDue: null,
       onThisDayAvailable: false,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: GOAL_CANDIDATE,
       tbrBookCount: 5,
       tbrOldestWaiting: null,
@@ -276,6 +282,7 @@ describe('selectHomeContextCard', () => {
       capsuleDue: null,
       onThisDayAvailable: false,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: null,
       tbrBookCount: 3,
       tbrOldestWaiting: null,
@@ -289,6 +296,7 @@ describe('selectHomeContextCard', () => {
       capsuleDue: null,
       onThisDayAvailable: false,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: null,
       tbrBookCount: 0,
       tbrOldestWaiting: null,
@@ -343,6 +351,7 @@ const FULL_INPUT: HomeContextSelectionInput = {
   capsuleDue: CAPSULE_CANDIDATE,
   onThisDayAvailable: true,
   milestone: null,
+  memoryResurfacing: null,
   goalNearCompletion: GOAL_CANDIDATE,
   tbrBookCount: 3,
   tbrOldestWaiting: null,
@@ -414,6 +423,7 @@ describe('selectVisibleHomeContextCard', () => {
       capsuleDue: null,
       onThisDayAvailable: false,
       milestone: null,
+      memoryResurfacing: null,
       goalNearCompletion: null,
       tbrBookCount: 0,
       tbrOldestWaiting: null,
@@ -471,6 +481,7 @@ describe('віха в пріоритеті Home (ТЗ §22)', () => {
     staleReading: null,
     capsuleDue: null,
     milestone: milestoneAt('finished_books:50', 1),
+    memoryResurfacing: null,
   };
 
   it('віха важливіша за «Цей день» — але слот усе одно РІВНО один', () => {
@@ -511,6 +522,7 @@ describe('приглушення віхи (ТЗ §23)', () => {
       goalNearCompletion: null,
       tbrBookCount: 0,
       milestone: milestoneAt('reading_hours:100', 1),
+      memoryResurfacing: null,
     };
     expect(
       selectVisibleHomeContextCard(input, new Set(['milestone:finished_books:50']))?.kind,
@@ -524,9 +536,133 @@ describe('приглушення віхи (ТЗ §23)', () => {
       staleReading: null,
       capsuleDue: null,
       milestone: milestoneAt('finished_books:50', 1),
+      memoryResurfacing: null,
     };
     expect(selectVisibleHomeContextCard(input, new Set(['milestone:finished_books:50']))?.kind).toBe(
       'on_this_day',
     );
+  });
+});
+
+/**
+ * POLYTSIA V1.7, Phase 9 — MEMORY RESURFACING у слоті Home (ТЗ модуль E §7, §10, §30).
+ *
+ * ТЗ дає «концептуальний» пріоритет, у якому вгорі стоять Year/Month/Week Recap, і одразу просить
+ * звірити його з живим кодом, а не переносити механічно. Звірка: recap-карток на Home НЕ існує —
+ * Recap живе власними екранами (`app/reading-recap/*`). Тож у ФАКТИЧНІЙ мапі лишається те, що ТЗ
+ * вимагає по суті: спогад нижчий за віху й за «Цей день», і не домінує над головною.
+ */
+const RESURFACING_CANDIDATE: MemoryResurfacingCandidate = {
+  semanticKey: 'journal:entry-1',
+  kind: 'journal_memory',
+  occurredAt: new Date(2025, 0, 10, 12, 0).toISOString(),
+  workId: 'work-1',
+  userBookId: 'ub-1',
+  bookTitle: 'Книга',
+  coverUrl: null,
+  coverFallbackColor: null,
+  text: 'Стара думка.',
+  entryType: 'thought',
+  finishedRunCount: null,
+  periodKind: null,
+  periodKey: null,
+  weight: 2,
+  homeEligible: true,
+};
+
+describe('спогад у пріоритеті Home (ТЗ модуль E §7)', () => {
+  const withResurfacing: HomeContextSelectionInput = {
+    ...FULL_INPUT,
+    staleReading: null,
+    capsuleDue: null,
+    milestone: null,
+    onThisDayAvailable: false,
+    memoryResurfacing: RESURFACING_CANDIDATE,
+  };
+
+  it('спогад бере слот, коли вищі кандидати мовчать', () => {
+    expect(selectHomeContextCard(withResurfacing)?.kind).toBe('memory_resurfacing');
+  });
+
+  it('віха й «Цей день» важливіші за спогад', () => {
+    expect(
+      selectHomeContextCard({ ...withResurfacing, milestone: milestoneAt('finished_books:50', 1) })?.kind,
+    ).toBe('milestone');
+    expect(selectHomeContextCard({ ...withResurfacing, onThisDayAvailable: true })?.kind).toBe(
+      'on_this_day',
+    );
+  });
+
+  it('спогад важливіший за ціль і за TBR — інакше його не побачили б ніколи', () => {
+    expect(selectHomeContextCard(withResurfacing)?.kind).toBe('memory_resurfacing');
+    expect(selectHomeContextCard({ ...withResurfacing, memoryResurfacing: null })?.kind).not.toBe(
+      'memory_resurfacing',
+    );
+  });
+
+  it('слот лишається РІВНО одним: спогад не додає другої картки', () => {
+    const card = selectHomeContextCard({
+      ...withResurfacing,
+      milestone: milestoneAt('finished_books:50', 1),
+      onThisDayAvailable: true,
+    });
+    expect(card).not.toBeNull();
+    expect(card?.kind).toBe('milestone');
+  });
+
+  it('без спогаду пріоритет поводиться рівно як до Phase 9', () => {
+    expect(selectHomeContextCard({ ...withResurfacing, memoryResurfacing: null })?.kind).toBe(
+      'goal_near_completion',
+    );
+  });
+});
+
+describe('приглушення спогаду (ТЗ модуль E §10)', () => {
+  const input: HomeContextSelectionInput = {
+    ...FULL_INPUT,
+    staleReading: null,
+    capsuleDue: null,
+    milestone: null,
+    onThisDayAvailable: false,
+    memoryResurfacing: RESURFACING_CANDIDATE,
+  };
+
+  it('ключ ідентифікує КОНКРЕТНИЙ спогад, а не тип картки', () => {
+    expect(
+      getHomeContextCardSuppressionKey({ kind: 'memory_resurfacing', candidate: RESURFACING_CANDIDATE }),
+    ).toBe('memory_resurfacing:journal:entry-1');
+  });
+
+  it('приховати один спогад не ховає інший', () => {
+    expect(selectVisibleHomeContextCard(input, new Set(['memory_resurfacing:journal:entry-9']))?.kind).toBe(
+      'memory_resurfacing',
+    );
+    expect(
+      selectVisibleHomeContextCard(input, new Set(['memory_resurfacing:journal:entry-1']))?.kind,
+    ).not.toBe('memory_resurfacing');
+  });
+
+  it('приглушений спогад поступається слотом наступному кандидату, а не ховає його', () => {
+    expect(
+      selectVisibleHomeContextCard(input, new Set(['memory_resurfacing:journal:entry-1']))?.kind,
+    ).toBe('goal_near_completion');
+  });
+
+  it('усі сім типів карток можуть бути приглушені підряд і цикл не зациклюється', () => {
+    const all: HomeContextSelectionInput = {
+      ...FULL_INPUT,
+      milestone: milestoneAt('finished_books:50', 1),
+      memoryResurfacing: RESURFACING_CANDIDATE,
+    };
+    const suppressed = new Set([
+      'stale_reading:ub-stale',
+      'capsule_due:capsule-1',
+      'milestone:finished_books:50',
+      'on_this_day',
+      'memory_resurfacing:journal:entry-1',
+      'goal_near_completion:goal-1',
+      'tbr_suggestion',
+    ]);
+    expect(selectVisibleHomeContextCard(all, suppressed)).toBeNull();
   });
 });

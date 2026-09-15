@@ -162,6 +162,12 @@ export const queryKeys = {
     // спільний кеш" принцип, що й у `readingRuns` вище).
     sources: (userBookId: string) => ['bookHistory', 'sources', userBookId] as const,
   },
+  readingHistory: {
+    // POLYTSIA V1.7, Phase 10 — момент початку читацької історії. Окремо від `readingMilestones.all`
+    // і від сезонів: він потрібен обом, змінюється надзвичайно рідко, і саме тому має бути ОДНИМ
+    // записом, а не двома копіями, що можуть розійтись.
+    start: ['readingHistory', 'start'] as const,
+  },
   readingMilestones: {
     // POLYTSIA V1.7, Phase 8 (Meaningful Milestones) — БЕЗ параметрів: віхи derived з усієї
     // історії одразу (ТЗ §17 — жодної таблиці `milestones`), і всі поверхні (Reading Life,
@@ -264,6 +270,16 @@ export const queryKeys = {
     // "Перечитання"), з іншим `queryFn`, тож окремий кеш-запис, той самий принцип, що й
     // `userBooks.all` vs `userBooks.allSorted` (різні `queryFn` — ніколи один спільний ключ).
     all: ['memoryHub', 'all'] as const,
+  },
+  memoryResurfacing: {
+    // POLYTSIA V1.7, Phase 9 (Memory Resurfacing, ТЗ модуль E) — БЕЗ параметрів, той самий
+    // принцип, що й `readingMilestones.all`: спогади derived з усієї історії одразу, а Memory Hub
+    // і Home беруть із ЦЬОГО ОДНОГО запису свій зріз, а не рахують по-своєму.
+    all: ['memoryResurfacing', 'all'] as const,
+    // Окремо від `all`: стан показів читається з SecureStore, не з БД, і не повинен
+    // перераховуватись щоразу, коли змінився запис у щоденнику (той самий розподіл, що й
+    // `home.contextCard` vs `home.contextCardSuppression`).
+    homeState: ['memoryResurfacing', 'homeState'] as const,
   },
   wrapped: {
     year: (year: number) => ['wrapped', 'year', year] as const,

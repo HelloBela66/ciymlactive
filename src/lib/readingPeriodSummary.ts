@@ -118,6 +118,31 @@ export const EMPTY_READING_PERIOD_SUMMARY: ReadingPeriodSummary = {
  * ділити нема на що", а ТЗ §28 додає продуктову вимогу — за відсутності даних показувати НЕ
  * нуль, а нічого.
  */
+/**
+ * POLYTSIA V1.7, Phase 10 — ЄДИНЕ визначення «у цьому періоді нічого не записувалось».
+ *
+ * ── ЩО БУЛО НЕ ТАК ───────────────────────────────────────────────────────────────────────────
+ * Recap рахував порожнечу за чотирма ознаками (сесії, завершені проходи, DNF, записи щоденника),
+ * а екран Сезону — за двома (`uniqueBooksCount === 0 && totalMinutes === 0`). На тих самих даних
+ * вони розходились: сезон, у якому людина не читала, але вела щоденник або кинула книгу, Recap
+ * показував як змістовний, а Сезони — як «немає даних». Дві поверхні, дві відповіді на одне
+ * питання — рівно те, проти чого написаний весь V1.7.
+ *
+ * ── ЧОМУ САМЕ ЦІ ЧОТИРИ ОЗНАКИ ───────────────────────────────────────────────────────────────
+ * Порожній період — це відсутність ЗАПИСІВ, а не відсутність прочитаних книг. Кинута книга й
+ * залишена думка — теж події читацької біографії; місяць, у якому сталось тільки це, порожнім не
+ * є. `journalCount === null` означає «не рахували» (підсумок без журналу), а не «нуль» — тому
+ * нульом його вважати не можна, і `?? 0` тут був би тихою помилкою.
+ */
+export function isReadingPeriodEmpty(summary: ReadingPeriodSummary): boolean {
+  return (
+    summary.sessionCount === 0 &&
+    summary.finishedRunCount === 0 &&
+    summary.dnfRunCount === 0 &&
+    (summary.journalCount ?? 0) === 0
+  );
+}
+
 export function computePagesPerHour(pagesRead: number, readingMinutes: number): number | null {
   if (readingMinutes <= 0 || pagesRead <= 0) return null;
   const perMinute = pagesPerMinuteFromTotals(pagesRead, readingMinutes);

@@ -1,4 +1,5 @@
 import { computeStaleReadingInfo, type StaleReadingInfo } from './staleReading';
+import type { MemoryResurfacingCandidate } from './memoryResurfacing';
 import type { OldestWaitingInsight } from './tbrPersonality';
 import type { ReadingSession } from '@/types/readingSession';
 import type { ReadingGoal, ReadingGoalProgress } from '@/types/readingGoal';
@@ -22,6 +23,7 @@ export type HomeContextCardKind =
   | 'capsule_due'
   | 'milestone'
   | 'on_this_day'
+  | 'memory_resurfacing'
   | 'goal_near_completion'
   | 'tbr_suggestion';
 
@@ -196,6 +198,7 @@ export type HomeContextCard =
   | { kind: 'capsule_due'; candidate: CapsuleDueCandidate }
   | { kind: 'milestone'; candidate: MilestoneCandidate }
   | { kind: 'on_this_day' }
+  | { kind: 'memory_resurfacing'; candidate: MemoryResurfacingCandidate }
   | { kind: 'goal_near_completion'; candidate: GoalCandidate }
   | { kind: 'tbr_suggestion'; bookCount: number; oldestWaiting: OldestWaitingInsight | null };
 
@@ -208,6 +211,13 @@ export interface HomeContextSelectionInput {
   onThisDayAvailable: boolean;
   /** POLYTSIA V1.7, Phase 8 — найсвіжіша віха, якщо вона є (`findRecentMilestoneCandidate`). */
   milestone: MilestoneCandidate | null;
+  /**
+   * POLYTSIA V1.7, Phase 9 (ТЗ модуль E §2B, §7) — ambient-спогад, ЯКЩО він узагалі має право
+   * зараз показатись. Уся рідкість (не частіше разу на 7 днів) і cooldown конкретного спогаду
+   * вирішені ДО цієї точки, у `selectHomeResurfacingCandidate` — сюди приходить або готовий
+   * кандидат, або `null`. Цей модуль про пам'ять нічого не знає; він лише роздає єдиний слот.
+   */
+  memoryResurfacing: MemoryResurfacingCandidate | null;
   goalNearCompletion: GoalCandidate | null;
   tbrBookCount: number;
   tbrOldestWaiting: OldestWaitingInsight | null;
@@ -231,6 +241,13 @@ export function selectHomeContextCard(input: HomeContextSelectionInput): HomeCon
   // Card flood не виникає: слот усе одно рівно один (ТЗ §22).
   if (input.milestone) return { kind: 'milestone', candidate: input.milestone };
   if (input.onThisDayAvailable) return { kind: 'on_this_day' };
+  // POLYTSIA V1.7, Phase 9 (ТЗ модуль E §7) — resurfacing НИЖЧЕ за віху й за On This Day, але
+  // вище за ціль і TBR. ТЗ дає «концептуальний» пріоритет із Year/Month/Week Recap угорі, але
+  // просить звірити з live code, а не переносити список механічно: recap-карток на Home НЕ
+  // існує (Recap — окремі екрани, `app/reading-recap/*`), тож у фактичній мапі їм нема чого
+  // посунути. Лишається саме те, що ТЗ вимагає по суті: спогад не домінує над Home і поступається
+  // і рідкісній віхі, і сьогоднішньому On This Day.
+  if (input.memoryResurfacing) return { kind: 'memory_resurfacing', candidate: input.memoryResurfacing };
   if (input.goalNearCompletion) return { kind: 'goal_near_completion', candidate: input.goalNearCompletion };
   if (input.tbrBookCount > 0) {
     return { kind: 'tbr_suggestion', bookCount: input.tbrBookCount, oldestWaiting: input.tbrOldestWaiting };
@@ -262,6 +279,12 @@ export function getHomeContextCardSuppressionKey(card: HomeContextCard): string 
       return `milestone:${card.candidate.id}`;
     case 'on_this_day':
       return 'on_this_day';
+    // Ключ — КОНКРЕТНИЙ спогад (ТЗ §10, §21): «не сьогодні» для однієї цитати не повинно
+    // приховати геть інший спогад завтра. Це денне приглушення й НЕ замінює 90-денний cooldown
+    // самого спогаду (`HOME_RESURFACING_CANDIDATE_COOLDOWN_DAYS`) — механізми різні за терміном і
+    // за джерелом істини, і навмисно не об'єднані.
+    case 'memory_resurfacing':
+      return `memory_resurfacing:${card.candidate.semanticKey}`;
     case 'goal_near_completion':
       return `goal_near_completion:${card.candidate.goal.id}`;
     case 'tbr_suggestion':
@@ -290,6 +313,8 @@ export function nullifyHomeContextCandidate(
       return { ...input, milestone: null };
     case 'on_this_day':
       return { ...input, onThisDayAvailable: false };
+    case 'memory_resurfacing':
+      return { ...input, memoryResurfacing: null };
     case 'goal_near_completion':
       return { ...input, goalNearCompletion: null };
     case 'tbr_suggestion':
@@ -299,7 +324,7 @@ export function nullifyHomeContextCandidate(
 
 /** Скільки типів карток існує — межа циклу нижче, щоб приглушення НЕ МОГЛО зациклитись
  * (кожна ітерація або повертає картку, або приглушує рівно один тип і ніколи не повертає його). */
-const HOME_CONTEXT_CARD_KIND_COUNT = 6;
+const HOME_CONTEXT_CARD_KIND_COUNT = 7;
 
 /**
  * #169 — той самий вибір, що й `selectHomeContextCard`, але з урахуванням приглушених сьогодні

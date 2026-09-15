@@ -19,7 +19,7 @@ import {
   yearRange,
   type ReadingPeriodRange,
 } from './readingCalendar';
-import type { ReadingPeriodSummary } from './readingPeriodSummary';
+import { isReadingPeriodEmpty, type ReadingPeriodSummary } from './readingPeriodSummary';
 
 /**
  * POLYTSIA V1.7, Phase 5 — READING RECAPS (`docs/V1_7_READING_LIFE.md`, ТЗ V1.7 модуль C).
@@ -248,11 +248,9 @@ export function buildReadingRecap(input: ReadingRecapInput): ReadingRecap {
 
   const title = formatRecapPeriodTitle(period);
   const totalDays = recapPeriodDayCount(period);
-  const isEmpty =
-    summary.sessionCount === 0 &&
-    summary.finishedRunCount === 0 &&
-    summary.dnfRunCount === 0 &&
-    (summary.journalCount ?? 0) === 0;
+  // POLYTSIA V1.7, Phase 10 — визначення переїхало в `readingPeriodSummary.ts`, щоб Recap і
+  // Сезони не могли розійтись у тому, що вважається порожнім періодом. Логіка не змінилась.
+  const isEmpty = isReadingPeriodEmpty(summary);
 
   if (isEmpty) {
     return {

@@ -1,5 +1,4 @@
-import { differenceInCalendarDays, differenceInMonths } from 'date-fns';
-import { pluralizeUk } from './pluralizeUk';
+import { formatTimeAgo, getElapsedCalendarPeriod } from './elapsedPeriod';
 
 /**
  * POLYTSIA V1.6, Фаза 5 («Книга через час») — уся доменна логіка чистими функціями без
@@ -16,29 +15,18 @@ export function normalizeRecallText(value: string | null): string | null {
 }
 
 /**
- * «Ти прочитав цю книгу N місяців тому.» (Фаза 5 ТЗ, крок Flow). Місяці — для більшості
- * випадків (найчастіший діапазон капсули: 3 місяці — кілька років); менше місяця — дні (капсулу
- * можна прочитати одразу після створення, п.5 ТЗ "вручну у будь-який момент"); від року —
- * округлені роки, щоб не казати "14 місяців тому". Навмисно `differenceInMonths` (день-чутлива
- * кількість ПОВНИХ місяців), а НЕ `differenceInCalendarMonths` (лише різниця номерів
- * місяця/року, без урахування дня): останній для 31 серпня → 11 вересня порахував би "1 місяць"
- * (серпень→вересень — це вже інший календарний місяць), хоча минуло лише 11 днів — жодного
- * повного місяця ще не пройшло. `differenceInCalendarDays` для гілки днів — той самий
- * calendar-correct підхід, що й `calculateCapsuleReopenAt` (`bookCapsule.ts`).
+ * «Ти прочитав цю книгу N місяців тому.» (Фаза 5 ТЗ, крок Flow).
+ *
+ * POLYTSIA V1.7, Phase 9 (ТЗ модуль E §17) — сам РОЗРАХУНОК переїхав у `elapsedPeriod.ts`, щоб
+ * «скільки минуло» в усьому застосунку рахувалось однаково (раніше ця функція і
+ * `formatReturnGap` розходились на семантиці місяця — розбір у докблоці `elapsedPeriod.ts`).
+ * Обґрунтування самої семантики, що була тут, лишається чинним і переїхало разом із кодом:
+ * `differenceInMonths` (кількість ПОВНИХ місяців) саме тому, що 31 серпня → 11 вересня — це
+ * 11 днів, а не «1 місяць».
+ *
+ * Поведінка й сигнатура НЕ змінені: та сама фраза на тих самих входах (`recall.test.ts` лишився
+ * незмінним і продовжує це стерегти), тож `app/recall/[workId].tsx` чіпати не довелось.
  */
 export function formatTimeSinceFinished(finishedAtIso: string, now: Date): string {
-  const finishedAt = new Date(finishedAtIso);
-  const months = differenceInMonths(now, finishedAt);
-
-  if (months >= 12) {
-    const years = Math.floor(months / 12);
-    return `${years} ${pluralizeUk(years, ['рік', 'роки', 'років'])} тому`;
-  }
-  if (months >= 1) {
-    return `${months} ${pluralizeUk(months, ['місяць', 'місяці', 'місяців'])} тому`;
-  }
-
-  const days = differenceInCalendarDays(now, finishedAt);
-  if (days <= 0) return 'сьогодні';
-  return `${days} ${pluralizeUk(days, ['день', 'дні', 'днів'])} тому`;
+  return formatTimeAgo(getElapsedCalendarPeriod(finishedAtIso, now.toISOString()));
 }

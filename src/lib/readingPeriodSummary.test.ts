@@ -2,6 +2,7 @@ import {
   computePagesPerHour,
   computeReadingPeriodSummary,
   EMPTY_READING_PERIOD_SUMMARY,
+  isReadingPeriodEmpty,
   type PeriodFinishedRunInput,
   type PeriodSessionInput,
 } from './readingPeriodSummary';
@@ -269,5 +270,40 @@ describe('journalCount', () => {
 
   it('переданий — повертається без змін', () => {
     expect(computeReadingPeriodSummary({ sessions: [], finishedRuns: [], journalCount: 7 }).journalCount).toBe(7);
+  });
+});
+
+/**
+ * POLYTSIA V1.7, Phase 10 — ТЗ: одна відповідь на питання «у цьому періоді щось було?».
+ *
+ * До цієї фази Recap і Сезони відповідали по-різному: Recap дивився на чотири ознаки, екран
+ * сезону — на дві (`uniqueBooksCount === 0 && totalMinutes === 0`). Випадки нижче — рівно ті, на
+ * яких вони розходились.
+ */
+describe('isReadingPeriodEmpty — спільне визначення порожнього періоду', () => {
+  it('нічого не сталось — порожньо', () => {
+    expect(isReadingPeriodEmpty(EMPTY_READING_PERIOD_SUMMARY)).toBe(true);
+  });
+
+  it('період лише із записами щоденника НЕ порожній', () => {
+    // Саме тут стара формула сезону помилялась: книг нема, хвилин нема — «немає даних», хоча
+    // людина в цьому сезоні писала.
+    expect(isReadingPeriodEmpty({ ...EMPTY_READING_PERIOD_SUMMARY, journalCount: 3 })).toBe(false);
+  });
+
+  it('період лише з кинутою книгою НЕ порожній', () => {
+    expect(isReadingPeriodEmpty({ ...EMPTY_READING_PERIOD_SUMMARY, dnfRunCount: 1 })).toBe(false);
+  });
+
+  it('період лише із сесіями НЕ порожній', () => {
+    expect(isReadingPeriodEmpty({ ...EMPTY_READING_PERIOD_SUMMARY, sessionCount: 2 })).toBe(false);
+  });
+
+  it('період лише із завершеним прочитанням НЕ порожній', () => {
+    expect(isReadingPeriodEmpty({ ...EMPTY_READING_PERIOD_SUMMARY, finishedRunCount: 1 })).toBe(false);
+  });
+
+  it('journalCount: null — це «не рахували», а не нуль, і порожнечі само по собі не скасовує', () => {
+    expect(isReadingPeriodEmpty({ ...EMPTY_READING_PERIOD_SUMMARY, journalCount: null })).toBe(true);
   });
 });

@@ -11,6 +11,15 @@ import { findOldestWaitingBook } from '@/lib/tbrPersonality';
 import { selectHomePrimaryMemory } from '@/lib/onThisDay';
 import { useOnThisDay } from '@/features/on-this-day/useOnThisDay';
 import { useReadingMilestones } from '@/features/milestones/useReadingMilestones';
+import {
+  useHomeResurfacingState,
+  useMemoryResurfacingCandidates,
+} from '@/features/memory/useMemoryResurfacing';
+import {
+  journalSemanticKey,
+  selectHomeResurfacingCandidate,
+  workRelationshipSemanticKey,
+} from '@/lib/memoryResurfacing';
 import { HomeContextSuppressionStorage } from '@/lib/homeContextSuppressionStorage';
 import {
   findStaleReadingCandidate,
@@ -155,10 +164,17 @@ export function useHomeContextCard(): HomeContextCard | null {
   // Home не рахує власних віх: якби рахував, «50-та книга» на головній і в Reading Life могли б
   // колись розійтись.
   const milestonesQuery = useReadingMilestones();
+  // POLYTSIA V1.7, Phase 9 — той самий спільний кеш-запис спогадів, що й Memory Hub.
+  const resurfacingQuery = useMemoryResurfacingCandidates();
+  const resurfacingStateQuery = useHomeResurfacingState();
 
   if (!restQuery.data || !suppressedQuery.data) return null;
 
-  const onThisDayAvailable = !!onThisDayQuery.data && selectHomePrimaryMemory(onThisDayQuery.data) != null;
+  // Один виклик на обидві потреби: «чи хоче On This Day слот» і «які сутності він уже
+  // розповідає» (ТЗ модуль E §21) — інакше та сама функція рахувалась би двічі за рендер, і
+  // з'явився б шанс, що дві відповіді розійдуться.
+  const primaryMemory = onThisDayQuery.data ? selectHomePrimaryMemory(onThisDayQuery.data) : null;
+  const onThisDayAvailable = primaryMemory != null;
   // «Зараз» — тут, а не в чистій функції (house convention). Доки віхи вантажаться, кандидата
   // просто немає: картка не блимає й не з'являється з затримкою поверх іншої.
   const milestone = milestonesQuery.data
@@ -168,8 +184,39 @@ export function useHomeContextCard(): HomeContextCard | null {
       )
     : null;
 
+  /**
+   * ТЗ модуль E §21, §30 — семантичні ключі того, що ВЖЕ розповідає інша поверхня. Одна подія не
+   * повинна прийти до людини двічі різними словами: сьогоднішній «Цей день у твоєму читанні» і
+   * віха, що зараз має право на слот, закривають свої сутності для resurfacing.
+   *
+   * Ключі будуються тими самими функціями, що й у самих кандидатів (`journalSemanticKey` тощо) —
+   * саме тому вони експортовані: якби кожна сторона клеїла рядок по-своєму, дедуп мовчки
+   * перестав би працювати від однієї зайвої двокрапки.
+   */
+  const excludedSemanticKeys = new Set<string>();
+  if (primaryMemory) {
+    excludedSemanticKeys.add(workRelationshipSemanticKey(primaryMemory.primary.workId));
+    for (const entry of primaryMemory.primary.journalEntries) {
+      excludedSemanticKeys.add(journalSemanticKey(entry.id));
+    }
+  }
+  if (milestone) {
+    // Лише та віха, що реально претендує на слот, — не вся історія віх: інакше книга, яка колись
+    // була 50-ю завершеною, назавжди втратила б право стати спогадом.
+    const milestoneWorkId = milestonesQuery.data?.find((view) => view.milestone.id === milestone.id)?.workId;
+    if (milestoneWorkId != null) excludedSemanticKeys.add(workRelationshipSemanticKey(milestoneWorkId));
+  }
+
+  const memoryResurfacing = resurfacingQuery.data
+    ? selectHomeResurfacingCandidate(resurfacingQuery.data, {
+        now: new Date(),
+        state: resurfacingStateQuery.data,
+        excludedSemanticKeys,
+      })
+    : null;
+
   return selectVisibleHomeContextCard(
-    { ...restQuery.data, onThisDayAvailable, milestone },
+    { ...restQuery.data, onThisDayAvailable, milestone, memoryResurfacing },
     suppressedQuery.data,
   );
 }

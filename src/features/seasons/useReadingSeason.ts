@@ -6,6 +6,7 @@ import { BookMemoryRepository } from '@/data/repositories/BookMemoryRepository';
 import { SeriesRepository } from '@/data/repositories/SeriesRepository';
 import { JournalRepository } from '@/data/repositories/JournalRepository';
 import { summarizeReadingPeriod } from '@/features/reading-period/summarizeReadingPeriod';
+import { isReadingPeriodEmpty } from '@/lib/readingPeriodSummary';
 import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { seasonDateRange, formatSeasonKey } from '@/lib/season';
@@ -82,6 +83,16 @@ export interface ReadingSeasonData {
 
   // ТЗ §53 — DNF НЕ рахується в "прочитано", лише нейтральний окремий лічильник.
   dnfCount: number;
+
+  /**
+   * POLYTSIA V1.7, Phase 10 — «у цьому сезоні нічого не записувалось», за КАНОНІЧНИМ визначенням
+   * (`isReadingPeriodEmpty`, `readingPeriodSummary.ts`) — тим самим, яким користується Recap.
+   *
+   * До цієї фази екран сезону рахував порожнечу власною формулою
+   * (`uniqueBooksCount === 0 && totalMinutes === 0`), і сезон, у якому людина не читала, але вела
+   * щоденник чи кинула книгу, Recap показував як змістовний, а Сезони — як «немає даних».
+   */
+  isEmpty: boolean;
 }
 
 /**
@@ -298,6 +309,7 @@ export async function fetchReadingSeasonData(
     dominantReadingExperience,
     seasonSeries,
     dnfCount,
+    isEmpty: isReadingPeriodEmpty(summary),
   };
 }
 

@@ -6,6 +6,11 @@ import {
   adjacentSeasonKey,
   formatSeasonLabel,
   formatSeasonHeroTitle,
+  seasonKeyOf,
+  isSeasonInFuture,
+  isSeasonBeforeHistory,
+  canNavigateSeason,
+  resolveSeasonKey,
   type SeasonKey,
 } from './season';
 
@@ -187,5 +192,134 @@ describe('formatSeasonHeroTitle', () => {
     expect(formatSeasonHeroTitle('winter')).toBe('Зима твого читання');
     expect(formatSeasonHeroTitle('spring')).toBe('Весна твого читання');
     expect(formatSeasonHeroTitle('autumn')).toBe('Осінь твого читання');
+  });
+});
+
+/**
+ * POLYTSIA V1.7, Phase 10 — МЕЖІ ІСТОРІЇ СЕЗОНІВ.
+ *
+ * Дати — з локальних компонентів (`new Date(2027, 5, 15, 12)`), не з рядків: межі сезонів локальні
+ * (`monthRangeOf`), і рядкова date-only форма зсунула б їх на добу в поясах на захід від Гринвіча.
+ */
+const NOW_SUMMER_2027 = new Date(2027, 5, 15, 12, 0);
+
+function instant(year: number, month: number, day: number): string {
+  return new Date(year, month - 1, day, 12, 0).toISOString();
+}
+
+describe('isSeasonInFuture — сезон, який ще не настав', () => {
+  it('поточний сезон — не майбутнє', () => {
+    expect(isSeasonInFuture({ seasonId: 'summer', year: 2027 }, NOW_SUMMER_2027)).toBe(false);
+  });
+
+  it('наступний сезон — майбутнє', () => {
+    expect(isSeasonInFuture({ seasonId: 'autumn', year: 2027 }, NOW_SUMMER_2027)).toBe(true);
+    expect(isSeasonInFuture({ seasonId: 'winter', year: 2028 }, NOW_SUMMER_2027)).toBe(true);
+  });
+
+  it('минулі сезони — не майбутнє', () => {
+    expect(isSeasonInFuture({ seasonId: 'spring', year: 2027 }, NOW_SUMMER_2027)).toBe(false);
+    expect(isSeasonInFuture({ seasonId: 'winter', year: 2019 }, NOW_SUMMER_2027)).toBe(false);
+  });
+
+  it('МЕЖА: у перший день сезону він уже не майбутнє', () => {
+    // Літо 2027 починається 1 червня. Опівночі 1 червня воно вже настало.
+    expect(isSeasonInFuture({ seasonId: 'summer', year: 2027 }, new Date(2027, 5, 1, 0, 0))).toBe(false);
+    // А за хвилину до того — ще ні.
+    expect(isSeasonInFuture({ seasonId: 'summer', year: 2027 }, new Date(2027, 4, 31, 23, 59))).toBe(true);
+  });
+});
+
+describe('isSeasonBeforeHistory — сезон, якого в історії ще не було', () => {
+  const historyStart = instant(2025, 4, 10); // квітень 2025 — весна 2025
+
+  it('сезон, що закінчився до першої події, лишився поза історією', () => {
+    expect(isSeasonBeforeHistory({ seasonId: 'winter', year: 2025 }, historyStart, NOW_SUMMER_2027)).toBe(true);
+    expect(isSeasonBeforeHistory({ seasonId: 'autumn', year: 2024 }, historyStart, NOW_SUMMER_2027)).toBe(true);
+  });
+
+  it('сезон, у якому історія почалась, — уже частина історії', () => {
+    expect(isSeasonBeforeHistory({ seasonId: 'spring', year: 2025 }, historyStart, NOW_SUMMER_2027)).toBe(false);
+  });
+
+  it('усе, що після, — теж історія', () => {
+    expect(isSeasonBeforeHistory({ seasonId: 'summer', year: 2027 }, historyStart, NOW_SUMMER_2027)).toBe(false);
+  });
+
+  it('МЕЖА: подія в перший день сезону робить цей сезон частиною історії', () => {
+    // Весна починається 1 березня; подія саме 1 березня о 00:00.
+    const startOfSpring = new Date(2025, 2, 1, 0, 0).toISOString();
+    expect(isSeasonBeforeHistory({ seasonId: 'spring', year: 2025 }, startOfSpring, NOW_SUMMER_2027)).toBe(false);
+    expect(isSeasonBeforeHistory({ seasonId: 'winter', year: 2025 }, startOfSpring, NOW_SUMMER_2027)).toBe(true);
+  });
+
+  it('порожня історія: усе, крім поточного сезону, поза історією', () => {
+    expect(isSeasonBeforeHistory({ seasonId: 'summer', year: 2027 }, null, NOW_SUMMER_2027)).toBe(false);
+    expect(isSeasonBeforeHistory({ seasonId: 'spring', year: 2027 }, null, NOW_SUMMER_2027)).toBe(true);
+  });
+});
+
+describe('canNavigateSeason — гортання обмежене з обох боків', () => {
+  const historyStart = instant(2025, 4, 10);
+  const opts = { now: NOW_SUMMER_2027, earliestReadingInstant: historyStart };
+
+  it('з поточного сезону вперед іти нема куди', () => {
+    expect(canNavigateSeason({ seasonId: 'summer', year: 2027 }, 'next', opts)).toBe(false);
+  });
+
+  it('назад із поточного — можна', () => {
+    expect(canNavigateSeason({ seasonId: 'summer', year: 2027 }, 'prev', opts)).toBe(true);
+  });
+
+  it('із першого сезону історії назад іти нема куди', () => {
+    expect(canNavigateSeason({ seasonId: 'spring', year: 2025 }, 'prev', opts)).toBe(false);
+  });
+
+  it('із минулого сезону вперед — можна', () => {
+    expect(canNavigateSeason({ seasonId: 'spring', year: 2025 }, 'next', opts)).toBe(true);
+  });
+
+  it('порожня історія: із поточного сезону нікуди не піти', () => {
+    const empty = { now: NOW_SUMMER_2027, earliestReadingInstant: null };
+    expect(canNavigateSeason({ seasonId: 'summer', year: 2027 }, 'prev', empty)).toBe(false);
+    expect(canNavigateSeason({ seasonId: 'summer', year: 2027 }, 'next', empty)).toBe(false);
+  });
+
+  it('зима через межу року не ламає межі', () => {
+    const winterOpts = { now: new Date(2027, 0, 15, 12, 0), earliestReadingInstant: instant(2026, 12, 5) };
+    // Зима 2027 = грудень 2026 — лютий 2027; історія почалась 5 грудня 2026, тобто в ній.
+    expect(canNavigateSeason({ seasonId: 'winter', year: 2027 }, 'prev', winterOpts)).toBe(false);
+    expect(canNavigateSeason({ seasonId: 'winter', year: 2027 }, 'next', winterOpts)).toBe(false);
+  });
+});
+
+describe('resolveSeasonKey — недовірений route-параметр', () => {
+  const opts = { now: NOW_SUMMER_2027 };
+
+  it('майбутній сезон приземляється на поточний', () => {
+    expect(resolveSeasonKey('winter-2099', opts)).toEqual({ seasonId: 'summer', year: 2027 });
+    expect(resolveSeasonKey('autumn-2027', opts)).toEqual({ seasonId: 'summer', year: 2027 });
+  });
+
+  it('минулий сезон відкривається як є — навіть дуже давній', () => {
+    // Нижню межу тут свідомо не застосовуємо: див. докблок `resolveSeasonKey`.
+    expect(resolveSeasonKey('winter-2019', opts)).toEqual({ seasonId: 'winter', year: 2019 });
+  });
+
+  it('сміття й відсутній параметр — поточний сезон', () => {
+    expect(resolveSeasonKey('не-сезон', opts)).toEqual({ seasonId: 'summer', year: 2027 });
+    expect(resolveSeasonKey(undefined, opts)).toEqual({ seasonId: 'summer', year: 2027 });
+    expect(resolveSeasonKey('summer-27', opts)).toEqual({ seasonId: 'summer', year: 2027 });
+  });
+});
+
+describe('seasonKeyOf — сезон довільного моменту', () => {
+  it('currentSeasonKey лишився тією самою відповіддю', () => {
+    expect(seasonKeyOf(NOW_SUMMER_2027)).toEqual(currentSeasonKey(NOW_SUMMER_2027));
+  });
+
+  it('грудень належить зимі НАСТУПНОГО року', () => {
+    expect(seasonKeyOf(new Date(2026, 11, 15, 12))).toEqual({ seasonId: 'winter', year: 2027 });
+    expect(seasonKeyOf(new Date(2027, 0, 15, 12))).toEqual({ seasonId: 'winter', year: 2027 });
   });
 });

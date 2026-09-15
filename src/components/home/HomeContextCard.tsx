@@ -11,10 +11,13 @@ import { readingGoalTypeLabels } from '@/design/i18n-labels';
 import { useDismissHomeContextCard, useHomeContextCard } from '@/features/home/useHomeContextCard';
 import { useReadingMilestones } from '@/features/milestones/useReadingMilestones';
 import { MilestoneRow } from '@/components/milestones/MilestoneList';
+import { MemoryResurfacingRow } from '@/components/memory/MemoryResurfacingCard';
+import { useMarkResurfacingShown } from '@/features/memory/useMemoryResurfacing';
 import { describeStaleReading } from '@/lib/staleReading';
 import { formatBookCountSentence, formatOldestWaitingSentence } from '@/lib/tbrPersonality';
 import { OnThisDayCard } from './OnThisDayCard';
 import type { CapsuleDueCandidate, GoalCandidate, StaleReadingCandidate } from '@/lib/homeContext';
+import type { MemoryResurfacingCandidate } from '@/lib/memoryResurfacing';
 import type { OldestWaitingInsight } from '@/lib/tbrPersonality';
 
 /**
@@ -205,6 +208,39 @@ function MilestoneContextCard({ milestoneId, onDismiss }: { milestoneId: string;
   );
 }
 
+/**
+ * POLYTSIA V1.7, Phase 9 — ambient-спогад на Home (ТЗ модуль E §2B, §7, §8).
+ *
+ * ПОКАЗ ФІКСУЄТЬСЯ ТУТ, а не у виборі кандидата. Причина принципова: `selectHomeResurfacingCandidate`
+ * — чиста функція, вона не має права нічого писати, і якби «показано» фіксувалось при виборі,
+ * запис стався б навіть тоді, коли слот забрала картка вищого пріоритету й людина спогаду не
+ * бачила. Тут же ефект спрацьовує рівно тоді, коли картка справді на екрані.
+ *
+ * `useEffect` з `semanticKey` у залежностях — один запис на один показаний спогад; повторний
+ * рендер тієї самої картки нічого не переписує (та й перезапис був би нешкідливим: `markShown`
+ * ідемпотентний за змістом).
+ */
+function MemoryResurfacingContextCard({
+  candidate,
+  onDismiss,
+}: {
+  candidate: MemoryResurfacingCandidate;
+  onDismiss: () => void;
+}) {
+  const markShown = useMarkResurfacingShown();
+  React.useEffect(() => {
+    markShown(candidate.semanticKey);
+  }, [markShown, candidate.semanticKey]);
+
+  return (
+    <MemoryResurfacingRow
+      candidate={candidate}
+      now={new Date()}
+      trailing={<DismissButton onPress={onDismiss} />}
+    />
+  );
+}
+
 function OnThisDayContextCard({ onDismiss }: { onDismiss: () => void }) {
   const theme = useTheme();
   return (
@@ -240,6 +276,8 @@ export function HomeContextCard() {
       return <MilestoneContextCard milestoneId={card.candidate.id} onDismiss={onDismiss} />;
     case 'on_this_day':
       return <OnThisDayContextCard onDismiss={onDismiss} />;
+    case 'memory_resurfacing':
+      return <MemoryResurfacingContextCard candidate={card.candidate} onDismiss={onDismiss} />;
     case 'goal_near_completion':
       return <GoalNearCompletionContextCard item={card.candidate} onDismiss={onDismiss} />;
     case 'tbr_suggestion':

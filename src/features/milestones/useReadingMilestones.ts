@@ -6,6 +6,7 @@ import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { formatMilestoneCopy, type MilestoneCopy } from '@/lib/readingMilestoneCopy';
 import { buildReadingMilestones, type ReadingMilestone } from '@/lib/readingMilestones';
+import { fetchReadingHistoryStart } from '@/features/reading-period/readingHistoryStart';
 
 /**
  * POLYTSIA V1.7, Phase 8 — MEANINGFUL READING MILESTONES (ТЗ V1.7 модуль D).
@@ -43,11 +44,13 @@ export function useReadingMilestones() {
     queryFn: async () => {
       const db = await getDatabase();
 
-      const [runs, sessions, earliestSession, earliestRun] = await Promise.all([
+      const [runs, sessions, earliestReadingInstant] = await Promise.all([
         ReadingRunRepository.listAllFinished(db),
         ReadingSessionRepository.listAllCompletedMetrics(db),
-        ReadingSessionRepository.getEarliestCompletedStartInstant(db),
-        ReadingRunRepository.getEarliestStartInstant(db),
+        // POLYTSIA V1.7, Phase 10 — початок історії рахує СПІЛЬНА функція
+        // (`fetchReadingHistoryStart`), а не цей хук власним кодом: той самий момент потрібен
+        // межам гортання Сезонів, і дві копії обчислення з часом розійшлись би (ТЗ модуль D §11).
+        fetchReadingHistoryStart(db),
       ]);
 
       // Ідентичність книги — `work`, не `user_book`/`edition` (ТЗ §30: два видання того самого
@@ -55,11 +58,6 @@ export function useReadingMilestones() {
       const workIdByUserBookId = await UserBookRepository.listWorkIdsByIds(db, [
         ...new Set(runs.map((run) => run.userBookId)),
       ]);
-
-      // Початок читацької історії — найраніша з двох canonical-подій (ТЗ §11). Не дата
-      // встановлення застосунку: імпортована історія може починатись задовго до «Полиці».
-      const candidates = [earliestSession, earliestRun].filter((value): value is string => value != null);
-      const earliestReadingInstant = candidates.length > 0 ? candidates.sort()[0] ?? null : null;
 
       const milestones = buildReadingMilestones({
         finishedRuns: runs.map((run) => ({

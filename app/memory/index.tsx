@@ -11,6 +11,9 @@ import { QuickAction } from '@/components/ui/QuickAction';
 import { useTheme } from '@/design/ThemeProvider';
 import { useMemoryIndex, type MemoryIndexItem } from '@/features/memory/useMemoryIndex';
 import { useMemoryHub, type RereadCandidate } from '@/features/memory/useMemoryHub';
+import { useMemoryResurfacingCandidates } from '@/features/memory/useMemoryResurfacing';
+import { MemoryResurfacingList } from '@/components/memory/MemoryResurfacingCard';
+import { selectHubResurfacingCandidates } from '@/lib/memoryResurfacing';
 import type { CapsuleDueCandidate } from '@/lib/homeContext';
 
 /** Той самий вигляд рядка, що й `MemoryCard` на `app/on-this-day.tsx` (обкладинка + назва +
@@ -110,6 +113,15 @@ function RereadCandidateRow({ candidate }: { candidate: RereadCandidate }) {
  * 5. **Перечитання** — книги з ≥2 завершеними прочитаннями, кожна веде на
  *    `/reread-comparison/[workId]` — до цієї фази такий перелік існував лише
  *    ПОЧИНАЮЧИ з конкретної книги (Book Details/Book Memory), не як глобальний список.
+ * 6. **Із твоєї історії** (POLYTSIA V1.7, Phase 9, ТЗ модуль E §12) — curated спогади: стара
+ *    думка чи цитата, давно завершена книга, стосунок із книгою, минулий Recap. Це PULL-поверхня:
+ *    людина прийшла сама, тож тут немає ані «раз на 7 днів», ані 90-денного cooldown, що діють
+ *    для ambient-слоту Home — лише стеля кількості (ТЗ §13: не нескінченна стрічка).
+ *
+ *    Дедуп із «Цей день у твоєму читанні» тут СВІДОМО не застосовується, на відміну від Home:
+ *    розділ 1 вище — лише посилання, він не показує вмісту спогаду, тож дублювати нема чого
+ *    (ТЗ §5 бореться з тим, щоб одна подія не прийшла двічі в ОДИН момент, а не з тим, щоб книга
+ *    ніколи не згадувалась двома способами).
  *
  * Розділи 2 і 5 — "тиха деградація": не рендеряться взагалі, коли порожні (той самий принцип,
  * що й `OnThisDayCard`/усі insight-фічі V1.6), щоб порожній розділ не займав місце марно.
@@ -120,10 +132,17 @@ export default function MemoryIndexScreen() {
   const theme = useTheme();
   const { data, isLoading } = useMemoryIndex();
   const { data: hub, isLoading: isHubLoading } = useMemoryHub();
+  const { data: resurfacing, isLoading: isResurfacingLoading } = useMemoryResurfacingCandidates();
 
-  const isAnyLoading = isLoading || isHubLoading;
+  const isAnyLoading = isLoading || isHubLoading || isResurfacingLoading;
   const dueCapsules = hub?.dueCapsules ?? [];
   const rereadCandidates = hub?.rereadCandidates ?? [];
+  const memories = resurfacing
+    ? selectHubResurfacingCandidates(resurfacing, { excludedSemanticKeys: new Set() })
+    : [];
+  // «Зараз» рахується ОДИН раз на екран, а не в кожній картці: інакше два спогади, відрендерені
+  // по різні боки опівночі, могли б сказати «рік тому» і «два роки тому» про сусідні дати.
+  const now = new Date();
 
   return (
     <>
@@ -188,6 +207,13 @@ export default function MemoryIndexScreen() {
                 data.map((item) => <MemoryIndexRow key={item.userBookId} item={item} />)
               )}
             </View>
+
+            {memories.length > 0 ? (
+              <View style={{ gap: theme.spacing.sm, marginTop: theme.spacing.xl }}>
+                <SectionHeader title="Із твоєї історії" />
+                <MemoryResurfacingList candidates={memories} now={now} />
+              </View>
+            ) : null}
 
             {rereadCandidates.length > 0 ? (
               <View style={{ gap: theme.spacing.sm, marginTop: theme.spacing.xl }}>

@@ -86,13 +86,108 @@ export function parseSeasonKey(key: string): SeasonKey | null {
  * потрапляє щойно завершена сесія.
  */
 export function currentSeasonKey(now: Date): SeasonKey {
-  const month = now.getMonth() + 1; // 1-12
-  const year = now.getFullYear();
+  return seasonKeyOf(now);
+}
+
+/**
+ * POLYTSIA V1.7, Phase 10 — у який сезон потрапляє ДОВІЛЬНИЙ момент, не лише «зараз».
+ *
+ * Тіло перенесено з `currentSeasonKey` без змін (вона лишилась тонкою обгорткою заради наявних
+ * викликів): щоб спитати «у якому сезоні почалась моя читацька історія», потрібна та сама
+ * відповідь, що й для «який сезон зараз», інакше межа історії й межа сьогодення проводились би
+ * двома різними шматками коду — саме те, чого V1.7 уникає.
+ */
+export function seasonKeyOf(instant: Date): SeasonKey {
+  const month = instant.getMonth() + 1; // 1-12
+  const year = instant.getFullYear();
   if (month === 12) return { seasonId: 'winter', year: year + 1 };
   if (month <= 2) return { seasonId: 'winter', year };
   if (month <= 5) return { seasonId: 'spring', year };
   if (month <= 8) return { seasonId: 'summer', year };
   return { seasonId: 'autumn', year };
+}
+
+/**
+ * POLYTSIA V1.7, Phase 10 — МЕЖІ ІСТОРІЇ СЕЗОНІВ.
+ *
+ * ── ЩО БУЛО НЕ ТАК ───────────────────────────────────────────────────────────────────────────
+ * Стрілки «попередній/наступний сезон» не мали жодної межі: з екрана сезону можна було дійти до
+ * «Літа 2099» і до «Зими 1904», і кожен такий сезон показував той самий порожній стан із
+ * пропозицією «читай книги протягом сезону, щоб побачити тут підсумок» — тобто застосунок радив
+ * читати протягом сезону, який ще не настав.
+ *
+ * Це не лише дивна порада: Recap (Phase 5) уже вміє зупинятись на поточному періоді
+ * (`isLatest`), а Reading Life (Phase 4) взагалі будується з реальної історії й порожніх років не
+ * має. Тобто на питання «де закінчується моя історія» застосунок мав дві різні відповіді, а
+ * Сезони — третю, нескінченну.
+ *
+ * ── ЯК СТАЛО ─────────────────────────────────────────────────────────────────────────────────
+ * Сезон можна відкрити, лише якщо він уже почався і не закінчився до першої події читацької
+ * історії. Обидві межі — чисті функції над тим самим `seasonDateRange`, тож екран не має власної
+ * арифметики дат.
+ */
+
+/** Сезон ще не почався: його перший день пізніший за `now`. */
+export function isSeasonInFuture(key: SeasonKey, now: Date): boolean {
+  return seasonDateRange(key.seasonId, key.year).start > now.toISOString();
+}
+
+/**
+ * Сезон повністю закінчився ДО першої події читацької історії — тобто про нього нема чого
+ * розповісти й не буде.
+ *
+ * `earliestReadingInstant === null` означає, що історії ще немає взагалі (порожня БД). Тоді
+ * «раніше за історію» — усе, крім поточного сезону: гортати назад крізь порожнечу нема сенсу.
+ * Це та сама межа, що її Reading Life отримує безкоштовно, будуючись із даних.
+ */
+export function isSeasonBeforeHistory(
+  key: SeasonKey,
+  earliestReadingInstant: string | null,
+  now: Date,
+): boolean {
+  if (earliestReadingInstant == null) {
+    const current = seasonKeyOf(now);
+    return !(key.seasonId === current.seasonId && key.year === current.year);
+  }
+  // `end` виключний, тож «сезон закінчився до першої події» — це `end <= earliest`.
+  return seasonDateRange(key.seasonId, key.year).end <= earliestReadingInstant;
+}
+
+/**
+ * Чи можна ступити на крок у цьому напрямку. Та сама відповідь, що її Recap виражає своїм
+ * `isLatest`, лише для обох боків і в термінах сезонів.
+ */
+export function canNavigateSeason(
+  key: SeasonKey,
+  direction: 'prev' | 'next',
+  options: { now: Date; earliestReadingInstant: string | null },
+): boolean {
+  const target = adjacentSeasonKey(key, direction);
+  if (direction === 'next') return !isSeasonInFuture(target, options.now);
+  return !isSeasonBeforeHistory(target, options.earliestReadingInstant, options.now);
+}
+
+/**
+ * Куди приземлити відкриття екрана. Route-параметр — недовірений вхід (ТЗ V1.7 §11): deep-link на
+ * «winter-2099» не повинен відкривати екран у майбутньому лише тому, що рядок синтаксично
+ * правильний, а `parseSeasonKey` пропускає будь-який чотиризначний рік.
+ *
+ * СВІДОМО перевіряється ЛИШЕ майбутнє, а не нижня межа історії. Дві причини, і обидві важливі:
+ *
+ * 1. Технічна: початок читацької історії приходить асинхронним запитом, і на першому рендері він
+ *    ще невідомий. Якби функція застосовувала й нижню межу, deep-link на «літо 2024» у людини з
+ *    багаторічною історією мовчки відкривав би поточний сезон — просто тому, що запит не встиг.
+ * 2. Змістовна: «цей сезон ще не настав» і «цей сезон був до твоєї історії» — різні речі. Перше
+ *    показувати нема сенсу (там за визначенням порожньо й порожньо буде завжди), а друге —
+ *    правдива частина відповіді, і екран її говорить (`isSeasonBeforeHistory` у порожньому стані).
+ *
+ * Гортанням у прейсторію потрапити все одно не можна — це стереже `canNavigateSeason`.
+ */
+export function resolveSeasonKey(rawKey: string | undefined, options: { now: Date }): SeasonKey {
+  const parsed = rawKey != null ? parseSeasonKey(rawKey) : null;
+  if (!parsed) return seasonKeyOf(options.now);
+  if (isSeasonInFuture(parsed, options.now)) return seasonKeyOf(options.now);
+  return parsed;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { differenceInCalendarMonths } from 'date-fns';
+import { formatElapsedGap, getElapsedCalendarPeriod } from './elapsedPeriod';
 import { pluralizeUk } from './pluralizeUk';
 import type { ReadingMilestone } from './readingMilestones';
 
@@ -22,7 +22,6 @@ import type { ReadingMilestone } from './readingMilestones';
 
 const HOUR_FORMS = ['година', 'години', 'годин'] as const;
 const YEAR_FORMS = ['рік', 'роки', 'років'] as const;
-const MONTH_FORMS = ['місяць', 'місяці', 'місяців'] as const;
 
 /**
  * Порядковий числівник жіночого роду для «книга»: 10-та, 25-та, 50-та. Усі пороги
@@ -101,23 +100,19 @@ export function formatMilestoneCopy(
 
 /**
  * «через 2 роки», «через 2 роки 4 місяці», «через 5 місяців» — ТЗ §8: повернення до книги
- * вимірюється людською тривалістю, а не «через 854 дні».
+ * вимірюється людською тривалістю, а не «через 854 дні». Рахується між ПРОХОДАМИ
+ * (`ReadingRun`), а не між подіями бібліотеки.
  *
- * Рахується між ПРОХОДАМИ (`ReadingRun`), а не між подіями бібліотеки. Місяці — календарні
- * (`differenceInCalendarMonths`), тож «з 15 січня по 14 лютого» чесно читається як «менш ніж
- * місяць», а не округлюється вгору.
+ * POLYTSIA V1.7, Phase 9 (ТЗ модуль E §17) — ВИПРАВЛЕНО. Раніше тут стояв
+ * `differenceInCalendarMonths`, який суперечив власному докблоку цієї функції: для «з 15 січня по
+ * 14 лютого» він давав 1 (різні календарні місяці) і функція казала «через 1 місяць», хоча
+ * обіцяла читати цей проміжок як «менш ніж місяць». Тепер розрахунок спільний із
+ * `formatTimeSinceFinished` (`elapsedPeriod.ts`, `differenceInMonths` — ПОВНІ місяці), тож обіцянка
+ * докблока нарешті виконується, і два «скільки минуло» в застосунку більше не розходяться.
  *
  * `null`, коли проміжок менший за місяць: «через 3 дні» — це не повернення через роки, і робити з
  * нього подію не варто.
  */
 export function formatReturnGap(fromIso: string, toIso: string): string | null {
-  const totalMonths = differenceInCalendarMonths(new Date(toIso), new Date(fromIso));
-  if (totalMonths < 1) return null;
-
-  const years = Math.floor(totalMonths / 12);
-  const months = totalMonths % 12;
-
-  if (years === 0) return `через ${months} ${pluralizeUk(months, MONTH_FORMS)}`;
-  if (months === 0) return `через ${years} ${pluralizeUk(years, YEAR_FORMS)}`;
-  return `через ${years} ${pluralizeUk(years, YEAR_FORMS)} ${months} ${pluralizeUk(months, MONTH_FORMS)}`;
+  return formatElapsedGap(getElapsedCalendarPeriod(fromIso, toIso));
 }
