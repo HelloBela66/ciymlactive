@@ -14,6 +14,9 @@ import { ShareCardActions } from '@/components/share/ShareCardActions';
 import { useTheme } from '@/design/ThemeProvider';
 import { useReadingRecap, type RecapFinishedBookRow } from '@/features/reading-recap/useReadingRecap';
 import { useShareCard } from '@/features/share/useShareCard';
+import { useReadingMilestones } from '@/features/milestones/useReadingMilestones';
+import { MilestoneList } from '@/components/milestones/MilestoneList';
+import { filterMilestonesInRange } from '@/lib/readingMilestones';
 import { createLogger } from '@/lib/logger';
 import { resolveRecapAnchor, type RecapPeriodKind } from '@/lib/readingRecap';
 
@@ -143,6 +146,17 @@ export default function ReadingRecapScreen() {
   // `resolveRecapAnchor` поверне `null`, і запит не виконається взагалі, замість того щоб
   // порахувати підсумок, який ніхто не побачить.
   const { data, isLoading, isError, refetch } = useReadingRecap(kind ?? 'week', kind ? periodKey : '');
+  // POLYTSIA V1.7, Phase 8 — віха, що сталась у цьому періоді (ТЗ §21), зрізом того самого
+  // спільного кеш-запису; recap її НЕ перераховує.
+  const milestones = useReadingMilestones();
+  const periodMilestoneViews =
+    data && milestones.data
+      ? filterMilestonesInRange(
+          milestones.data.map((view) => ({ ...view, at: view.milestone.at })),
+          data.range,
+        )
+      : [];
+
   const cardRef = useRef<View>(null);
   const shareController = useShareCard({
     cardRef,
@@ -228,6 +242,13 @@ export default function ReadingRecapScreen() {
                 </View>
               ) : null}
             </Card>
+
+            {periodMilestoneViews.length > 0 ? (
+              <View style={{ gap: theme.spacing.sm }}>
+                <SectionHeader title="Віхи цього періоду" />
+                <MilestoneList views={periodMilestoneViews} />
+              </View>
+            ) : null}
 
             {data.books.length > 0 ? (
               <View style={{ gap: theme.spacing.sm }}>

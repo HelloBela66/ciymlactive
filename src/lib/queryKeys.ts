@@ -162,6 +162,13 @@ export const queryKeys = {
     // спільний кеш" принцип, що й у `readingRuns` вище).
     sources: (userBookId: string) => ['bookHistory', 'sources', userBookId] as const,
   },
+  readingMilestones: {
+    // POLYTSIA V1.7, Phase 8 (Meaningful Milestones) — БЕЗ параметрів: віхи derived з усієї
+    // історії одразу (ТЗ §17 — жодної таблиці `milestones`), і всі поверхні (Reading Life,
+    // Recap, Home) читають той самий один кеш-запис, беручи з нього свій зріз
+    // (`filterMilestonesInRange`/`latestMilestone`). Той самий принцип, що й `readingLife.all`.
+    all: ['readingMilestones', 'all'] as const,
+  },
   readingRecap: {
     // POLYTSIA V1.7, Phase 5 (Reading Recaps, `docs/V1_7_READING_LIFE.md`) — ОДИН ключ на всі
     // три періоди (`kind` — частина ключа), бо це буквально один `queryFn` з іншим діапазоном.

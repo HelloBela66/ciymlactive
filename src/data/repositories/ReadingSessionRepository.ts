@@ -523,6 +523,11 @@ export const ReadingSessionRepository = {
    * canonical-двигун періодів (`PeriodSessionInput`, `src/lib/readingPeriodSummary.ts`).
    * POLYTSIA V1.7, Phase 4 (Reading Life, `docs/V1_7_READING_LIFE.md`).
    *
+   * POLYTSIA V1.7, Phase 8 — додано `id` і `user_book_id`: віхи (`src/lib/readingMilestones.ts`)
+   * потребують стабільного tie-break для сесій з однаковим `started_at` (ТЗ §6) і книги, під час
+   * читання якої перетнуто часовий поріг (ТЗ §10). Шість вузьких колонок замість тринадцяти —
+   * той самий принцип проєкції, що й був.
+   *
    * ЧОМУ ОКРЕМИЙ МЕТОД, А НЕ `listAllCompleted` вище: Reading Life будує ієрархію «рік → місяць»
    * за ВСЮ історію одразу (`src/lib/readingLife.ts`), тож їй потрібні саме рядки, а не
    * SQL-агрегат — але потрібні лише чотири поля з тринадцяти. Це той самий принцип #168 («не
@@ -540,25 +545,50 @@ export const ReadingSessionRepository = {
    * різних відповідей на питання «скільки я читав цього місяця?»». Один запит → один
    * `buildReadingLife` → обидва екрани як проєкції одного результату.
    */
-  async listAllCompletedMetrics(
-    db: SQLiteDatabase,
-  ): Promise<{ startedAt: string; durationSeconds: number | null; startPage: number; endPage: number | null }[]> {
+  async listAllCompletedMetrics(db: SQLiteDatabase): Promise<
+    {
+      id: string;
+      userBookId: string;
+      startedAt: string;
+      durationSeconds: number | null;
+      startPage: number;
+      endPage: number | null;
+    }[]
+  > {
     const rows = await db.getAllAsync<{
+      id: string;
+      user_book_id: string;
       started_at: string;
       duration_seconds: number | null;
       start_page: number;
       end_page: number | null;
     }>(
-      `SELECT started_at, duration_seconds, start_page, end_page FROM reading_session
+      `SELECT id, user_book_id, started_at, duration_seconds, start_page, end_page FROM reading_session
        WHERE deleted_at IS NULL AND ended_at IS NOT NULL
        ORDER BY started_at ASC`,
     );
     return rows.map((row) => ({
+      id: row.id,
+      userBookId: row.user_book_id,
       startedAt: row.started_at,
       durationSeconds: row.duration_seconds,
       startPage: row.start_page,
       endPage: row.end_page,
     }));
+  },
+
+  /**
+   * Найраніший `started_at` серед ЖИВИХ завершених сесій — одна з двох можливих точок відліку
+   * читацької історії (POLYTSIA V1.7, Phase 8, ТЗ §11). `null`, коли сесій ще немає.
+   *
+   * Один рядок-агрегат, не вибірка: тут потрібне саме число, а не дані.
+   */
+  async getEarliestCompletedStartInstant(db: SQLiteDatabase): Promise<string | null> {
+    const row = await db.getFirstAsync<{ earliest: string | null }>(
+      `SELECT MIN(started_at) AS earliest FROM reading_session
+       WHERE deleted_at IS NULL AND ended_at IS NOT NULL`,
+    );
+    return row?.earliest ?? null;
   },
 
   /**

@@ -16,6 +16,10 @@ import {
 } from '@/components/reading-life/ReadingPeriodStats';
 import { useTheme } from '@/design/ThemeProvider';
 import { useReadingLifeYear } from '@/features/reading-life/useReadingLife';
+import { useReadingMilestones } from '@/features/milestones/useReadingMilestones';
+import { MilestoneList } from '@/components/milestones/MilestoneList';
+import { yearRangeOf } from '@/lib/readingCalendar';
+import { filterMilestonesInRange } from '@/lib/readingMilestones';
 import type { ReadingLifeMonth } from '@/lib/readingLife';
 
 /**
@@ -78,6 +82,16 @@ export default function ReadingLifeYearScreen() {
   const year = Number(params.year);
   const { year: yearData, isLoading, isError, refetch } = useReadingLifeYear(year);
 
+  // POLYTSIA V1.7, Phase 8 — віхи, що припали на цей рік (ТЗ §21). Не окремий підрахунок: зріз
+  // того самого кеш-запису, що живить усі поверхні віх.
+  const milestones = useReadingMilestones();
+  const yearMilestoneViews = Number.isFinite(year)
+    ? filterMilestonesInRange(
+        (milestones.data ?? []).map((view) => ({ ...view, at: view.milestone.at })),
+        yearRangeOf(year),
+      )
+    : [];
+
   return (
     <>
       <Stack.Screen
@@ -109,6 +123,14 @@ export default function ReadingLifeYearScreen() {
               </AppText>
               <ReadingPeriodStats summary={yearData.summary} />
             </Card>
+
+            {yearMilestoneViews.length > 0 ? (
+              <View style={{ gap: theme.spacing.sm }}>
+                {/* «Віхи», не «Досягнення»: це факти біографії, а не нагороди (ТЗ §25). */}
+                <SectionHeader title="Віхи цього року" />
+                <MilestoneList views={yearMilestoneViews} />
+              </View>
+            ) : null}
 
             <View style={{ gap: theme.spacing.sm }}>
               <SectionHeader title="Місяці" />

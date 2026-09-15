@@ -5,6 +5,7 @@ import {
   type PeriodBookRow,
 } from '@/features/reading-period/summarizeReadingPeriod';
 import { queryKeys } from '@/lib/queryKeys';
+import type { ReadingPeriodRange } from '@/lib/readingCalendar';
 import type { ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
 import {
   buildReadingRecap,
@@ -52,6 +53,8 @@ export interface ReadingRecapData {
   nextKey: string;
   /** `true`, якщо наступний період ще не почався: у майбутнє гортати нема сенсу. */
   isLatest: boolean;
+  /** Canonical-діапазон періоду — щоб поверхні (віхи) не перераховували його самі. */
+  range: ReadingPeriodRange;
 }
 
 export function useReadingRecap(kind: RecapPeriodKind, periodKey: string) {
@@ -96,6 +99,7 @@ export function useReadingRecap(kind: RecapPeriodKind, periodKey: string) {
         previousKey: recapPeriodKeyOf(kind, previousAnchor),
         nextKey: recapPeriodKeyOf(kind, nextAnchor),
         isLatest,
+        range,
       };
     },
   });

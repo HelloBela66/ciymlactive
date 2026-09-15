@@ -317,6 +317,22 @@ export const ReadingRunRepository = {
    * тієї самої причини, що й сесії: SQL не знає часового поясу пристрою
    * (`ReadingSessionRepository.listAllCompletedMetrics`).
    */
+  /**
+   * Найраніший `started_at` серед ЖИВИХ проходів — друга можлива точка відліку читацької історії
+   * (POLYTSIA V1.7, Phase 8, ТЗ §11). Потрібна поруч із сесійною: імпортована/legacy-історія
+   * (`is_legacy_backfill`) може мати проходи, старіші за будь-яку записану сесію, і рахувати
+   * ювілей від першої СЕСІЇ означало б відрізати людині частину її ж біографії.
+   *
+   * Без `JOIN user_book`: тут потрібна лише дата, а книга може бути й soft-deleted — історія
+   * від цього не молодшає (§19).
+   */
+  async getEarliestStartInstant(db: SQLiteDatabase): Promise<string | null> {
+    const row = await db.getFirstAsync<{ earliest: string | null }>(
+      `SELECT MIN(started_at) AS earliest FROM reading_run WHERE deleted_at IS NULL`,
+    );
+    return row?.earliest ?? null;
+  },
+
   async listAllFinished(db: SQLiteDatabase): Promise<ReadingRun[]> {
     const rows = await db.getAllAsync<ReadingRunRow>(
       `SELECT rr.* FROM reading_run rr
