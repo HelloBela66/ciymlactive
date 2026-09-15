@@ -388,6 +388,28 @@ export const JournalRepository = {
   },
 
   /**
+   * Скільки записів щоденника створено в діапазоні `[startIso, endIso)` — POLYTSIA V1.7, Phase 5
+   * (Reading Recaps). Та сама політика, що й `listCreatedInstants` вище (лічильник, не тексти →
+   * spoiler-safe не застосовується), лише вужчий зріз: Recap одного періоду не має потреби
+   * тягнути мітки за весь час.
+   *
+   * Межі приходять готовими інстантами з `readingCalendar` — тобто ЛОКАЛЬНІ межі періоду,
+   * виражені в UTC. Тому результат тотожний тому, що дало б бакетування
+   * `listCreatedInstants` за `readingMonthKey`: обидва шляхи ріжуть історію в одних і тих самих
+   * точках, і Reading Life з Recap не можуть розійтись у числі записів за той самий місяць.
+   */
+  async countCreatedBetween(db: SQLiteDatabase, startIso: string, endIso: string): Promise<number> {
+    const row = await db.getFirstAsync<{ c: number }>(
+      `SELECT
+         (SELECT COUNT(*) FROM note WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?)
+       + (SELECT COUNT(*) FROM quote WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?)
+       AS c`,
+      [startIso, endIso, startIso, endIso],
+    );
+    return row?.c ?? 0;
+  },
+
+  /**
    * Сторінка глобальної стрічки "Мій щоденник" (Фаза 4) — той самий union-підхід, що й
    * `listPage`, але з JOIN до `user_book`→`edition`→`work`, щоб кожен запис ніс назву й
    * обкладинку своєї книги (записи різних книг ідуть впереміш, на відміну від "щоденника

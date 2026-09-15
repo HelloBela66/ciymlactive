@@ -1,15 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { getDatabase } from '@/data/db';
-import { UserBookRepository } from '@/data/repositories/UserBookRepository';
-import { ReadingRunRepository } from '@/data/repositories/ReadingRunRepository';
 import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { RatingRepository } from '@/data/repositories/RatingRepository';
 import { GenreRepository } from '@/data/repositories/GenreRepository';
+import {
+  summarizeReadingPeriod,
+  uniqueFinishedBooks,
+} from '@/features/reading-period/summarizeReadingPeriod';
 import { queryKeys } from '@/lib/queryKeys';
 import { computeStreaks } from '@/lib/streaks';
 import { computeBusiestMonth, computeTopGenreAmong } from '@/lib/readingAggregates';
 import { yearRangeOf } from '@/lib/readingCalendar';
-import { computeReadingPeriodSummary, type ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
+import type { ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
+import {
+  buildReadingRecap,
+  recapPeriodFromRange,
+  type ReadingRecap,
+} from '@/lib/readingRecap';
 import type { UserBookWithDetails } from '@/types/userBook';
 
 export interface WrappedYearData {
@@ -29,6 +36,12 @@ export interface WrappedYearData {
   topGenre: { name: string; count: number } | null;
   /** Повний canonical-підсумок року — те саме джерело, що й Weekly/Monthly Recap. */
   summary: ReadingPeriodSummary;
+  /**
+   * Year Recap — той самий детермінований текст, що й у Weekly/Monthly (`buildReadingRecap`),
+   * лише з `kind: 'year'`. Живе ТУТ, а не на окремому екрані: інакше «яким був мій рік» мало б
+   * дві поверхні (ТЗ V1.7 — Wrapped не повинен стати паралельною системою).
+   */
+  recap: ReadingRecap;
 }
 
 /**
@@ -70,46 +83,33 @@ export function useWrappedYear(year: number) {
     queryKey: queryKeys.wrapped.year(year),
     queryFn: async () => {
       const db = await getDatabase();
-      const { startIso, endIso } = yearRangeOf(year);
+      const range = yearRangeOf(year);
 
-      const [runsInRange, sessions] = await Promise.all([
-        ReadingRunRepository.listFinishedBetween(db, startIso, endIso),
-        ReadingSessionRepository.listStartedBetween(db, startIso, endIso),
+      // Той самий `summarizeReadingPeriod`, що й Recap/Reading Life — не власна копія ланцюжка
+      // «діапазон → repository-методи → формула» (POLYTSIA V1.7, Phase 6). Попередній рік
+      // потрібен лише для рядка порівняння в recap.
+      const [current, previous] = await Promise.all([
+        summarizeReadingPeriod(db, range),
+        summarizeReadingPeriod(db, yearRangeOf(year - 1)),
       ]);
+      const summary = current.summary;
 
-      // Один пакетний запит на всі книги року (не по одному на run) — той самий принцип, що вже
-      // діє в Сезонах/Календарі. `...IncludingDeleted`: історичний рік не має "порожніти" лише
-      // тому, що книгу згодом прибрали з Бібліотеки.
-      const uniqueUserBookIds = [...new Set(runsInRange.map((run) => run.userBookId))];
-      const userBooks = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, uniqueUserBookIds);
-      const userBookById = new Map(userBooks.map((ub) => [ub.id, ub]));
+      // Сирі сесії року — лише для `computeBusiestMonth` (їй потрібні самі `started_at`, яких
+      // немає в агрегованому підсумку).
+      const sessions = await ReadingSessionRepository.listStartedBetween(db, range.startIso, range.endIso);
 
-      const summary = computeReadingPeriodSummary({
-        sessions,
-        finishedRuns: runsInRange.map((run) => ({
-          id: run.id,
-          userBookId: run.userBookId,
-          workId: userBookById.get(run.userBookId)?.work.id ?? null,
-          runNumber: run.runNumber,
-          status: run.status,
-          finishedAt: run.finishedAt,
-        })),
-      });
-
-      // Унікальні книги в порядку завершення: `listFinishedBetween` уже віддає runs за
+      // Унікальні книги в порядку завершення: `listFinishedBetween` уже віддає проходи за
       // `finished_at ASC`, тож перше входження книги — її перше завершення цього року.
-      // Книга, чиї edition/work фізично відсутні, тихо пропускається (той самий підхід, що й
-      // `attachDetailsBatch`), а не ламає весь підсумок.
-      const booksFinished: UserBookWithDetails[] = [];
-      const seenUserBookIds = new Set<string>();
-      for (const run of runsInRange) {
-        if (run.status !== 'finished') continue;
-        if (seenUserBookIds.has(run.userBookId)) continue;
-        const userBook = userBookById.get(run.userBookId);
-        if (!userBook) continue;
-        seenUserBookIds.add(run.userBookId);
-        booksFinished.push(userBook);
-      }
+      const booksFinished = uniqueFinishedBooks(current.books);
+
+      const recap = buildReadingRecap({
+        period: recapPeriodFromRange('year', range),
+        summary,
+        previousSummary: previous.summary,
+        finishedBooks: current.books
+          .filter((book) => book.status === 'finished')
+          .map((book) => ({ title: book.userBook.work.title, isReread: book.runNumber > 1 })),
+      });
 
       const { longest: longestStreak } = computeStreaks(summary.activeDayKeys, `${year}-12-31`);
 
@@ -152,6 +152,7 @@ export function useWrappedYear(year: number) {
         busiestMonth,
         topGenre,
         summary,
+        recap,
       };
     },
   });

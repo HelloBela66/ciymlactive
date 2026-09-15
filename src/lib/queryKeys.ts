@@ -162,6 +162,16 @@ export const queryKeys = {
     // спільний кеш" принцип, що й у `readingRuns` вище).
     sources: (userBookId: string) => ['bookHistory', 'sources', userBookId] as const,
   },
+  readingRecap: {
+    // POLYTSIA V1.7, Phase 5 (Reading Recaps, `docs/V1_7_READING_LIFE.md`) — ОДИН ключ на всі
+    // три періоди (`kind` — частина ключа), бо це буквально один `queryFn` з іншим діапазоном.
+    // Окремі `week(...)`/`month(...)`/`year(...)` ключі означали б три queryFn, тобто три шляхи
+    // до однієї цифри — рівно те, чого V1.7 не допускає.
+    //
+    // `periodKey` — понеділок (`yyyy-MM-dd`) для тижня, `yyyy-MM` для місяця, `yyyy` для року
+    // (`recapPeriodKeyOf`, `src/lib/readingRecap.ts`).
+    period: (kind: string, periodKey: string) => ['readingRecap', kind, periodKey] as const,
+  },
   readingLife: {
     // POLYTSIA V1.7, Phase 4 («Моя читацька історія», `docs/V1_7_READING_LIFE.md`) — БЕЗ
     // параметрів, і це головне архітектурне рішення цієї фази: екран року й екран місяця НЕ

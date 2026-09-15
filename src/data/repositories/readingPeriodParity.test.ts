@@ -5,9 +5,11 @@ import { UserBookRepository } from './UserBookRepository';
 import { ReadingSessionRepository } from './ReadingSessionRepository';
 import { ReadingRunRepository } from './ReadingRunRepository';
 import { JournalRepository } from './JournalRepository';
-import { computeReadingPeriodSummary, type ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
+import { summarizeReadingPeriod } from '@/features/reading-period/summarizeReadingPeriod';
+import type { ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
 import { monthRange, readingDayKey, weekRange, yearRangeOf } from '@/lib/readingCalendar';
 import { buildReadingLife, findReadingLifeMonth, findReadingLifeYear } from '@/lib/readingLife';
+import { recapRangeOf } from '@/lib/readingRecap';
 import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
 
 /**
@@ -83,28 +85,18 @@ async function seedFinishedRun(
   );
 }
 
-/** Рівно той ланцюжок, що виконують реальні хуки періоду (Wrapped/Recap/Seasons). */
+/**
+ * РІВНО той код, який виконують реальні хуки періоду (Wrapped/Recap/Reading Life) — не імітація
+ * його (POLYTSIA V1.7, Phase 6).
+ *
+ * До Phase 6 тут жила власна копія ланцюжка «діапазон → repository-методи → формула». Вона
+ * доводила менше, ніж здавалось: тест міг лишатись зеленим, поки продакшн-хук тихо взяв би інший
+ * метод (наприклад, `listStartedOrFinishedBetween` замість `listFinishedBetween`) чи забув
+ * `...IncludingDeleted`. Тепер обидва шляхи — це буквально одна функція.
+ */
 async function summarize(db: SQLiteDatabase, range: { startIso: string; endIso: string }) {
-  const [runs, sessions] = await Promise.all([
-    ReadingRunRepository.listFinishedBetween(db, range.startIso, range.endIso),
-    ReadingSessionRepository.listStartedBetween(db, range.startIso, range.endIso),
-  ]);
-  const userBooks = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(
-    db,
-    [...new Set(runs.map((r) => r.userBookId))],
-  );
-  const byId = new Map(userBooks.map((ub) => [ub.id, ub]));
-  return computeReadingPeriodSummary({
-    sessions,
-    finishedRuns: runs.map((run) => ({
-      id: run.id,
-      userBookId: run.userBookId,
-      workId: byId.get(run.userBookId)?.work.id ?? null,
-      runNumber: run.runNumber,
-      status: run.status,
-      finishedAt: run.finishedAt,
-    })),
-  });
+  const { summary } = await summarizeReadingPeriod(db, range);
+  return summary;
 }
 
 describe('V1.7 parity — тиждень/місяць/рік не розходяться між собою', () => {
@@ -349,6 +341,27 @@ describe('V1.7 parity — Reading Life і діапазонний запит да
       '2026-06',
     ]);
     expect(findReadingLifeYear(life, 2025)?.months.map((month) => month.monthKey)).toEqual(['2025-11']);
+  });
+
+  it("Recap бере той самий діапазон місяця, що й Reading Life (третій шлях не з'являється)", async () => {
+    const db = await openMigratedTestDb();
+    await seedMixedHistory(db);
+
+    const life = await buildLifeLikeHook(db);
+
+    for (const [monthKey, anchor] of [
+      ['2026-06', new Date(2026, 5, 15)],
+      ['2026-07', new Date(2026, 6, 15)],
+    ] as const) {
+      // `recapRangeOf` — те, чим користується `useReadingRecap`; `findReadingLifeMonth` — те, що
+      // показує Reading Life. Якщо колись Recap почне рахувати «свій» місяць, цей тест впаде.
+      const fromRecapRange = await summarize(db, recapRangeOf('month', anchor));
+      const fromLife = findReadingLifeMonth(life, monthKey);
+      expect(fromLife).not.toBeNull();
+      expect(fromLife ? comparableMetrics(fromLife.summary) : null).toEqual(
+        comparableMetrics(fromRecapRange),
+      );
+    }
   });
 
   it("м'яко видалена книга лишається і в Reading Life (та сама History Preservation)", async () => {

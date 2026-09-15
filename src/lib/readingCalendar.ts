@@ -86,6 +86,69 @@ export function readingYearOf(instantIso: string): number {
   return new Date(instantIso).getFullYear();
 }
 
+/** `2026`, `6` → `'2026-06'`. Дзеркальна до `parseReadingMonthKey` нижче. */
+export function formatReadingMonthKey(year: number, month: number): string {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+}
+
+/**
+ * `'2026-06'` → `{ year: 2026, month: 6 }`; `null` для будь-чого іншого. Потрібна на межі з
+ * навігацією: ключ місяця приходить у маршрут як рядок параметра
+ * (`app/reading-life/month/[monthKey].tsx`, Recap), тобто як недовірений вхід — екран не має
+ * падати, якщо туди потрапить будь-що.
+ *
+ * Живе тут, а не в `readingLife.ts` (де з'явилась у Phase 4): ключ місяця — поняття
+ * canonical-календаря, ним користуються і Reading Life, і Recaps, і будь-яка майбутня помісячна
+ * поверхня. Тримати парсер у модулі однієї з них означало б, що інші імпортують місяць «через»
+ * чужу фічу.
+ */
+export function parseReadingMonthKey(monthKey: string): { year: number; month: number } | null {
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return null;
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  if (month < 1 || month > 12) return null;
+  return { year, month };
+}
+
+/**
+ * Ключ дня (`yyyy-MM-dd`) → `Date` ЛОКАЛЬНОЇ півночі того дня; `null` на будь-що інше.
+ * POLYTSIA V1.7, Phase 5 (Reading Recaps) — ключ періоду приходить у маршрут як рядок параметра,
+ * тобто як недовірений вхід.
+ *
+ * ЧОМУ НЕ `new Date(key)`: рядок `'2026-08-10'` специфікація ECMAScript велить парсити як
+ * date-only форму, тобто як UTC-північ. У поясі на захід від Гринвіча (наприклад, UTC−5) це дає
+ * 9 серпня 19:00 ЛОКАЛЬНОГО часу — тобто попередній день. Той самий клас помилки, що й
+ * `iso.slice(0, 10)` у зворотному напрямку (`docs/V1_7_TEMPORAL_SEMANTICS.md`). Тому компоненти
+ * розбираються вручну й подаються в конструктор `Date(year, monthIndex, day)`, який завжди
+ * будує ЛОКАЛЬНУ дату.
+ */
+export function readingDayFromKey(dayKey: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return null;
+  const year = Number(dayKey.slice(0, 4));
+  const month = Number(dayKey.slice(5, 7));
+  const day = Number(dayKey.slice(8, 10));
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  // Відсіює неіснуючі дати (`2026-02-30` → 2 березня): `Date` мовчки «перекочує» переповнення,
+  // а ключ, що вказує не на той день, який назвав, — гірший за відсутній.
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+  return date;
+}
+
+/**
+ * Ключ ТИЖНЯ — ключ дня його понеділка (`yyyy-MM-dd`). POLYTSIA V1.7, Phase 5.
+ *
+ * Окремого формату тижня (на кшталт ISO `2026-W33`) свідомо немає: дата понеділка — це вже
+ * стабільний, людиночитний і сортований ключ, який до того ж напряму годиться для `weekRange`
+ * без окремого парсера. `READING_WEEK_STARTS_ON` лишається єдиним джерелом правди про те, з
+ * якого дня починається тиждень.
+ */
+export function readingWeekKeyOf(date: Date): string {
+  return readingDayKeyOf(startOfWeek(date, { weekStartsOn: READING_WEEK_STARTS_ON }));
+}
+
 /**
  * Напіввідкритий діапазон `[startIso, endIso)` в абсолютних UTC instants, побудований із
  * ЛОКАЛЬНИХ меж періоду. Саме в такому вигляді він іде в SQL (`started_at >= ? AND started_at < ?`)

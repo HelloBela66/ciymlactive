@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
 import { Stack, router, useLocalSearchParams, type Href } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { uk } from 'date-fns/locale';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
@@ -17,7 +18,7 @@ import {
   useReadingLifeMonthBooks,
   type ReadingLifeMonthBook,
 } from '@/features/reading-life/useReadingLife';
-import { parseReadingMonthKey } from '@/lib/readingLife';
+import { parseReadingMonthKey } from '@/lib/readingCalendar';
 
 /**
  * Місяць читацької історії — POLYTSIA V1.7, Phase 4 (`docs/V1_7_READING_LIFE.md`, ТЗ V1.7 §13).
@@ -133,6 +134,35 @@ export default function ReadingLifeMonthScreen() {
               </AppText>
               <ReadingPeriodStats summary={month.summary} />
             </Card>
+
+            {/* POLYTSIA V1.7, Phase 5 — вхід у Recap ЦЬОГО місяця.
+                Recap не дублює цей екран і не замінює його: тут — цифри й список книг
+                (навігація історією), там — те саме одним реченням плюс картка-поділитися.
+                Обидва беруть числа з одного `computeReadingPeriodSummary`, тож «скільки я читав
+                цього місяця» має ОДНУ відповідь на обох (`docs/V1_7_READING_LIFE.md`). */}
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/reading-recap/[kind]/[periodKey]',
+                  params: { kind: 'month', periodKey: monthKey },
+                } as unknown as Href)
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Підсумок місяця одним реченням"
+            >
+              <Card style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+                <Ionicons name="sparkles-outline" size={20} color={theme.colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <AppText variant="body" color="accent">
+                    Підсумок одним реченням
+                  </AppText>
+                  <AppText variant="caption" color="secondary">
+                    І картка, якою можна поділитися
+                  </AppText>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+              </Card>
+            </Pressable>
 
             {/* Книги вантажаться окремим запитом, тож можуть з'явитися трохи пізніше за цифри
                 — порожнього блоку при цьому не показуємо, лише коли запит уже завершився. */}

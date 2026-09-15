@@ -6,6 +6,7 @@ import { AppText } from '@/components/ui/AppText';
 import { QuickAction } from '@/components/ui/QuickAction';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { useTheme } from '@/design/ThemeProvider';
+import { recapPeriodKeyOf } from '@/lib/readingRecap';
 import { currentSeasonKey, formatSeasonKey } from '@/lib/season';
 
 /**
@@ -86,6 +87,33 @@ export default function MyReadingScreen() {
 
         <View style={{ gap: theme.spacing.sm, marginTop: theme.spacing.xl }}>
           <SectionHeader title="Підсумки" />
+          {/* POLYTSIA V1.7, Phase 5 — Reading Recaps (ТЗ модуль C). Тиждень і місяць стають поруч
+              із Роком і Сезонами, бо відповідають на те саме питання в іншому масштабі: «яким був
+              цей відрізок». Ключ періоду рахується `recapPeriodKeyOf` — тим самим, яким
+              користується сам екран, щоб «поточний тиждень» тут і там означав одне й те саме
+              (понеділок як початок, ТЗ V1.7). */}
+          <QuickAction
+            icon="calendar-outline"
+            label="Тиждень"
+            description="Підсумок поточного тижня"
+            onPress={() =>
+              router.push({
+                pathname: '/reading-recap/[kind]/[periodKey]',
+                params: { kind: 'week', periodKey: recapPeriodKeyOf('week', new Date()) },
+              } as unknown as Href)
+            }
+          />
+          <QuickAction
+            icon="calendar-number-outline"
+            label="Місяць"
+            description="Підсумок поточного місяця"
+            onPress={() =>
+              router.push({
+                pathname: '/reading-recap/[kind]/[periodKey]',
+                params: { kind: 'month', periodKey: recapPeriodKeyOf('month', new Date()) },
+              } as unknown as Href)
+            }
+          />
           <QuickAction
             icon="sparkles-outline"
             label="Рік"

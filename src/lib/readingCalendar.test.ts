@@ -5,9 +5,13 @@ import {
   monthRange,
   monthRangeOf,
   monthSpanRange,
+  formatReadingMonthKey,
+  parseReadingMonthKey,
+  readingDayFromKey,
   readingDayKey,
   readingDayKeyOf,
   readingMonthKey,
+  readingWeekKeyOf,
   readingYearOf,
   weekRange,
   yearRange,
@@ -107,6 +111,86 @@ describe('readingMonthKey / readingYearOf — місяць і рік у ЛОКА
     const range = monthRangeOf(Number(key.slice(0, 4)), Number(key.slice(5, 7)));
     expect(instant >= range.startIso).toBe(true);
     expect(instant < range.endIso).toBe(true);
+  });
+});
+
+describe('formatReadingMonthKey / parseReadingMonthKey', () => {
+  it('складає ключ із двоцифровим місяцем', () => {
+    expect(formatReadingMonthKey(2026, 6)).toBe('2026-06');
+    expect(formatReadingMonthKey(2026, 12)).toBe('2026-12');
+  });
+
+  it('розбирає власний ключ назад без втрат', () => {
+    expect(parseReadingMonthKey(formatReadingMonthKey(2026, 6))).toEqual({ year: 2026, month: 6 });
+  });
+
+  it('повертає null на сміття з маршруту, а не кидає виняток', () => {
+    expect(parseReadingMonthKey('')).toBeNull();
+    expect(parseReadingMonthKey('2026')).toBeNull();
+    expect(parseReadingMonthKey('2026-6')).toBeNull();
+    expect(parseReadingMonthKey('2026-13')).toBeNull();
+    expect(parseReadingMonthKey('2026-00')).toBeNull();
+    expect(parseReadingMonthKey('abcd-ef')).toBeNull();
+  });
+});
+
+describe('readingDayFromKey — ключ дня → ЛОКАЛЬНА північ', () => {
+  it('round-trip: ключ → дата → той самий ключ', () => {
+    expect(readingDayKeyOf(readingDayFromKey('2026-08-16') as Date)).toBe('2026-08-16');
+  });
+
+  it('повертає саме ЛОКАЛЬНУ північ названого дня, а не UTC-північ', () => {
+    const date = readingDayFromKey('2026-08-16') as Date;
+    expect(date.getFullYear()).toBe(2026);
+    expect(date.getMonth()).toBe(7);
+    expect(date.getDate()).toBe(16);
+    expect(date.getHours()).toBe(0);
+    expect(date.getMinutes()).toBe(0);
+  });
+
+  it('1 січня лишається 1 січня (межа року — головний випадок `new Date(key)`-бага)', () => {
+    const date = readingDayFromKey('2027-01-01') as Date;
+    expect(date.getFullYear()).toBe(2027);
+    expect(date.getMonth()).toBe(0);
+    expect(date.getDate()).toBe(1);
+  });
+
+  it('повертає null на сміття з маршруту замість «перекоченої» дати', () => {
+    expect(readingDayFromKey('')).toBeNull();
+    expect(readingDayFromKey('2026-08')).toBeNull();
+    expect(readingDayFromKey('2026-8-16')).toBeNull();
+    expect(readingDayFromKey('2026-13-01')).toBeNull();
+    expect(readingDayFromKey('2026-02-30')).toBeNull();
+    expect(readingDayFromKey('не-дата')).toBeNull();
+  });
+
+  it('29 лютого існує у високосному році й не існує у звичайному', () => {
+    expect(readingDayFromKey('2028-02-29')).not.toBeNull();
+    expect(readingDayFromKey('2026-02-29')).toBeNull();
+  });
+});
+
+describe('readingWeekKeyOf — ключ тижня це його понеділок', () => {
+  it('будь-який день тижня дає ОДИН і той самий ключ', () => {
+    const monday = readingWeekKeyOf(new Date(2026, 7, 10, 9, 0));
+    expect(readingWeekKeyOf(new Date(2026, 7, 13, 23, 30))).toBe(monday);
+    expect(readingWeekKeyOf(new Date(2026, 7, 16, 23, 50))).toBe(monday); // неділя
+    expect(monday).toBe('2026-08-10');
+  });
+
+  it('понеділок 00:20 починає НОВИЙ тиждень', () => {
+    expect(readingWeekKeyOf(new Date(2026, 7, 17, 0, 20))).toBe('2026-08-17');
+  });
+
+  it('ключ тижня узгоджений із `weekRange`: це початок того самого діапазону', () => {
+    const anyDay = new Date(2026, 7, 13, 15, 0);
+    const key = readingWeekKeyOf(anyDay);
+    expect(readingDayKeyOf(new Date(weekRange(anyDay).startIso))).toBe(key);
+  });
+
+  it('тиждень через межу року має ключ свого понеділка, навіть якщо він у старому році', () => {
+    // 1 січня 2027 — п'ятниця; її тиждень починається в понеділок 28 грудня 2026.
+    expect(readingWeekKeyOf(new Date(2027, 0, 1, 12, 0))).toBe('2026-12-28');
   });
 });
 

@@ -2,8 +2,6 @@ import {
   buildReadingLife,
   findReadingLifeMonth,
   findReadingLifeYear,
-  formatReadingMonthKey,
-  parseReadingMonthKey,
   type ReadingLifeInput,
 } from './readingLife';
 import type { PeriodFinishedRunInput, PeriodSessionInput } from './readingPeriodSummary';
@@ -55,26 +53,6 @@ function finishedRun(
 }
 
 const EMPTY_INPUT: ReadingLifeInput = { sessions: [], finishedRuns: [] };
-
-describe('formatReadingMonthKey / parseReadingMonthKey', () => {
-  it('складає ключ із двоцифровим місяцем', () => {
-    expect(formatReadingMonthKey(2026, 6)).toBe('2026-06');
-    expect(formatReadingMonthKey(2026, 12)).toBe('2026-12');
-  });
-
-  it('розбирає власний ключ назад без втрат', () => {
-    expect(parseReadingMonthKey(formatReadingMonthKey(2026, 6))).toEqual({ year: 2026, month: 6 });
-  });
-
-  it('повертає null на сміття з маршруту, а не кидає виняток', () => {
-    expect(parseReadingMonthKey('')).toBeNull();
-    expect(parseReadingMonthKey('2026')).toBeNull();
-    expect(parseReadingMonthKey('2026-6')).toBeNull();
-    expect(parseReadingMonthKey('2026-13')).toBeNull();
-    expect(parseReadingMonthKey('2026-00')).toBeNull();
-    expect(parseReadingMonthKey('abcd-ef')).toBeNull();
-  });
-});
 
 describe('buildReadingLife — групування', () => {
   it('порожній вхід дає порожню історію, а не рік із нулями', () => {

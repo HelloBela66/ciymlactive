@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { CoverThumbnail } from '@/components/ui/CoverThumbnail';
 import { useTheme } from '@/design/ThemeProvider';
 import { useWrappedYear } from '@/features/wrapped/useWrappedYear';
-import { formatDuration } from '@/lib/sessionTiming';
+import { formatCompactDuration } from '@/lib/calendarFormat';
 import { pluralizeUk } from '@/lib/pluralizeUk';
 
 const DAY_FORMS = ['день', 'дні', 'днів'] as const;
@@ -32,6 +32,24 @@ function StatTile({ label, value }: { label: string; value: string }) {
 /**
  * Річний Wrapped (розділ 30 ТЗ, Milestone 6). Дані — `useWrappedYear`, тут лише розкладка;
  * рік перемикається локальною стрілкою (як Календар), без нового екрана на кожен рік.
+ *
+ * ── POLYTSIA V1.7, Phase 6: YEAR RECAP ЖИВЕ ТУТ ──────────────────────────────────────────────
+ * ТЗ V1.7 прямо забороняє, щоб Wrapped став паралельною системою поруч із Recap. Тому Year Recap
+ * НЕ отримав власного екрана: `app/reading-recap/[kind]/[periodKey].tsx` на `kind === 'year'`
+ * перенаправляє сюди, а сам текст recap (те саме детерміноване речення й ті самі факти, що й у
+ * тижневому/місячному) приходить із `useWrappedYear`, який будує його тим самим
+ * `buildReadingRecap`. Двох відповідей на питання «яким був мій рік» не існує ні на рівні
+ * екранів, ні на рівні обчислень.
+ *
+ * ВИПРАВЛЕНО ЦІЄЮ ФАЗОЮ:
+ * 1. Тривалість показувалась через `formatDuration` (`sessionTiming.ts`) — це формат ЖИВОГО
+ *    ТАЙМЕРА сесії, `HH:MM:SS`. «Час читання: 128:34:00» читається як секундомір, а не як
+ *    підсумок року; решта V1.7-поверхонь давно використовує людський `formatCompactDuration`
+ *    («128 год 34 хв»). Та сама метрика мусить називатись і виглядати однаково скрізь.
+ * 2. Назва найактивнішого місяця будувалась через `Date.UTC(year, month - 1, 1)`. У поясі на
+ *    захід від Гринвіча цей момент — ще попередній місяць за локальним часом, тож січень
+ *    підписувався як «грудень». `computeBusiestMonth` рахує місяць ЛОКАЛЬНО
+ *    (`new Date(startedAt).getMonth()`), тож і підпис до нього має будуватись локально.
  */
 export default function WrappedScreen() {
   const theme = useTheme();
@@ -87,19 +105,35 @@ export default function WrappedScreen() {
           <AppText variant="body" color="secondary">
             Завантаження…
           </AppText>
-        ) : data.booksFinished.length === 0 && data.totalMinutes === 0 ? (
+        ) : data.recap.isEmpty ? (
           <EmptyState
             title={`Немає даних за ${year} рік`}
             description="Читай книги протягом року, щоб побачити тут підсумки."
           />
         ) : (
           <View style={{ gap: theme.spacing.lg }}>
+            {/* Year Recap — те саме детерміноване речення, що й у тижневому/місячному підсумку
+                (ТЗ §103: шаблон, не генерація). Стоїть першим: спершу «що це був за рік»
+                словами, далі цифри. */}
+            <Card style={{ gap: theme.spacing.md }}>
+              <AppText variant="heading">{data.recap.headline}</AppText>
+              {data.recap.lines.length > 0 ? (
+                <View style={{ gap: theme.spacing.xs }}>
+                  {data.recap.lines.map((line) => (
+                    <AppText key={line.id} variant="body" color="secondary">
+                      {line.text}
+                    </AppText>
+                  ))}
+                </View>
+              ) : null}
+            </Card>
+
             <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
               <StatTile
                 label={`${pluralizeUk(data.booksFinished.length, BOOK_FORMS)} прочитано`}
                 value={String(data.booksFinished.length)}
               />
-              <StatTile label="Час читання" value={formatDuration(data.totalMinutes * 60 * 1000)} />
+              <StatTile label="Час читання" value={formatCompactDuration(data.totalMinutes)} />
             </View>
 
             <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
@@ -152,7 +186,7 @@ export default function WrappedScreen() {
                   Найактивніший місяць
                 </AppText>
                 <AppText variant="heading" style={{ textTransform: 'capitalize' }}>
-                  {format(new Date(Date.UTC(year, data.busiestMonth.month - 1, 1)), 'LLLL', { locale: uk })}
+                  {format(new Date(year, data.busiestMonth.month - 1, 1), 'LLLL', { locale: uk })}
                 </AppText>
               </Card>
             ) : null}

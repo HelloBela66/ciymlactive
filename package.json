@@ -13,7 +13,7 @@
     "lint": "eslint . --max-warnings=0",
     "test": "cross-env TZ=UTC jest",
     "test:watch": "cross-env TZ=UTC jest --watch",
-    "test:tz": "cross-env TZ=Europe/Kyiv jest lib/readingCalendar lib/readingLife lib/readingPeriodSummary repositories/readingPeriodParity lib/season.test lib/readingAggregates lib/readingPace lib/rereadComparison",
+    "test:tz": "cross-env TZ=Europe/Kyiv jest lib/readingCalendar lib/readingLife lib/readingRecap lib/readingPeriodSummary repositories/readingPeriodParity lib/season.test lib/readingAggregates lib/readingPace lib/rereadComparison",
     "catalog:import": "node scripts/sync-curated-books.js"
   },
   "dependencies": {

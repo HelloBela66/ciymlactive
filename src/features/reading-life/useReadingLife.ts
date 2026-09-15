@@ -5,12 +5,11 @@ import { ReadingRunRepository } from '@/data/repositories/ReadingRunRepository';
 import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import { queryKeys } from '@/lib/queryKeys';
-import { monthRangeOf } from '@/lib/readingCalendar';
+import { monthRangeOf, parseReadingMonthKey } from '@/lib/readingCalendar';
 import {
   buildReadingLife,
   findReadingLifeMonth,
   findReadingLifeYear,
-  parseReadingMonthKey,
   type ReadingLife,
   type ReadingLifeMonth,
   type ReadingLifeYear,

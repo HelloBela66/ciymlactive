@@ -1,4 +1,4 @@
-import { readingMonthKey } from './readingCalendar';
+import { parseReadingMonthKey, readingMonthKey } from './readingCalendar';
 import {
   computeReadingPeriodSummary,
   type PeriodFinishedRunInput,
@@ -73,25 +73,6 @@ export interface ReadingLifeYear {
 export interface ReadingLife {
   /** Лише роки, у яких щось відбулось, найновіший перший. */
   years: ReadingLifeYear[];
-}
-
-/** `2026`, `6` → `'2026-06'`. Дзеркальна до `parseReadingMonthKey` нижче. */
-export function formatReadingMonthKey(year: number, month: number): string {
-  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
-}
-
-/**
- * `'2026-06'` → `{ year: 2026, month: 6 }`; `null` для будь-чого іншого. Потрібна на межі з
- * навігацією: `monthKey` приходить у маршрут як рядок параметра (`app/reading-life/month/
- * [monthKey].tsx`), тобто як недовірений вхід — екран не має падати, якщо туди потрапить
- * будь-що.
- */
-export function parseReadingMonthKey(monthKey: string): { year: number; month: number } | null {
-  if (!/^\d{4}-\d{2}$/.test(monthKey)) return null;
-  const year = Number(monthKey.slice(0, 4));
-  const month = Number(monthKey.slice(5, 7));
-  if (month < 1 || month > 12) return null;
-  return { year, month };
 }
 
 interface MonthBucket {
