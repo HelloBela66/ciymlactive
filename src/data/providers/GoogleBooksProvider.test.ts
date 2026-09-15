@@ -1,11 +1,14 @@
 /**
- * POLYTSIA FOUNDATION FINAL POLISH — Task B (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, §7-8).
+ * POLYTSIA FOUNDATION FINAL POLISH — Task B (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, §7-8, §12
+ * доповнення після реального прогону CI).
  *
  * `GoogleBooksProvider` — єдиний провайдер із ДВОМА шляхами (проксі налаштовано / прямий
  * анонімний fallback, докладніше — коментар над файлом), обидва мусять узгоджено пропускати
  * `ProviderSearchOutcome` (не голий масив) до `useProviderSearch`/`search.tsx`. Той самий
- * `jest.resetModules()` + динамічний `import()` патерн, що й `googleBooksProxyClient.test.ts` —
- * `isGoogleBooksProxyConfigured()` читає `process.env` на рівні модуля.
+ * `jest.resetModules()` + `require()` патерн, що й `googleBooksProxyClient.test.ts` —
+ * `isGoogleBooksProxyConfigured()` читає `process.env` на рівні модуля; ПОВНЕ пояснення "чому
+ * саме `require()`, а не динамічний `import()`" (`import()` пройшов локальний `npm test`, але
+ * зламав CI під `jest-expo`/`babel-preset-expo`) лишається коментарем там-таки, не дублюється тут.
  *
  * Другий блок тестів — РЕГРЕСІЙНИЙ тест на конкретний баг, знайдений і виправлений У МЕЖАХ
  * цього ж пасу (не поза його рамками): `lookupByISBN`'s прямий (без проксі) шлях індексував
@@ -19,7 +22,10 @@ type GoogleBooksProviderModule = typeof import('./GoogleBooksProvider');
 
 async function loadProvider(): Promise<GoogleBooksProviderModule> {
   jest.resetModules();
-  return import('./GoogleBooksProvider');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- динамічний import() ламає
+  // CI під jest-expo (див. коментар над файлом googleBooksProxyClient.test.ts); require() —
+  // єдиний робочий спосіб перезавантажити цей env-залежний модуль між тестами.
+  return require('./GoogleBooksProvider') as GoogleBooksProviderModule;
 }
 
 const originalEnv = { ...process.env };

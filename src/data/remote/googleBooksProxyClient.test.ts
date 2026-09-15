@@ -2,23 +2,35 @@ import type { ProviderSearchOutcome } from '@/lib/providerSearchError';
 import type { GoogleBooksProxyBook } from './googleBooksProxyClient';
 
 /**
- * POLYTSIA FOUNDATION FINAL POLISH — Task B (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, §7-8).
+ * POLYTSIA FOUNDATION FINAL POLISH — Task B (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, §7-8, §12
+ * доповнення після реального прогону CI).
  *
  * `isGoogleBooksProxyConfigured()`/`PROXY_ENABLED`/`SUPABASE_URL`/`SUPABASE_ANON_KEY` — усі
- * читаються з `process.env` РІВНО ОДИН РАЗ, на рівні модуля, в момент `import`. Щоб кожен тест
- * міг незалежно керувати "проксі налаштовано чи ні" й отримати ЧИСТИЙ модуль із новими значеннями
- * `process.env`, кожен тест виставляє потрібні змінні середовища, тоді `jest.resetModules()` +
- * динамічний `import()` (а не статичний `import` уверху файлу) — стандартний Jest-патерн для
- * модулів, чия поведінка залежить від оточення, зафіксованого при завантаженні; `require()` тут
- * навмисно НЕ використовується (`@typescript-eslint/no-require-imports`, проєкт лінтить проти
- * CommonJS-стилю навіть у тестах).
+ * читаються з `process.env` РІВНО ОДИН РАЗ, на рівні модуля, в момент завантаження. Щоб кожен
+ * тест міг незалежно керувати "проксі налаштовано чи ні" й отримати ЧИСТИЙ модуль із новими
+ * значеннями `process.env`, кожен тест виставляє потрібні змінні середовища, тоді
+ * `jest.resetModules()` + `require()` перезавантажує модуль наново.
+ *
+ * ІСТОРІЯ (для майбутніх редагувань цього файлу — щоб ніхто знову не "покращив" це на
+ * `import()`): спершу тут був динамічний `import()` (`jest.resetModules()` + `await import(...)`)
+ * замість `require()`, щоб не зачіпати `@typescript-eslint/no-require-imports`. Це пройшло
+ * ЛОКАЛЬНИЙ `npm test`, але зламало CI (`TypeError: A dynamic import callback was invoked without
+ * --experimental-vm-modules`) — `jest-expo`/`babel-preset-expo` (`babel.config.js`) не
+ * транспілює динамічний `import()` у `require()`-обгортку (немає
+ * `babel-plugin-dynamic-import-node` чи еквівалента в пресеті), тож Jest намагається виконати
+ * справжній ESM-`import()` і падає без `--experimental-vm-modules`, якого в конфігурації проєкту
+ * немає. Тому тут навмисно `require()` з точковим `eslint-disable-next-line` (а не вимкнення
+ * правила глобально) — перевірено реальним CI-прогоном, не лише здогадкою.
  */
 
 type GoogleBooksProxyClientModule = typeof import('./googleBooksProxyClient');
 
 async function loadClient(): Promise<GoogleBooksProxyClientModule> {
   jest.resetModules();
-  return import('./googleBooksProxyClient');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- динамічний import() ламає
+  // CI під jest-expo (див. коментар над файлом); require() — єдиний робочий спосіб
+  // перезавантажити цей env-залежний модуль між тестами.
+  return require('./googleBooksProxyClient') as GoogleBooksProxyClientModule;
 }
 
 function configureEnv(): void {

@@ -124,6 +124,25 @@ ESLint-попереджень**, підтверджено реальним др�
 фактичним виконанням на машині власника. Деталі — `docs/FOUNDATION_FINAL_POLISH_REPORT.md`,
 розділ 12 і 17 (verdict оновлено на **FOUNDATION CLOSED**).
 
+**Третє доповнення (той самий день, 2026-09-15) — власник запушив (`git push`, commit `b364eca`),
+і перший реальний CI-прогін цього пасу знайшов регресію, яку жоден локальний прогін не спіймав:**
+job `Typecheck, lint, tests` упав — 3 Jest suites / 29 tests failed,
+`TypeError: A dynamic import callback was invoked without --experimental-vm-modules`, у трьох
+нових тестових файлах (`GoogleBooksProvider.test.ts`, `googleBooksProxyClient.test.ts`,
+`isbndbProxyClient.test.ts`). Причина: другий раунд ESLint-фіксів (вище) перевів
+`loadClient()`/`loadProvider()` з `require()` на `jest.resetModules()` + динамічний `import()` —
+синтаксично й типово коректний код, який пройшов локальний `tsc`/`eslint`, але `jest-expo`/
+`babel-preset-expo` (`babel.config.js`) не транспілює динамічний `import()` у `require()`-обгортку,
+тож Jest намагається виконати справжній ESM-`import()` і падає без `--experimental-vm-modules`.
+Цей конкретний код ніколи фізично не виконувався локальним Jest (власник перезапускав `tsc`/
+`eslint` після цього фіксу, не `npm test`) — тому лише CI це впіймав. Виправлено поверненням до
+`require()` у всіх трьох файлах, цього разу з ПРАВИЛЬНО названим
+`eslint-disable-next-line @typescript-eslint/no-require-imports` (той самий патерн, що вже
+проходив і Jest, і ESLint раніше в цій самій сесії). Задеплойовано на `C:\polytsya-m11`,
+byte-verified. Потрібен ще один `git push` + зелений CI-прогін для остаточного підтвердження —
+`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, розділ 12/17, verdict оновлено на
+**FOUNDATION CLOSED, PENDING FINAL CI CONFIRMATION**.
+
 ## КАЛЕНДАР — візуальна композиція та redesign дня читання
 
 **Дата:** 2026-09-14

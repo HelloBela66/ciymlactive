@@ -2,17 +2,22 @@ import type { ProviderSearchOutcome } from '@/lib/providerSearchError';
 import type { IsbndbProxyBook } from './isbndbProxyClient';
 
 /**
- * POLYTSIA FOUNDATION FINAL POLISH — Task B (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, §7-8).
- * Дзеркальний тест до `googleBooksProxyClient.test.ts` (той самий `callProxy` контракт, той
- * самий `jest.resetModules()` + динамічний `import()` патерн для env-залежного модуля —
- * докладне пояснення "чому саме так, а не `require()`" лишається коментарем там-таки).
+ * POLYTSIA FOUNDATION FINAL POLISH — Task B (`docs/FOUNDATION_FINAL_POLISH_REPORT.md`, §7-8, §12
+ * доповнення після реального прогону CI). Дзеркальний тест до `googleBooksProxyClient.test.ts`
+ * (той самий `callProxy` контракт, той самий `jest.resetModules()` + `require()` патерн для
+ * env-залежного модуля — ПОВНЕ пояснення "чому саме `require()`, а не динамічний `import()`"
+ * (`import()` пройшов локальний `npm test`, але зламав CI під `jest-expo`/`babel-preset-expo`)
+ * лишається коментарем там-таки, не дублюється тут).
  */
 
 type IsbndbProxyClientModule = typeof import('./isbndbProxyClient');
 
 async function loadClient(): Promise<IsbndbProxyClientModule> {
   jest.resetModules();
-  return import('./isbndbProxyClient');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- динамічний import() ламає
+  // CI під jest-expo (див. коментар над файлом googleBooksProxyClient.test.ts); require() —
+  // єдиний робочий спосіб перезавантажити цей env-залежний модуль між тестами.
+  return require('./isbndbProxyClient') as IsbndbProxyClientModule;
 }
 
 function configureEnv(): void {
