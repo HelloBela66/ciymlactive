@@ -5,7 +5,7 @@ import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepo
 import { UserBookRepository } from '@/data/repositories/UserBookRepository';
 import type { ReadingPeriodRange } from '@/lib/readingCalendar';
 import { computeReadingPeriodSummary, type ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
-import type { ReadingRunStatus } from '@/types/readingRun';
+import type { ReadingRun } from '@/types/readingRun';
 import type { UserBookWithDetails } from '@/types/userBook';
 
 /**
@@ -37,11 +37,14 @@ import type { UserBookWithDetails } from '@/types/userBook';
  *   застосовується — та сама політика, що й `countAll`).
  */
 
+/**
+ * Прохід + його книга. Увесь `ReadingRun` цілком, а не розсипані копії кількох його полів
+ * (POLYTSIA V1.7, Phase 7): Сезонам потрібні `run.id` і `run.startedAt`, Recap — `run.status` і
+ * `run.runNumber`, і тримати для кожного споживача свою плоску проєкцію означало б знову
+ * розводити те, що насправді є одним рядком.
+ */
 export interface PeriodBookRow {
-  runId: string;
-  runNumber: number;
-  status: ReadingRunStatus;
-  finishedAt: string | null;
+  run: ReadingRun;
   userBook: UserBookWithDetails;
 }
 
@@ -84,14 +87,13 @@ export async function summarizeReadingPeriod(
     const userBook = userBookById.get(run.userBookId);
     // Книга з фізично відсутнім edition/work тихо пропускається — той самий підхід, що й
     // `attachDetailsBatch`: підсумок періоду не має падати через одну биту книгу.
+    //
+    // ЗВІДСИ ВИПЛИВАЄ, що `books.length` може бути МЕНШЕ за `summary.finishedRunCount`: підсумок
+    // рахує подію історії (прохід реально завершився), список показує те, що можна показати.
+    // Це не розбіжність двох відповідей, а різниця між «скільки сталось» і «скільки видно», і
+    // вона проявляється лише на пошкоджених даних.
     if (!userBook) continue;
-    books.push({
-      runId: run.id,
-      runNumber: run.runNumber,
-      status: run.status,
-      finishedAt: run.finishedAt,
-      userBook,
-    });
+    books.push({ run, userBook });
   }
 
   return { summary, books };
@@ -106,7 +108,7 @@ export function uniqueFinishedBooks(books: PeriodBookRow[]): UserBookWithDetails
   const seen = new Set<string>();
   const result: UserBookWithDetails[] = [];
   for (const book of books) {
-    if (book.status !== 'finished') continue;
+    if (book.run.status !== 'finished') continue;
     if (seen.has(book.userBook.id)) continue;
     seen.add(book.userBook.id);
     result.push(book.userBook);

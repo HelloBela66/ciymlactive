@@ -7,7 +7,14 @@ import { ReadingRunRepository } from './ReadingRunRepository';
 import { JournalRepository } from './JournalRepository';
 import { summarizeReadingPeriod } from '@/features/reading-period/summarizeReadingPeriod';
 import type { ReadingPeriodSummary } from '@/lib/readingPeriodSummary';
-import { monthRange, readingDayKey, weekRange, yearRangeOf } from '@/lib/readingCalendar';
+import {
+  monthRange,
+  monthRangeOf,
+  monthSpanRange,
+  readingDayKey,
+  weekRange,
+  yearRangeOf,
+} from '@/lib/readingCalendar';
 import { buildReadingLife, findReadingLifeMonth, findReadingLifeYear } from '@/lib/readingLife';
 import { recapRangeOf } from '@/lib/readingRecap';
 import { sumSessionMinutes, sumSessionPages } from '@/lib/readingAggregates';
@@ -380,6 +387,62 @@ describe('V1.7 parity — Reading Life і діапазонний запит да
     expect(after ? comparableMetrics(after.summary) : null).toEqual(
       before ? comparableMetrics(before.summary) : undefined,
     );
+  });
+});
+
+describe('V1.7 parity — СЕЗОН узгоджений із місяцями, з яких складається (Phase 7)', () => {
+  it('літо = червень + липень + серпень, без щілин і подвійного рахунку', async () => {
+    const db = await openMigratedTestDb();
+    await seedBook(db, 'p-s');
+
+    // По сесії в кожному місяці літа + межові випадки на самих краях сезону.
+    await seedSession(db, { id: 's1', userBookId: 'p-s', startedAtLocal: new Date(2026, 5, 1, 0, 30), durationSeconds: 1800, startPage: 0, endPage: 20 });
+    await seedSession(db, { id: 's2', userBookId: 'p-s', startedAtLocal: new Date(2026, 6, 15, 12, 0), durationSeconds: 3600, startPage: 20, endPage: 60 });
+    await seedSession(db, { id: 's3', userBookId: 'p-s', startedAtLocal: new Date(2026, 7, 31, 23, 50), durationSeconds: 1200, startPage: 60, endPage: 75 });
+    // Поза сезоном з обох боків — не має потрапити нікуди.
+    await seedSession(db, { id: 's4', userBookId: 'p-s', startedAtLocal: new Date(2026, 4, 31, 23, 50), durationSeconds: 600, startPage: 0, endPage: 5 });
+    await seedSession(db, { id: 's5', userBookId: 'p-s', startedAtLocal: new Date(2026, 8, 1, 0, 30), durationSeconds: 600, startPage: 75, endPage: 80 });
+
+    await seedFinishedRun(db, { id: 'r1', userBookId: 'p-s', runNumber: 1, finishedAtLocal: new Date(2026, 6, 20, 12, 0) });
+
+    // `monthSpanRange(2026, 6, 3)` — рівно те, чим Сезони будують своє вікно (`seasonDateRange`).
+    const season = await summarize(db, monthSpanRange(2026, 6, 3));
+    const months = await Promise.all(
+      [6, 7, 8].map((month) => summarize(db, monthRangeOf(2026, month))),
+    );
+    const sum = (pick: (m: (typeof months)[number]) => number) =>
+      months.reduce((total, month) => total + pick(month), 0);
+
+    expect(season.sessionCount).toBe(3);
+    expect(season.readingMinutes).toBe(sum((m) => m.readingMinutes));
+    expect(season.pagesRead).toBe(sum((m) => m.pagesRead));
+    expect(season.activeDays).toBe(sum((m) => m.activeDays));
+    expect(season.finishedRunCount).toBe(sum((m) => m.finishedRunCount));
+
+    // МЕЖІ: нічне читання 1 червня о 00:30 у сезоні; 31 травня о 23:50 — ні.
+    expect(season.activeDayKeys).toEqual(['2026-06-01', '2026-07-15', '2026-08-31']);
+  });
+
+  it('зимовий сезон через межу року теж дорівнює сумі своїх місяців', async () => {
+    const db = await openMigratedTestDb();
+    await seedBook(db, 'p-w');
+    await seedSession(db, { id: 's1', userBookId: 'p-w', startedAtLocal: new Date(2026, 11, 20, 12, 0), durationSeconds: 1800, startPage: 0, endPage: 20 });
+    await seedSession(db, { id: 's2', userBookId: 'p-w', startedAtLocal: new Date(2027, 0, 1, 0, 30), durationSeconds: 1200, startPage: 20, endPage: 35 });
+    await seedSession(db, { id: 's3', userBookId: 'p-w', startedAtLocal: new Date(2027, 1, 10, 12, 0), durationSeconds: 600, startPage: 35, endPage: 40 });
+
+    const season = await summarize(db, monthSpanRange(2026, 12, 3));
+    const months = await Promise.all([
+      summarize(db, monthRangeOf(2026, 12)),
+      summarize(db, monthRangeOf(2027, 1)),
+      summarize(db, monthRangeOf(2027, 2)),
+    ]);
+
+    expect(season.sessionCount).toBe(3);
+    expect(season.readingMinutes).toBe(
+      months.reduce((total, month) => total + month.readingMinutes, 0),
+    );
+    // Новорічна ніч належить зимі 2026/27 і НЕ губиться на межі року.
+    expect(season.activeDayKeys).toContain('2027-01-01');
   });
 });
 

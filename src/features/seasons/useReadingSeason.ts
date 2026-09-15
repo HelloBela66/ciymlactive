@@ -1,16 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { getDatabase } from '@/data/db';
-import { UserBookRepository } from '@/data/repositories/UserBookRepository';
-import { ReadingRunRepository } from '@/data/repositories/ReadingRunRepository';
-import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { RatingRepository } from '@/data/repositories/RatingRepository';
 import { BookMemoryRepository } from '@/data/repositories/BookMemoryRepository';
 import { SeriesRepository } from '@/data/repositories/SeriesRepository';
 import { JournalRepository } from '@/data/repositories/JournalRepository';
+import { summarizeReadingPeriod } from '@/features/reading-period/summarizeReadingPeriod';
+import { ReadingSessionRepository } from '@/data/repositories/ReadingSessionRepository';
 import { queryKeys } from '@/lib/queryKeys';
 import { seasonDateRange, formatSeasonKey } from '@/lib/season';
-import { sumSessionMinutes, sumSessionPages, computeActiveDays, computeDominantReadingExperience } from '@/lib/readingAggregates';
+import { computeDominantReadingExperience } from '@/lib/readingAggregates';
 import type { SeasonId } from '@/design/season';
 import type { ReadingExperienceId } from '@/design/readingExperience';
 import type { UserBookWithDetails } from '@/types/userBook';
@@ -114,37 +113,40 @@ export async function fetchReadingSeasonData(
 ): Promise<ReadingSeasonData> {
   const range = seasonDateRange(seasonId, year);
 
-  // ТЗ §65 — обидва запити нижче range-bound (не lifetime scan): run'и лише в межах сезону,
-  // сесії лише в межах сезону.
-  const [runsInRange, sessions] = await Promise.all([
-    ReadingRunRepository.listFinishedBetween(db, range.start, range.end),
-    ReadingSessionRepository.listStartedBetween(db, range.start, range.end),
-  ]);
-
-  const finishedRunRows = runsInRange.filter((run) => run.status === 'finished');
-  const dnfCount = runsInRange.length - finishedRunRows.length; // ТЗ §53
-
-  // Пакетне довантаження деталей книги для УНІКАЛЬНИХ userBookId (не по одному на run — ТЗ §66).
+  // ── POLYTSIA V1.7, Phase 7: СЕЗОНИ НА CANONICAL-ДВИГУНІ ────────────────────────────────────
+  // До цієї фази Сезони брали ті самі три repository-методи, ту саму History Preservation — і
+  // рахували хвилини/сторінки/активні дні/DNF ВЛАСНИМ кодом. Формули збігалися з
+  // `computeReadingPeriodSummary` рядок у рядок, але жодна з них не була покрита
+  // parity-тестом: на питання «скільки я читав цього літа» відповідала копія, яку ніщо не
+  // тримало в синхроні з оригіналом. V1.7 називає це «п'ятою відповіддю», і саме так вона й
+  // виглядає, поки не розійдеться.
   //
-  // POLYTSIA V1.7 (§61) — `...IncludingDeleted`, а не alive-only `listWithDetailsByIds`.
-  // Продуктове рішення V1.7: історичний Сезон ПЕРЕЖИВАЄ soft-delete книги з Бібліотеки. Сезон —
-  // емоційний знімок минулого, а не запит до живої Бібліотеки: якщо людина прочитала книгу
-  // влітку 2026, а у 2028 прибрала її з Бібліотеки, «Літо 2026» не має переписувати минуле.
-  // Зняти guard лише в `ReadingRunRepository.listFinishedBetween` було б НЕДОСТАТНЬО — run
-  // пройшов би, але книга все одно відсіялась би тут, на `if (!userBook) continue`. Це той
-  // самий двоетапний фікс, що вже застосований для Календаря (Gap A/B, FOUNDATION FINAL POLISH).
-  const uniqueUserBookIds = [...new Set(finishedRunRows.map((run) => run.userBookId))];
-  const userBookDetailsList = await UserBookRepository.listWithDetailsByIdsIncludingDeleted(db, uniqueUserBookIds);
-  const userBookDetailsById = new Map(userBookDetailsList.map((ub) => [ub.id, ub]));
+  // Тепер вибірка й базові числа — `summarizeReadingPeriod` (той самий код, що й у Recap,
+  // Wrapped і Reading Life, і той самий, який викликає parity-тест). Тут лишається ЛИШЕ те, що
+  // справді специфічне для сезону: книга сезону, збережені думки, цитата, спогад, серія,
+  // «як читалося».
+  //
+  // Що НЕ змінилось: `...IncludingDeleted` (§61 — історичний Сезон переживає soft-delete книги)
+  // і range-bound вибірка (ТЗ §65) — обидва тепер усередині спільної функції.
+  const { summary, books: periodBooks } = await summarizeReadingPeriod(db, {
+    startIso: range.start,
+    endIso: range.end,
+  });
 
-  const finishedRuns: SeasonBookRun[] = [];
-  for (const run of finishedRunRows) {
-    const userBook = userBookDetailsById.get(run.userBookId);
-    // Лишається для ФІЗИЧНО відсутніх/видалених edition|work — тиха деградація, не помилка
-    // (`attachDetailsBatch` не зможе зібрати деталі, і книга просто не з'явиться).
-    if (!userBook) continue;
-    finishedRuns.push({ userBook, run, isReread: run.runNumber > 1 });
-  }
+  // `reading_experience` — сезон-специфічна метрика («Як читалося», ТЗ §50), якої немає в
+  // canonical-підсумку: їй потрібні самі рядки сесій, а не агрегати. Тому окремий, той самий
+  // range-bound запит.
+  const sessions = await ReadingSessionRepository.listStartedBetween(db, range.start, range.end);
+
+  const dnfCount = summary.dnfRunCount; // ТЗ §53
+
+  const finishedRuns: SeasonBookRun[] = periodBooks
+    .filter((entry) => entry.run.status === 'finished')
+    .map((entry) => ({
+      userBook: entry.userBook,
+      run: entry.run,
+      isReread: entry.run.runNumber > 1,
+    }));
 
   // Унікальні книги сезону, найновіший фініш зверху (природний порядок для hero-обкладинок).
   const seenBookIds = new Set<string>();
@@ -159,9 +161,10 @@ export async function fetchReadingSeasonData(
   }
   const rereadBooks = books.filter((ub) => rereadUserBookIds.has(ub.id));
 
-  const totalMinutes = sumSessionMinutes(sessions);
-  const totalPages = sumSessionPages(sessions);
-  const activeDays = computeActiveDays(sessions);
+  // Базові числа — з canonical-підсумку, не з власної формули (див. коментар вище).
+  const totalMinutes = summary.readingMinutes;
+  const totalPages = summary.pagesRead;
+  const activeDays = summary.activeDays;
   const dominantReadingExperience = computeDominantReadingExperience(sessions);
 
   // ТЗ §45 — "Книга сезону": обране пріоритетне над найвищою оцінкою (той самий вибір, що й

@@ -107,8 +107,8 @@ export function useWrappedYear(year: number) {
         summary,
         previousSummary: previous.summary,
         finishedBooks: current.books
-          .filter((book) => book.status === 'finished')
-          .map((book) => ({ title: book.userBook.work.title, isReread: book.runNumber > 1 })),
+          .filter((book) => book.run.status === 'finished')
+          .map((book) => ({ title: book.userBook.work.title, isReread: book.run.runNumber > 1 })),
       });
 
       const { longest: longestStreak } = computeStreaks(summary.activeDayKeys, `${year}-12-31`);

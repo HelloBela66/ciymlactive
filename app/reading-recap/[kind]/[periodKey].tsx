@@ -106,8 +106,8 @@ function FinishedBookRow({ book }: { book: RecapFinishedBookRow }) {
           ) : null}
           <AppText variant="caption" color="tertiary">
             {[
-              book.status === 'did_not_finish' ? 'Відкладено' : 'Завершено',
-              book.runNumber > 1 ? `прочитання №${book.runNumber}` : null,
+              book.run.status === 'did_not_finish' ? 'Відкладено' : 'Завершено',
+              book.run.runNumber > 1 ? `прочитання №${book.run.runNumber}` : null,
             ]
               .filter((part): part is string => part != null)
               .join(' · ')}
@@ -233,7 +233,7 @@ export default function ReadingRecapScreen() {
               <View style={{ gap: theme.spacing.sm }}>
                 <SectionHeader title="Книги цього періоду" />
                 {data.books.map((book) => (
-                  <FinishedBookRow key={book.runId} book={book} />
+                  <FinishedBookRow key={book.run.id} book={book} />
                 ))}
               </View>
             ) : null}

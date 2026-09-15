@@ -79,8 +79,8 @@ export function useReadingRecap(kind: RecapPeriodKind, periodKey: string) {
         summary: current.summary,
         previousSummary: previous.summary,
         finishedBooks: current.books
-          .filter((book) => book.status === 'finished')
-          .map((book) => ({ title: book.userBook.work.title, isReread: book.runNumber > 1 })),
+          .filter((book) => book.run.status === 'finished')
+          .map((book) => ({ title: book.userBook.work.title, isReread: book.run.runNumber > 1 })),
       });
 
       const nextAnchor = shiftRecapAnchor(kind, anchor, 1);
