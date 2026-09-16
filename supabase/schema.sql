@@ -384,18 +384,57 @@ $$;
 -- `random()`-компонент у сортуванні — щоб повторний виклик із тим самим жанром+метою природно
 -- перемішував порядок кандидатів (клієнт і так додатково виключає вже показане,
 -- `RecommendationRepository`, — це лише перший шар різноманітності, ще до того).
-create or replace function curated_book_recommend(p_genre text, p_purpose text, p_limit int default 30)
+-- ── СОРТУВАННЯ ЙДЕ ПО ВУЗЬКІЙ ВИБІРЦІ, А НЕ ПО ПОВНИХ РЯДКАХ ────────────────────────────────
+-- Причина — розподіл жанрів у власному каталозі на 29 986 книг: «Дитяча література» це 15 099 з
+-- них, тобто половина. Попередня форма запиту (один рівень: `select b.<усі колонки> ... order
+-- by ... limit 30`) означала, що на КОЖЕН виклик Postgres мусив протягнути через сортування всі
+-- 15 099 рядків ЦІЛКОМ — разом із `description` (у середньому 666 символів) і масивами —
+-- обчислити `random()` для кожного й відсортувати, щоб віддати 30.
+--
+-- GIN-індекс на `genres` тут не рятує: він прискорює ФІЛЬТР (`@>`), але сортування — окремий
+-- вузол плану, і в нього все одно потрапляли широкі рядки. А під `random()` індекс не можна
+-- побудувати за визначенням.
+--
+-- Тому тепер два рівні. Внутрішній (`picked`) відбирає ЛИШЕ `id`: сортування бачить крихітні
+-- кортежі (id + булеве + випадкове число) замість ~700-байтових рядків, і top-N heapsort навіть
+-- на 15 тисячах таких кортежів коштує мало. Зовнішній рівень робить join уже до 30 відібраних
+-- id за первинним ключем — і лише там читає повні колонки.
+--
+-- `as materialized` — явно, а не покладаючись на поведінку за замовчуванням: CTE з волатильним
+-- `random()` Postgres і так не вбудував би, але явне слово документує намір («обчислити один
+-- раз, отримати 30 id») і робить план стійким до зміни версії.
+--
+-- ПОРЯДОК ВИДАЧІ ЗБЕРЕЖЕНО ТОЧНО. Join сам по собі порядку не гарантує, тому зовнішній
+-- `order by` повторює те саме правило: книги зі збігом за метою першими, всередині груп —
+-- випадково. Але сортує він уже 30 рядків, а не 15 099, тож його вартість неістотна.
+--
+-- ЩО НЕ ЗМІНИЛОСЬ: семантика. Той самий фільтр (`is_active` + `@>`), той самий пріоритет мети,
+-- та сама випадковість, той самий clamp ліміту. Змінилась лише кількість даних, що проходить
+-- через сортування.
+--
+-- `drop` перед `create`, а не `create or replace`: у функції з `returns table` Postgres вважає
+-- імена й типи вихідних колонок частиною сигнатури, і `create or replace` на ній не проходить.
+-- `if exists` лишає файл придатним і для чистої бази, де дропати ще нічого.
+drop function if exists curated_book_recommend(text, text, int);
+
+create function curated_book_recommend(p_genre text, p_purpose text, p_limit int default 30)
 returns table (
   id text, title text, authors text[], isbn13 text, isbn10 text, page_count integer,
   cover_url text, description text, language text, genres text[], purposes text[]
 )
 language sql stable security definer set search_path = public as $$
+  with picked as materialized (
+    select b.id
+    from curated_book b
+    where b.is_active and b.genres @> array[p_genre]
+    order by (p_purpose = any(b.purposes)) desc, random()
+    limit greatest(1, least(coalesce(p_limit, 30), 50))
+  )
   select b.id, b.title, b.authors, b.isbn13, b.isbn10, b.page_count, b.cover_url,
     b.description, b.language, b.genres, b.purposes
   from curated_book b
-  where b.is_active and b.genres @> array[p_genre]
-  order by (p_purpose = any(b.purposes)) desc, random()
-  limit greatest(1, least(coalesce(p_limit, 30), 50));
+  join picked p on p.id = b.id
+  order by (p_purpose = any(b.purposes)) desc, random();
 $$;
 
 create or replace function curated_book_find_by_isbn(p_isbn text)

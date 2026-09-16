@@ -37,6 +37,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="polytsya"/>
+        <data android:scheme="exp+polytsya"/>
       </intent-filter>
     </activity>
   </application>

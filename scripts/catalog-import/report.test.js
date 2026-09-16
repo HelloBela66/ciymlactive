@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildReport, formatReportText, writeReportFiles } = require('./report');
+const { buildReport, summarizeIssuesByCode, formatReportText, writeReportFiles } = require('./report');
 
 function baseParams(overrides) {
   return {
@@ -120,7 +120,10 @@ describe('formatReportText', () => {
     expect(text).toContain('Supabase не налаштовано');
   });
 
-  it('при наявності rowIssues — перелічує кожен рядок з позначкою ПОМИЛКА/попередження', () => {
+  // Раніше тут був тест, що вимагав построкового переліку І помилок, І попереджень. На партії в
+  // 3000 рядків це давало ~350 рядків виводу, на повному каталозі ~3462 — підсумок прокручувався
+  // геть із термінала, і звіт переставав відповідати на питання, заради якого друкується.
+  it('рядки з ПОМИЛКАМИ перелічуються поіменно — саме вони в базу не потрапили', () => {
     const report = buildReport(
       baseParams({
         rowIssues: [
@@ -131,12 +134,102 @@ describe('formatReportText', () => {
     );
     const text = formatReportText(report);
     expect(text).toContain('рядок 5 [ПОМИЛКА] MISSING_TITLE');
-    expect(text).toContain('рядок 8 [попередження] NO_GENRES');
   });
 
-  it('без жодного rowIssue — не додає секцію "Рядки з попередженнями/помилками"', () => {
+  it('попередження НЕ перелічуються построково — лише зведенням за кодом', () => {
+    const report = buildReport(
+      baseParams({
+        rowIssues: [
+          { rowNumber: 8, id: 'book-y', title: 'Назва Y', code: 'NO_GENRES' },
+          { rowNumber: 9, id: 'book-z', title: 'Назва Z', code: 'NO_GENRES' },
+        ],
+      }),
+    );
+    const text = formatReportText(report);
+    expect(text).not.toContain('рядок 8');
+    expect(text).not.toContain('рядок 9');
+    expect(text).toContain('NO_GENRES');
+    expect(text).toContain('Попередження (2)');
+    expect(text).toContain('JSON-звіті');
+  });
+
+  it('зведення за кодами: кожен код один раз із кількістю, помилки перед попередженнями', () => {
+    const report = buildReport(
+      baseParams({
+        totalRows: 400,
+        rowIssues: [
+          ...Array.from({ length: 350 }, (_, i) => ({ rowNumber: i + 2, code: 'POTENTIAL_SERIES_METADATA' })),
+          ...Array.from({ length: 5 }, (_, i) => ({ rowNumber: i + 400, code: 'NO_GENRES' })),
+          { rowNumber: 3, code: 'MISSING_TITLE' },
+        ],
+      }),
+    );
+    const text = formatReportText(report);
+    expect(text).toContain('Проблеми за кодами:');
+    expect(text).toMatch(/POTENTIAL_SERIES_METADATA\s+350/);
+    expect(text).toMatch(/NO_GENRES\s+5/);
+    expect(text).toMatch(/MISSING_TITLE\s+1/);
+    // Помилка вище за попередження, попри те що попереджень у 350 разів більше.
+    expect(text.indexOf('MISSING_TITLE')).toBeLessThan(text.indexOf('POTENTIAL_SERIES_METADATA'));
+    // 356 проблем — але не 356 рядків виводу. Це і є суть зміни.
+    expect(text.split('\n').length).toBeLessThan(40);
+  });
+
+  it('понад 50 рядків з помилками — показано перші 50 і скільки ще лишилось у JSON', () => {
+    const report = buildReport(
+      baseParams({
+        totalRows: 200,
+        rowIssues: Array.from({ length: 123 }, (_, i) => ({ rowNumber: i + 2, id: `book-${i}`, code: 'DB_UPSERT_FAILED' })),
+      }),
+    );
+    const text = formatReportText(report);
+    expect(text).toContain('перші 50 із 123');
+    expect(text).toContain('… ще 73');
+    expect(text).toContain('рядок 2 [ПОМИЛКА] DB_UPSERT_FAILED');
+    expect(text).not.toContain('рядок 52 [ПОМИЛКА]'); // 51-й рядок з помилкою й далі — уже поза межею
+  });
+
+  it('JSON-звіт лишається ПОВНИМ, попри скорочення тексту — нічого не губиться', () => {
+    const report = buildReport(
+      baseParams({
+        totalRows: 200,
+        rowIssues: Array.from({ length: 123 }, (_, i) => ({ rowNumber: i + 2, code: 'DB_UPSERT_FAILED' })),
+      }),
+    );
+    expect(report.rowIssues).toHaveLength(123);
+  });
+
+  it('без жодного rowIssue — не додає ані зведення, ані переліку', () => {
     const text = formatReportText(buildReport(baseParams({ rowIssues: [] })));
-    expect(text).not.toContain('Рядки з попередженнями/помилками');
+    expect(text).not.toContain('Проблеми за кодами');
+    expect(text).not.toContain('Рядки з помилками');
+  });
+});
+
+describe('summarizeIssuesByCode', () => {
+  it('рахує кожен код окремо, помилки перед попередженнями, всередині — за кількістю', () => {
+    const report = buildReport(
+      baseParams({
+        rowIssues: [
+          { rowNumber: 1, code: 'NO_GENRES' },
+          { rowNumber: 2, code: 'NO_GENRES' },
+          { rowNumber: 3, code: 'POTENTIAL_SERIES_METADATA' },
+          { rowNumber: 4, code: 'MISSING_TITLE' },
+          { rowNumber: 5, code: 'INVALID_ISBN' },
+          { rowNumber: 6, code: 'INVALID_ISBN' },
+        ],
+      }),
+    );
+    expect(summarizeIssuesByCode(report.rowIssues)).toEqual([
+      { code: 'INVALID_ISBN', severity: 'error', count: 2 },
+      { code: 'MISSING_TITLE', severity: 'error', count: 1 },
+      { code: 'NO_GENRES', severity: 'warning', count: 2 },
+      { code: 'POTENTIAL_SERIES_METADATA', severity: 'warning', count: 1 },
+    ]);
+  });
+
+  it('порожній список — порожнє зведення', () => {
+    expect(summarizeIssuesByCode([])).toEqual([]);
   });
 });
 

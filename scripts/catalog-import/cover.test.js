@@ -1,6 +1,15 @@
 'use strict';
 
-const { sniffImageType, isRetryableStatus, runWithConcurrency, downloadCoverBytes, uploadCoverBytes, processCover, MAX_COVER_BYTES } = require('./cover');
+const {
+  sniffImageType,
+  isRetryableStatus,
+  runWithConcurrency,
+  downloadCoverBytes,
+  uploadCoverBytes,
+  processCover,
+  MAX_COVER_BYTES,
+  CURATED_COVER_PREFIX,
+} = require('./cover');
 
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
@@ -146,17 +155,39 @@ describe('uploadCoverBytes', () => {
   it('успішний upload — повертає власний public URL, ніколи URL джерела', async () => {
     const fetchImpl = jest.fn().mockResolvedValue({ ok: true, text: async () => '' });
     const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
-    const result = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, config, fetchImpl);
+    const result = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(true);
-    expect(result.url).toMatch(/^https:\/\/project\.supabase\.co\/storage\/v1\/object\/public\/book-covers\/.+\.jpg$/);
+    expect(result.url).toBe(
+      'https://project.supabase.co/storage/v1/object/public/book-covers/curated/kobzar-1840.jpg',
+    );
   });
 
-  it('запит іде з x-upsert:false і Authorization: Bearer service_role (ТЗ §51)', async () => {
+  it('шлях об\'єкта — детермінований `curated/{id}.{ext}`, а не випадковий uuid у корені bucket', async () => {
     const fetchImpl = jest.fn().mockResolvedValue({ ok: true, text: async () => '' });
     const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
-    await uploadCoverBytes(PNG_BYTES, { mime: 'image/png', extension: 'png' }, config, fetchImpl);
+    await uploadCoverBytes(PNG_BYTES, { mime: 'image/png', extension: 'png' }, 'kobzar-1840', config, fetchImpl);
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://project.supabase.co/storage/v1/object/book-covers/curated/kobzar-1840.png');
+    expect(CURATED_COVER_PREFIX).toBe('curated/');
+  });
+
+  it('той самий id двічі — той САМИЙ шлях (повторний прогін перезаписує, а не плодить сиріт)', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, text: async () => '' });
+    const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
+    const first = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, 'kobzar-1840', config, fetchImpl);
+    const second = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, 'kobzar-1840', config, fetchImpl);
+    expect(first.url).toBe(second.url);
+    expect(fetchImpl.mock.calls[0][0]).toBe(fetchImpl.mock.calls[1][0]);
+  });
+
+  it('запит іде з x-upsert:true і Authorization: Bearer service_role (ТЗ §51)', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, text: async () => '' });
+    const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
+    await uploadCoverBytes(PNG_BYTES, { mime: 'image/png', extension: 'png' }, 'kobzar-1840', config, fetchImpl);
     const [, options] = fetchImpl.mock.calls[0];
-    expect(options.headers['x-upsert']).toBe('false');
+    // `true`, на відміну від `cover-upload/index.ts`: шлях тут детермінований, тож перезапис —
+    // очікувана поведінка повторного прогону, а не ознака, що щось пішло не так.
+    expect(options.headers['x-upsert']).toBe('true');
     expect(options.headers.Authorization).toBe('Bearer service-key');
     expect(options.headers['Content-Type']).toBe('image/png');
   });
@@ -164,9 +195,37 @@ describe('uploadCoverBytes', () => {
   it('HTTP-помилка при upload — COVER_UPLOAD_FAILED, не кидає виняток', async () => {
     const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => 'forbidden' });
     const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'bad-key' };
-    const result = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, config, fetchImpl);
+    const result = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(false);
     expect(result.code).toBe('COVER_UPLOAD_FAILED');
+  });
+
+  // Помилка ВИКЛИКУ (не прокинули id), а не подія даних — тому виняток, а не { ok: false }.
+  // Без цієї перевірки `id === undefined` дав би шлях `curated/undefined.jpg`: один об'єкт на
+  // весь каталог, перезаписаний 30 тисяч разів, і жодного сліду в звіті.
+  it('кривий або відсутній id — кидає виняток, а не пише в curated/undefined.{ext}', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, text: async () => '' });
+    const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
+    const jpg = { mime: 'image/jpeg', extension: 'jpg' };
+
+    await expect(uploadCoverBytes(JPEG_BYTES, jpg, undefined, config, fetchImpl)).rejects.toThrow(/слаг книги/);
+    await expect(uploadCoverBytes(JPEG_BYTES, jpg, '', config, fetchImpl)).rejects.toThrow(/слаг книги/);
+    // Слаг із роздільником шляху не може пройти ID_PATTERN — саме тому шлях тут можна будувати
+    // з id, на відміну від `cover-upload/index.ts`, куди рядок приходить від клієнта.
+    await expect(uploadCoverBytes(JPEG_BYTES, jpg, '../secret', config, fetchImpl)).rejects.toThrow(/слаг книги/);
+    await expect(uploadCoverBytes(JPEG_BYTES, jpg, 'a'.repeat(101), config, fetchImpl)).rejects.toThrow(/слаг книги/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // Прямий захист від помилки, що виникла б при оновленні сигнатури: старий виклик
+  // `uploadCoverBytes(bytes, type, config, fetchImpl)` передасть config туди, де очікується id.
+  it('старий порядок аргументів (без id) падає одразу, а не пише кудись не туди', async () => {
+    const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
+    const fetchImpl = jest.fn();
+    await expect(
+      uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, config, fetchImpl),
+    ).rejects.toThrow(/слаг книги/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -181,7 +240,7 @@ describe('processCover — повний конвеєр (ТЗ §16, кроки do
       body: { getReader: () => { let d = false; return { read: () => (d ? Promise.resolve({ done: true }) : ((d = true), Promise.resolve({ done: false, value: JPEG_BYTES }))) }; } },
     });
     fetchImpl.mockResolvedValueOnce({ ok: true, text: async () => '' });
-    const result = await processCover('https://retailer.example.com/cover.jpg', config, fetchImpl);
+    const result = await processCover('https://retailer.example.com/cover.jpg', 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(true);
     expect(result.url).toContain('project.supabase.co/storage/v1/object/public/book-covers/');
   });
@@ -194,13 +253,13 @@ describe('processCover — повний конвеєр (ТЗ §16, кроки do
       body: { getReader: () => { let d = false; return { read: () => (d ? Promise.resolve({ done: true }) : ((d = true), Promise.resolve({ done: false, value: PNG_BYTES }))) }; } },
     });
     fetchImpl.mockResolvedValueOnce({ ok: true, text: async () => '' });
-    const result = await processCover('https://retailer.example.com/cover.png', config, fetchImpl);
+    const result = await processCover('https://retailer.example.com/cover.png', 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(true);
   });
 
   it('404 з джерела — помилка COVER_HTTP_ERROR, upload взагалі не викликається', async () => {
     const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 404, text: async () => '' });
-    const result = await processCover('https://retailer.example.com/missing.jpg', config, fetchImpl);
+    const result = await processCover('https://retailer.example.com/missing.jpg', 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(false);
     expect(result.code).toBe('COVER_HTTP_ERROR');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -212,7 +271,7 @@ describe('processCover — повний конвеєр (ТЗ §16, кроки do
       status: 200,
       body: { getReader: () => { let d = false; return { read: () => (d ? Promise.resolve({ done: true }) : ((d = true), Promise.resolve({ done: false, value: HTML_BYTES }))) }; } },
     });
-    const result = await processCover('https://retailer.example.com/fake.jpg', config, fetchImpl);
+    const result = await processCover('https://retailer.example.com/fake.jpg', 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(false);
     expect(result.code).toBe('COVER_INVALID_IMAGE');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -234,7 +293,7 @@ describe('processCover — повний конвеєр (ТЗ §16, кроки do
         },
       },
     });
-    const result = await processCover('https://retailer.example.com/huge.jpg', config, fetchImpl);
+    const result = await processCover('https://retailer.example.com/huge.jpg', 'kobzar-1840', config, fetchImpl);
     expect(result.ok).toBe(false);
     expect(result.code).toBe('COVER_TOO_LARGE');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -251,8 +310,8 @@ describe('processCover — повний конвеєр (ТЗ §16, кроки do
       f.mockResolvedValueOnce({ ok: true, text: async () => '' });
       return f;
     };
-    const first = await processCover('https://retailer.example.com/cover.jpg', config, makeFetch());
-    const second = await processCover('https://retailer.example.com/cover.jpg', config, makeFetch());
+    const first = await processCover('https://retailer.example.com/cover.jpg', 'kobzar-1840', config, makeFetch());
+    const second = await processCover('https://retailer.example.com/cover.jpg', 'kobzar-1840', config, makeFetch());
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
   });

@@ -1,6 +1,12 @@
 'use strict';
 
-const { toUpsertBody, upsertChunk, upsertCuratedBooks, fetchExistingCoverUrls } = require('./supabaseAdmin');
+const {
+  EXISTING_COVERS_CHUNK_SIZE,
+  toUpsertBody,
+  upsertChunk,
+  upsertCuratedBooks,
+  fetchExistingCoverUrls,
+} = require('./supabaseAdmin');
 
 const CONFIG = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
 
@@ -151,10 +157,39 @@ describe('fetchExistingCoverUrls', () => {
     expect(url).toContain('id=in.(book-a,book-b)');
   });
 
-  it('HTTP-помилка на чанку — best-effort, не кидає виняток, просто не додає ці id в Map (безпечніше зайвий раз перезавантажити)', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 500 });
-    const result = await fetchExistingCoverUrls(['a'], CONFIG, fetchImpl);
-    expect(result.size).toBe(0);
+  // Раніше тут був протилежний тест — "best-effort, не кидає виняток, просто не додає ці id в
+  // Map". Він фіксував саме ту поведінку, що на повному каталозі (29 986 книг) означала: порожня
+  // мапа → всі рядки вважаються новими → всі обкладинки перезаливаються, а попередні файли
+  // лишаються в bucket сиротами. Тихий пропуск тут не втрачає дані, він їх подвоює — тож
+  // правильна поведінка протилежна: зупинити прогін.
+  it('не-OK відповідь — кидає виняток, а не повертає порожню Map (подвоєння в Storage гірше за падіння)', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 414, text: async () => 'URI Too Long' });
+    await expect(fetchExistingCoverUrls(['a'], CONFIG, fetchImpl)).rejects.toThrow(/HTTP 414/);
+  });
+
+  it('виняток містить URL, статус і тіло відповіді — три різні причини розрізняються без здогадок', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'Invalid API key' });
+    await expect(fetchExistingCoverUrls(['kobzar-1840'], CONFIG, fetchImpl)).rejects.toThrow(
+      /rest\/v1\/curated_book\?select=id,cover_url&id=in\.\(kobzar-1840\)/,
+    );
+    await expect(fetchExistingCoverUrls(['kobzar-1840'], CONFIG, fetchImpl)).rejects.toThrow(/Invalid API key/);
+  });
+
+  it('падіння на середньому чанку зупиняє прогін цілком, а не лише пропускає цей чанк', async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'a', cover_url: null }] })
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' });
+    await expect(fetchExistingCoverUrls(['a', 'b', 'c'], CONFIG, fetchImpl, 1)).rejects.toThrow(/HTTP 500/);
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // третій чанк уже не виконується
+  });
+
+  it('типовий розмір чанка — 80 id за замовчуванням (URL лишається в межах ~8 КБ на реальних слагах)', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, json: async () => [] });
+    const ids = Array.from({ length: 161 }, (_, i) => `book-${i}`);
+    await fetchExistingCoverUrls(ids, CONFIG, fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledTimes(3); // 80 + 80 + 1
+    expect(EXISTING_COVERS_CHUNK_SIZE).toBe(80);
   });
 
   it('порожній список id — порожня Map, жодного HTTP-виклику', async () => {

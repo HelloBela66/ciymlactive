@@ -200,7 +200,10 @@ async function main() {
           coverReused++;
           return;
         }
-        const result = await processCover(e.normalized.coverSourceUrl, config, fetch);
+        // `normalized.id` прокидається в пайплайн обкладинок навмисно: саме з нього будується
+        // детермінований шлях `curated/{id}.{ext}` у Storage (`cover.js`), який робить повторний
+        // прогін перезаписом тієї самої обкладинки, а не виробництвом нових сиріт у bucket.
+        const result = await processCover(e.normalized.coverSourceUrl, e.normalized.id, config, fetch);
         if (result.ok) {
           coverUrlById.set(e.normalized.id, result.url);
           coverDownloaded++;

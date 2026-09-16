@@ -69,6 +69,42 @@ function buildReport(params) {
   };
 }
 
+/**
+ * Скільки рядків з ПОМИЛКАМИ показувати поіменно в текстовому звіті.
+ *
+ * Причина межі — масштаб. На партії в 3000 рядків код `POTENTIAL_SERIES_METADATA` дає близько
+ * 350 попереджень, на повному каталозі з 29 986 книг — близько 3462. Построковий звіт тоді
+ * перетворював термінал на стрічку, у якій підсумок («Обкладинок не вдалося», «Помилок»)
+ * прокручувався геть — а саме заради нього звіт і друкується одразу після прогону. Тобто
+ * детальність не додавала інформації, а ховала ту, що вже була.
+ *
+ * Тому текстовий звіт відповідає на два різні питання: «яких проблем і скільки» (зведення за
+ * кодами) і «які саме рядки треба виправити руками» (перелік — але лише для
+ * `severity: 'error'`, бо тільки вони НЕ потрапили в базу, ТЗ §38). Попередження показуються
+ * лише числом: рядок з попередженням імпортувався, і читати 3462 однакові повідомлення підряд
+ * нема сенсу.
+ *
+ * Нічого не втрачається: `rowIssues` у JSON-звіті лишається ПОВНИМ, до останнього рядка, і
+ * текст явно каже, скільки саме там ще лишилось.
+ */
+const TEXT_REPORT_ERROR_ROW_LIMIT = 50;
+
+/** Зведення «код — кількість»: найчастіші згори, помилки перед попередженнями — саме помилки
+ * означають «рядок у базу не потрапив», тож вони мають читатись першими. */
+function summarizeIssuesByCode(rowIssues) {
+  const byCode = new Map();
+  for (const issue of rowIssues) {
+    const entry = byCode.get(issue.code) ?? { code: issue.code, severity: issue.severity, count: 0 };
+    entry.count++;
+    byCode.set(issue.code, entry);
+  }
+  return [...byCode.values()].sort((a, b) => {
+    if (a.severity !== b.severity) return a.severity === 'error' ? -1 : 1;
+    if (b.count !== a.count) return b.count - a.count;
+    return a.code.localeCompare(b.code);
+  });
+}
+
 /** Людський текстовий звіт (той самий список полів, що ТЗ §37, для друку в термінал одразу
  * після прогону) — окремо від JSON-файлу (`writeReportFiles`), щоб власник бачив підсумок без
  * відкриття файлу. */
@@ -96,11 +132,40 @@ function formatReportText(report) {
   ];
 
   if (report.rowIssues.length > 0) {
-    lines.push('', 'Рядки з попередженнями/помилками:');
-    for (const issue of report.rowIssues) {
-      const label = issue.severity === 'error' ? 'ПОМИЛКА' : 'попередження';
+    const summary = summarizeIssuesByCode(report.rowIssues);
+    const codeWidth = Math.max(...summary.map((entry) => entry.code.length));
+
+    lines.push('', 'Проблеми за кодами:');
+    for (const entry of summary) {
+      const label = entry.severity === 'error' ? 'ПОМИЛКА     ' : 'попередження';
+      lines.push(`  [${label}] ${entry.code.padEnd(codeWidth)}  ${entry.count}`);
+    }
+
+    const errorRows = report.rowIssues.filter((issue) => issue.severity === 'error');
+    if (errorRows.length > 0) {
+      const shown = errorRows.slice(0, TEXT_REPORT_ERROR_ROW_LIMIT);
       lines.push(
-        `  рядок ${issue.rowNumber} [${label}] ${issue.code} — id="${issue.id ?? '—'}" title="${issue.title ?? '—'}": ${issue.message}`,
+        '',
+        errorRows.length > shown.length
+          ? `Рядки з помилками (перші ${shown.length} із ${errorRows.length}) — ці рядки в базу НЕ потрапили:`
+          : `Рядки з помилками (${errorRows.length}) — ці рядки в базу НЕ потрапили:`,
+      );
+      for (const issue of shown) {
+        lines.push(
+          `  рядок ${issue.rowNumber} [ПОМИЛКА] ${issue.code} — id="${issue.id ?? '—'}" title="${issue.title ?? '—'}": ${issue.message}`,
+        );
+      }
+      if (errorRows.length > shown.length) {
+        lines.push(`  … ще ${errorRows.length - shown.length} — повний перелік у JSON-звіті (rowIssues).`);
+      }
+    }
+
+    const warningCount = report.rowIssues.length - errorRows.length;
+    if (warningCount > 0) {
+      lines.push(
+        '',
+        `Попередження (${warningCount}) показані лише зведенням вище — ці рядки імпортувались. ` +
+          'Повний построковий перелік — у JSON-звіті (rowIssues).',
       );
     }
   }
@@ -121,4 +186,10 @@ function writeReportFiles(outDir, report) {
   return { jsonPath, textPath };
 }
 
-module.exports = { buildReport, formatReportText, writeReportFiles };
+module.exports = {
+  TEXT_REPORT_ERROR_ROW_LIMIT,
+  buildReport,
+  summarizeIssuesByCode,
+  formatReportText,
+  writeReportFiles,
+};
