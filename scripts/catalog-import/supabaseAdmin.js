@@ -212,10 +212,73 @@ async function fetchExistingCoverUrls(ids, config, fetchImpl, chunkSize = EXISTI
   return result;
 }
 
+/**
+ * Розмір чанка для пошуку власників ISBN. Значення ISBN — 10 або 13 символів проти ~45 у слага,
+ * тож у ту саму безпечну довжину URL їх влазить більше.
+ */
+const ISBN_OWNERS_CHUNK_SIZE = 150;
+
+/**
+ * Хто в каталозі вже володіє цими ISBN: `Map<isbn, id>`.
+ *
+ * ── НАВІЩО ЦЕ ІСНУЄ ─────────────────────────────────────────────────────────────────────────
+ * `dedupe.js` ловить конфлікт ISBN лише В МЕЖАХ ОДНОГО ФАЙЛУ — це прямо записано в його
+ * коментарі. Але `curated_book_isbn13_key`/`curated_book_isbn10_key` — обмеження на ВСЮ
+ * таблицю, тож рядок може мати унікальний ISBN усередині свого файлу й усе одно впасти на
+ * апсерті: та сама книга вже є в каталозі під ІНШИМ слагом.
+ *
+ * Це не теорія. Імпорт `books-011.csv` 16.09.2026 дав рівно такий випадок 411 разів — один і
+ * той самий ISBN під двома транслітераціями слага (`huver-pokyn-iakshcho-…` проти
+ * `huver-pokyn-yakshcho-…`). Наслідки були подвійні: 411 помилок у звіті І 411 осиротілих
+ * обкладинок у сховищі, бо cover pipeline відпрацьовує ДО апсерту й встиг їх залити.
+ *
+ * Тому перевірка робиться ЗАЗДАЛЕГІДЬ: рядок з чужим ISBN відсіюється ще до того, як хоч одна
+ * обкладинка піде в мережу. Пара дешевих запитів замість сотень марних завантажень і ручного
+ * прибирання сховища потім.
+ *
+ * Не-OK відповідь КИДАЄ — з тієї ж причини, що й у `fetchExistingCoverUrls`: порожня мапа тут
+ * означає «конфліктів немає», тобто рівно те, чого ми боїмось, тільки мовчки.
+ *
+ * @param {string[]} isbns
+ * @param {'isbn13' | 'isbn10'} column
+ * @param {{ supabaseUrl: string, serviceRoleKey: string }} config
+ * @param {typeof fetch} fetchImpl
+ * @param {number} [chunkSize]
+ * @returns {Promise<Map<string, string>>}
+ */
+async function fetchIsbnOwners(isbns, column, config, fetchImpl, chunkSize = ISBN_OWNERS_CHUNK_SIZE) {
+  const result = new Map();
+  const unique = [...new Set(isbns.filter(Boolean))];
+  for (let start = 0; start < unique.length; start += chunkSize) {
+    const chunk = unique.slice(start, start + chunkSize);
+    if (chunk.length === 0) continue;
+    const values = chunk.map((v) => encodeURIComponent(v)).join(',');
+    const url = `${config.supabaseUrl}/rest/v1/curated_book?select=id,${column}&${column}=in.(${values})`;
+    const response = await fetchImpl(url, { headers: authHeaders(config.serviceRoleKey) });
+    if (!response.ok) {
+      const body = response.text ? await response.text().catch(() => '') : '';
+      throw new Error(
+        `Не вдалося перевірити, чи вільні ISBN у каталозі (${column}, HTTP ${response.status}). ` +
+          'Прогін зупинено навмисно: порожня відповідь виглядала б як «конфліктів немає», і рядки пішли б ' +
+          'качати обкладинки, щоб потім впасти на unique-обмеженні й лишити ті обкладинки сиротами.\n' +
+          `  Чанк: ${chunk.length} значень (${start + 1}–${start + chunk.length} із ${unique.length}), довжина URL ${url.length} байт.\n` +
+          `  Тіло відповіді: ${String(body).slice(0, 500)}`,
+      );
+    }
+    const rows = await response.json().catch(() => []);
+    for (const row of rows) {
+      if (row && row[column]) result.set(row[column], row.id);
+    }
+  }
+  return result;
+}
+
 module.exports = {
   EXISTING_COVERS_CHUNK_SIZE,
+  ISBN_OWNERS_CHUNK_SIZE,
   toUpsertBody,
   upsertChunk,
   upsertCuratedBooks,
   fetchExistingCoverUrls,
+  fetchIsbnOwners,
 };

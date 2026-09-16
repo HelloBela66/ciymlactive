@@ -6,6 +6,7 @@ const {
   upsertChunk,
   upsertCuratedBooks,
   fetchExistingCoverUrls,
+  fetchIsbnOwners,
 } = require('./supabaseAdmin');
 
 const CONFIG = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
@@ -204,5 +205,58 @@ describe('fetchExistingCoverUrls', () => {
     const ids = Array.from({ length: 5 }, (_, i) => `book-${i}`);
     await fetchExistingCoverUrls(ids, CONFIG, fetchImpl, 2);
     expect(fetchImpl).toHaveBeenCalledTimes(3); // 2+2+1
+  });
+});
+
+describe('fetchIsbnOwners — конфлікт ISBN з тим, що ВЖЕ в каталозі', () => {
+  // dedupe.js бачить лише конфлікти всередині файлу, а unique-індекс діє на всю таблицю. Саме
+  // цей розрив дав 411 відмов і 411 осиротілих обкладинок під час імпорту 16.09.2026.
+  it('повертає Map isbn → id власника', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { id: 'huver-pokyn-yakshcho-kokhaiesh-knyha-1', isbn13: '9789669425140' },
+        { id: 'stelmakh-mytkozavr-iz-yurkivky', isbn13: '9789660393141' },
+      ],
+    });
+    const owners = await fetchIsbnOwners(['9789669425140', '9789660393141'], 'isbn13', CONFIG, fetchImpl);
+    expect(owners.get('9789669425140')).toBe('huver-pokyn-yakshcho-kokhaiesh-knyha-1');
+    expect(owners.get('9789660393141')).toBe('stelmakh-mytkozavr-iz-yurkivky');
+    expect(owners.has('9780306406157')).toBe(false);
+  });
+
+  it('запит іде до select=id,isbn13 з фільтром in.(...)', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, json: async () => [] });
+    await fetchIsbnOwners(['9780306406157'], 'isbn13', CONFIG, fetchImpl);
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url).toContain('select=id,isbn13');
+    expect(url).toContain('isbn13=in.(9780306406157)');
+  });
+
+  it('працює і для isbn10 — колонка підставляється, а не зашита', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, json: async () => [{ id: 'x', isbn10: '0306406152' }] });
+    const owners = await fetchIsbnOwners(['0306406152'], 'isbn10', CONFIG, fetchImpl);
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url).toContain('select=id,isbn10');
+    expect(owners.get('0306406152')).toBe('x');
+  });
+
+  it('повтори в переданому списку не дублюють запит', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, json: async () => [] });
+    await fetchIsbnOwners(['9780306406157', '9780306406157', ''], 'isbn13', CONFIG, fetchImpl);
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url.match(/9780306406157/g)).toHaveLength(1);
+  });
+
+  it('порожній список — жодного HTTP-виклику', async () => {
+    const fetchImpl = jest.fn();
+    expect((await fetchIsbnOwners([], 'isbn13', CONFIG, fetchImpl)).size).toBe(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // Порожня мапа тут означає «конфліктів немає» — рівно те, чого ми боїмось, тільки мовчки.
+  it('не-OK відповідь — кидає, а не повертає порожню мапу', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'boom' });
+    await expect(fetchIsbnOwners(['9780306406157'], 'isbn13', CONFIG, fetchImpl)).rejects.toThrow(/HTTP 500/);
   });
 });

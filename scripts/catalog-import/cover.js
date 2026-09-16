@@ -231,11 +231,44 @@ async function uploadCoverBytes(bytes, imageType, id, config, fetchImpl) {
       const text = await response.text().catch(() => '');
       return { ok: false, code: 'COVER_UPLOAD_FAILED', detail: `HTTP ${response.status}: ${text.slice(0, 200)}` };
     }
-    return { ok: true, url: `${config.supabaseUrl}/storage/v1/object/public/book-covers/${objectPath}` };
+    return { ok: true, url: `${config.supabaseUrl}/storage/v1/object/public/book-covers/${objectPath}`, objectPath };
   } catch (error) {
     return { ok: false, code: 'COVER_UPLOAD_FAILED', detail: String(error && error.message ? error.message : error) };
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Видаляє щойно завантажений об'єкт обкладинки — прибирання за собою, коли апсерт рядка не
+ * вдався.
+ *
+ * Cover pipeline працює ДО апсерту (інакше нічого було б класти в `cover_url`), тож будь-яка
+ * відмова бази лишає в сховищі файл книги, якої в каталозі немає. `ISBN_TAKEN_IN_CATALOG`
+ * відсікає найчастішу причину заздалегідь, але не єдину: лишаються CHECK-порушення, збої мережі
+ * на самому апсерті, вичерпані квоти. Тому сироти прибираються одразу, у тому ж прогоні, що їх
+ * створив — а не колись потім окремим скриптом по всьому bucket.
+ *
+ * Помилка видалення НЕ валить імпорт: книга все одно не потрапила в каталог, а зайвий файл —
+ * менша біда, ніж перерваний прогін. Тому повертається булеве, а не виняток.
+ *
+ * @param {string} objectPath шлях, який повернув `uploadCoverBytes` (`curated/{id}.{ext}`)
+ * @returns {Promise<boolean>} чи вдалося видалити
+ */
+async function deleteCoverObject(objectPath, config, fetchImpl) {
+  try {
+    const response = await fetchImpl(`${config.supabaseUrl}/storage/v1/object/book-covers`, {
+      method: 'DELETE',
+      headers: {
+        apikey: config.serviceRoleKey,
+        Authorization: `Bearer ${config.serviceRoleKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prefixes: [objectPath] }),
+    });
+    return !!response.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -277,7 +310,7 @@ function assertCuratedId(id) {
  * @param {string} id слаг книги (`curated_book.id`)
  * @param {{ supabaseUrl: string, serviceRoleKey: string }} config
  * @param {typeof fetch} fetchImpl
- * @returns {Promise<{ ok: true, url: string } | { ok: false, code: string, detail?: string }>}
+ * @returns {Promise<{ ok: true, url: string, objectPath: string } | { ok: false, code: string, detail?: string }>}
  */
 async function processCover(sourceUrl, id, config, fetchImpl) {
   const downloaded = await downloadCoverBytes(sourceUrl, fetchImpl);
@@ -292,6 +325,7 @@ async function processCover(sourceUrl, id, config, fetchImpl) {
 module.exports = {
   MAX_COVER_BYTES,
   CURATED_COVER_PREFIX,
+  deleteCoverObject,
   sniffImageType,
   isRetryableStatus,
   runWithConcurrency,

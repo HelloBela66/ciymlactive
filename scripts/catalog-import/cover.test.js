@@ -9,6 +9,7 @@ const {
   processCover,
   MAX_COVER_BYTES,
   CURATED_COVER_PREFIX,
+  deleteCoverObject,
 } = require('./cover');
 
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -314,5 +315,33 @@ describe('processCover — повний конвеєр (ТЗ §16, кроки do
     const second = await processCover('https://retailer.example.com/cover.jpg', 'kobzar-1840', config, makeFetch());
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
+  });
+});
+
+describe('objectPath у результаті + deleteCoverObject (прибирання сироти)', () => {
+  const config = { supabaseUrl: 'https://project.supabase.co', serviceRoleKey: 'service-key' };
+
+  it('uploadCoverBytes повертає objectPath — без нього не було б що прибирати', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, text: async () => '' });
+    const result = await uploadCoverBytes(JPEG_BYTES, { mime: 'image/jpeg', extension: 'jpg' }, 'kobzar-1840', config, fetchImpl);
+    expect(result.objectPath).toBe('curated/kobzar-1840.jpg');
+  });
+
+  it('deleteCoverObject шле DELETE із prefixes: [objectPath]', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true });
+    expect(await deleteCoverObject('curated/kobzar-1840.jpg', config, fetchImpl)).toBe(true);
+    const [url, options] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://project.supabase.co/storage/v1/object/book-covers');
+    expect(options.method).toBe('DELETE');
+    expect(JSON.parse(options.body)).toEqual({ prefixes: ['curated/kobzar-1840.jpg'] });
+  });
+
+  // Книга й так не потрапила в каталог; перерваний через це весь прогін був би гіршою бідою,
+  // ніж один зайвий файл у сховищі.
+  it('невдале видалення — false, а не виняток', async () => {
+    const failing = jest.fn().mockResolvedValue({ ok: false, status: 403 });
+    expect(await deleteCoverObject('curated/x.jpg', config, failing)).toBe(false);
+    const throwing = jest.fn().mockRejectedValue(new Error('network down'));
+    expect(await deleteCoverObject('curated/x.jpg', config, throwing)).toBe(false);
   });
 });

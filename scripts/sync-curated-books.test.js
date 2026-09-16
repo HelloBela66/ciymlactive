@@ -8,7 +8,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
-const { parseArgs, readEnvFile, loadSupabaseConfig, readCsvFile } = require('./sync-curated-books');
+const { parseArgs, readEnvFile, loadSupabaseConfig, readCsvFile, filterAgainstCatalog } = require('./sync-curated-books');
 
 describe('parseArgs', () => {
   it('без прапорців — dry-run за замовчуванням (ТЗ §34: "avoid accidentally modifying production")', () => {
@@ -43,6 +43,78 @@ describe('parseArgs', () => {
 
   it('відсутній файл (лише прапорці) — file: null', () => {
     expect(parseArgs(['--apply']).file).toBeNull();
+  });
+
+  it('--only-new вимкнений за замовчуванням (оновлення — теж легітимний сценарій)', () => {
+    expect(parseArgs(['f.csv']).onlyNew).toBe(false);
+    expect(parseArgs(['f.csv', '--only-new']).onlyNew).toBe(true);
+  });
+});
+
+describe('filterAgainstCatalog — звірка з РЕАЛЬНИМ станом каталогу, а не з вмістом файлу', () => {
+  function entry(rowNumber, id, isbn13, isbn10) {
+    return { rowNumber, normalized: { id, isbn13: isbn13 ?? null, isbn10: isbn10 ?? null, title: 'Назва' } };
+  }
+  const empty = { existingIds: new Set(), isbn13Owners: new Map(), isbn10Owners: new Map(), onlyNew: false };
+
+  it('нічого не заважає — усі рядки лишаються', () => {
+    const r = filterAgainstCatalog([entry(2, 'a', '9780306406157')], empty);
+    expect(r.kept).toHaveLength(1);
+    expect(r.skipped).toHaveLength(0);
+  });
+
+  // Саме цей випадок дав 411 відмов 16.09.2026: та сама книга під двома транслітераціями слага.
+  it('ISBN належить ІНШОМУ id — рядок відсіяно з ISBN_TAKEN_IN_CATALOG', () => {
+    const r = filterAgainstCatalog([entry(2, 'huver-pokyn-iakshcho', '9789669425140')], {
+      ...empty,
+      isbn13Owners: new Map([['9789669425140', 'huver-pokyn-yakshcho']]),
+    });
+    expect(r.kept).toHaveLength(0);
+    expect(r.skipped[0].code).toBe('ISBN_TAKEN_IN_CATALOG');
+    expect(r.skipped[0].message).toContain('huver-pokyn-yakshcho');
+  });
+
+  it('ISBN належить ТОМУ САМОМУ id — не конфлікт, це звичайне оновлення книги', () => {
+    const r = filterAgainstCatalog([entry(2, 'kobzar', '9780306406157')], {
+      ...empty,
+      isbn13Owners: new Map([['9780306406157', 'kobzar']]),
+    });
+    expect(r.kept).toHaveLength(1);
+    expect(r.skipped).toHaveLength(0);
+  });
+
+  it('конфлікт по isbn10 ловиться так само, як по isbn13', () => {
+    const r = filterAgainstCatalog([entry(2, 'a', null, '0306406152')], {
+      ...empty,
+      isbn10Owners: new Map([['0306406152', 'b']]),
+    });
+    expect(r.skipped[0].code).toBe('ISBN_TAKEN_IN_CATALOG');
+  });
+
+  it('без --only-new наявний id проходить далі — це оновлення', () => {
+    const r = filterAgainstCatalog([entry(2, 'kobzar')], { ...empty, existingIds: new Set(['kobzar']) });
+    expect(r.kept).toHaveLength(1);
+  });
+
+  it('з --only-new наявний id пропускається (SKIPPED_EXISTING_ID) — каталог не чіпаємо', () => {
+    const r = filterAgainstCatalog([entry(2, 'kobzar'), entry(3, 'nova')], {
+      ...empty,
+      existingIds: new Set(['kobzar']),
+      onlyNew: true,
+    });
+    expect(r.kept.map((e) => e.normalized.id)).toEqual(['nova']);
+    expect(r.skipped[0].code).toBe('SKIPPED_EXISTING_ID');
+  });
+
+  it('--only-new має пріоритет над перевіркою ISBN — рядок і так не заливається', () => {
+    const r = filterAgainstCatalog([entry(2, 'kobzar', '9780306406157')], {
+      existingIds: new Set(['kobzar']),
+      isbn13Owners: new Map([['9780306406157', 'hto-inshyi']]),
+      isbn10Owners: new Map(),
+      onlyNew: true,
+    });
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].code).toBe('SKIPPED_EXISTING_ID');
   });
 });
 
@@ -210,6 +282,20 @@ describe('CLI end-to-end — ідемпотентність (mock Supabase, ре
         return;
       }
       if (req.method === 'GET' && url.pathname === '/rest/v1/curated_book') {
+        // Пошук власників ISBN (`fetchIsbnOwners`) — окрема гілка від пошуку за id.
+        for (const column of ['isbn13', 'isbn10']) {
+          const param = url.searchParams.get(column);
+          const m = param && param.match(/^in\.\((.*)\)$/);
+          if (!m) continue;
+          const wanted = new Set(m[1].split(','));
+          const found = [...store.values()]
+            .filter((row) => row[column] && wanted.has(row[column]))
+            .map((row) => ({ id: row.id, [column]: row[column] }));
+          const payloadIsbn = JSON.stringify(found);
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payloadIsbn) });
+          res.end(payloadIsbn);
+          return;
+        }
         const idsParam = url.searchParams.get('id');
         const match = idsParam && idsParam.match(/^in\.\((.*)\)$/);
         const ids = match ? match[1].split(',') : [];
@@ -276,18 +362,86 @@ describe('CLI end-to-end — ідемпотентність (mock Supabase, ре
     return { csvPath, envPath };
   }
 
-  async function runApply(csvPath, envPath, reportDir) {
+  /**
+   * @param {string[]} extraFlags додаткові прапорці CLI
+   * @param {boolean} allowFailure очікуваний ненульовий exit code (прогін зі знайденими
+   *   помилками завершується 1 — для частини сценаріїв це і є правильна поведінка, а не збій)
+   */
+  async function runApply(csvPath, envPath, reportDir, extraFlags = [], allowFailure = false) {
     const scriptPath = path.join(__dirname, 'sync-curated-books.js');
     const env = { ...process.env };
     delete env.SUPABASE_URL;
     delete env.SUPABASE_SERVICE_ROLE_KEY;
-    await execFileAsync('node', [scriptPath, csvPath, '--apply', `--env-file=${envPath}`, `--report-dir=${reportDir}`, '--concurrency=2'], {
-      env,
-      timeout: 15000,
-    });
+    const run = execFileAsync(
+      'node',
+      [scriptPath, csvPath, '--apply', `--env-file=${envPath}`, `--report-dir=${reportDir}`, '--concurrency=2', ...extraFlags],
+      { env, timeout: 15000 },
+    );
+    if (allowFailure) await run.catch(() => {});
+    else await run;
     const reportFile = fs.readdirSync(reportDir).find((f) => f.endsWith('.json') && !f.endsWith('-normalized.json'));
     return JSON.parse(fs.readFileSync(path.join(reportDir, reportFile), 'utf8'));
   }
+
+  /**
+   * Реальний випадок 16.09.2026: та сама книга вже в каталозі під іншим слагом (інша
+   * транслітерація), ISBN збігається. До цієї правки такий рядок встигав СКАЧАТИ й ЗАЛИТИ
+   * обкладинку, і лише потім падав на unique-обмеженні — 411 помилок і 411 сиріт у сховищі.
+   */
+  it('ISBN уже належить іншій книзі каталогу — рядок відсіяно ДО завантаження обкладинки', async () => {
+    const base = baseUrl();
+    // У каталозі вже є книга з цим ISBN, під ІНШИМ слагом.
+    store.set('kniga-yakshcho', { id: 'kniga-yakshcho', isbn13: '9780306406157', cover_url: `${base}/storage/v1/object/public/book-covers/curated/kniga-yakshcho.jpg` });
+
+    const csvPath = path.join(tmpDir, 'clash.csv');
+    const envPath = path.join(tmpDir, '.env.test');
+    fs.writeFileSync(
+      csvPath,
+      [
+        'id,title,authors,isbn13,isbn10,page_count,cover_url,description,genres,purposes,language,is_active',
+        `kniga-iakshcho,Та сама книга іншим слагом,Автор,9780306406157,,200,${base}/cover.jpg,Опис книги достатньої довжини для перевірки.,Фентезі,light,uk,true`,
+        `zovsim-nova,Справді нова книга,Автор,,,150,${base}/cover.jpg,Опис другої книги достатньої довжини.,Детектив,cry,uk,true`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    fs.writeFileSync(envPath, `SUPABASE_URL=${base}\nSUPABASE_SERVICE_ROLE_KEY=test-service-role-key\n`, 'utf8');
+
+    const report = await runApply(csvPath, envPath, path.join(tmpDir, 'reports-clash'), [], true);
+
+    // Конфліктний рядок у базу не потрапив...
+    expect(store.has('kniga-iakshcho')).toBe(false);
+    // ...і, головне, його обкладинка НЕ качалась: вивантаження рівно одне, для нової книги.
+    expect(storageUploads).toBe(1);
+    expect(store.has('zovsim-nova')).toBe(true);
+    expect(report.totals.created).toBe(1);
+
+    const clash = report.rowIssues.find((i) => i.code === 'ISBN_TAKEN_IN_CATALOG');
+    expect(clash).toBeTruthy();
+    expect(clash.id).toBe('kniga-iakshcho');
+    expect(clash.message).toContain('kniga-yakshcho');
+    // Жодного DB_UPSERT_FAILED — рядок навіть не дійшов до апсерту.
+    expect(report.rowIssues.some((i) => i.code === 'DB_UPSERT_FAILED')).toBe(false);
+  }, 20000);
+
+  /**
+   * Сценарій «долити нові книги з дампа, нічого не чіпаючи». Без прапорця апсерт мовчки
+   * перезаписав би наявні рядки — саме так 1372 книги отримали описи зі старішого набору.
+   */
+  it('--only-new: наявні книги не оновлюються, нові додаються', async () => {
+    const { csvPath, envPath } = writeFixture();
+    await runApply(csvPath, envPath, path.join(tmpDir, 'reports-1'));
+    const uploadsAfterFirst = storageUploads;
+    store.get('idem-book-1').title = 'Назва, яку не можна перезаписати';
+
+    const second = await runApply(csvPath, envPath, path.join(tmpDir, 'reports-2'), ['--only-new']);
+
+    expect(second.totals.created).toBe(0);
+    expect(second.totals.updated).toBe(0);
+    expect(store.get('idem-book-1').title).toBe('Назва, яку не можна перезаписати');
+    expect(storageUploads).toBe(uploadsAfterFirst);
+    expect(second.rowIssues.filter((i) => i.code === 'SKIPPED_EXISTING_ID')).toHaveLength(2);
+  }, 20000);
 
   it('перший --apply: обидва рядки створено, одна обкладинка завантажена й вивантажена у власне сховище', async () => {
     const { csvPath, envPath } = writeFixture();
@@ -339,6 +493,66 @@ describe('CLI end-to-end — ідемпотентність (mock Supabase, ре
    * виглядав як "усе імпортувалось", хоча насправді нуль. Так само `message` для
    * `DB_UPSERT_FAILED` був самою лише заглушкою "деталі — у повідомленні" без жодних деталей.
    */
+  /**
+   * Обкладинка завантажується ДО апсерту — інакше нічого було б класти в `cover_url`. Значить
+   * будь-яка відмова бази лишає в сховищі файл книги, якої в каталозі немає. 16.09.2026 таких
+   * сиріт назбиралось 411, і прибирати їх довелось окремим скриптом по всьому bucket.
+   */
+  it('апсерт відхилено — щойно завантажена обкладинка прибирається в тому ж прогоні', async () => {
+    const deletedPaths = [];
+    server.removeAllListeners('request');
+    server.on('request', (req, res) => {
+      const url = new URL(req.url, 'http://localhost');
+      if (req.method === 'GET' && url.pathname === '/cover.jpg') {
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': JPEG_BYTES.length });
+        res.end(JPEG_BYTES);
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/rest/v1/curated_book') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('[]');
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/rest/v1/curated_book') {
+        req.on('data', () => {});
+        req.on('end', () => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'disk full', code: 'XX000' }));
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname.startsWith('/storage/v1/object/book-covers/')) {
+        storageUploads++;
+        req.on('data', () => {});
+        req.on('end', () => {
+          res.writeHead(200, { 'Content-Length': 0 });
+          res.end();
+        });
+        return;
+      }
+      if (req.method === 'DELETE' && url.pathname === '/storage/v1/object/book-covers') {
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', () => {
+          deletedPaths.push(...JSON.parse(body).prefixes);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('[]');
+        });
+        return;
+      }
+      res.writeHead(404, { 'Content-Length': 0 });
+      res.end();
+    });
+
+    const { csvPath, envPath } = writeFixture();
+    await runApply(csvPath, envPath, path.join(tmpDir, 'reports-orphan'), [], true);
+
+    // Обкладинка встигла залитись (пайплайн іде до апсерту)...
+    expect(storageUploads).toBe(1);
+    // ...і була прибрана, бо рядок у каталог не потрапив.
+    expect(deletedPaths).toEqual(['curated/idem-book-1.jpg']);
+  }, 20000);
+
   it('Supabase відхиляє КОЖЕН upsert (напр. недійсний ключ) — created/updated=0 (не кількість файлу), помилка на кожному рядку, message містить реальну причину Supabase, не заглушку', async () => {
     server.removeAllListeners('request');
     server.on('request', (req, res) => {
